@@ -34,6 +34,30 @@ LISTS: dict[str, list[str]] = {
         "GGAL","BMA","SUPV","BBAR","PAMP","CEPU","EDN","TGSU2",
         "LOMA","CRESY","IRS","MELI","GLOB","VIST","YPF","PAM","TGS",
     ],
+    # Top 100 crypto por market cap (sin stablecoins) — ordenados de mayor a menor.
+    # get_tickers() acepta el parámetro `crypto_limit` para devolver los primeros N.
+    "crypto": [
+        "BTC-USD","ETH-USD","BNB-USD","SOL-USD","XRP-USD",
+        "ADA-USD","AVAX-USD","DOGE-USD","TRX-USD","DOT-USD",
+        "LINK-USD","MATIC-USD","LTC-USD","BCH-USD","NEAR-USD",
+        "UNI-USD","ATOM-USD","XLM-USD","SHIB-USD","APT-USD",
+        "SUI-USD","OP-USD","ARB-USD","FIL-USD","INJ-USD",
+        "HBAR-USD","IMX-USD","VET-USD","GRT-USD","ALGO-USD",
+        "SAND-USD","MANA-USD","AXS-USD","CHZ-USD","ENJ-USD",
+        "AAVE-USD","SNX-USD","CRV-USD","LDO-USD","MKR-USD",
+        "RUNE-USD","KAVA-USD","FLOW-USD","EOS-USD","XTZ-USD",
+        "EGLD-USD","THETA-USD","FTM-USD","ZIL-USD","ONE-USD",
+        "ICX-USD","ZRX-USD","BAT-USD","SC-USD","DCR-USD",
+        "DASH-USD","ZEC-USD","XMR-USD","WAVES-USD","IOTA-USD",
+        "QTUM-USD","ONT-USD","LSK-USD","NANO-USD","DGB-USD",
+        "RVN-USD","STORJ-USD","SKL-USD","OGN-USD","RSR-USD",
+        "CELR-USD","BAND-USD","ANKR-USD","CKB-USD","CELO-USD",
+        "AUDIO-USD","ENS-USD","LRC-USD","DYDX-USD","PERP-USD",
+        "1INCH-USD","SUSHI-USD","YFI-USD","COMP-USD","BAL-USD",
+        "OCEAN-USD","NMR-USD","REN-USD","UMA-USD","BNT-USD",
+        "ALPHA-USD","REEF-USD","BAKE-USD","BURGER-USD","TWT-USD",
+        "WIN-USD","BTT-USD","HOT-USD","DENT-USD","LOOM-USD",
+    ],
 }
 
 
@@ -45,27 +69,32 @@ def get_sp500_tickers() -> list[str]:
     return [t.replace(".", "-") for t in df["Symbol"].tolist()]
 
 
-def get_tickers(list_id: str, custom: list[str] | None = None) -> list[str]:
+def get_tickers(list_id: str, custom: list[str] | None = None, crypto_limit: int = 20) -> list[str]:
     if list_id == "sp500":
         return get_sp500_tickers()
     if list_id == "custom" and custom:
         return [t.upper().strip() for t in custom if t.strip()]
+    if list_id == "crypto":
+        return LISTS["crypto"][:max(1, crypto_limit)]
     return LISTS.get(list_id, [])
 
 
-# ── Indicadores ──────────────────────────────────────────────────────────────
+# ── Indicadores base ──────────────────────────────────────────────────────────
 
-def compute_rsi(closes: pd.Series, period: int = 14) -> float | None:
-    if len(closes) < period + 1:
-        return None
+def _rsi_series(closes: pd.Series, period: int = 14) -> pd.Series:
     delta = closes.diff()
     gain = delta.clip(lower=0)
     loss = -delta.clip(upper=0)
     avg_gain = gain.ewm(com=period - 1, min_periods=period).mean()
     avg_loss = loss.ewm(com=period - 1, min_periods=period).mean()
     rs = avg_gain / avg_loss.replace(0, np.nan)
-    rsi = 100 - (100 / (1 + rs))
-    return round(float(rsi.iloc[-1]), 2)
+    return 100 - (100 / (1 + rs))
+
+
+def compute_rsi(closes: pd.Series, period: int = 14) -> float | None:
+    if len(closes) < period + 1:
+        return None
+    return round(float(_rsi_series(closes, period).iloc[-1]), 2)
 
 
 def compute_macd(closes: pd.Series):
@@ -95,113 +124,316 @@ def compute_bollinger(closes: pd.Series, period: int = 20):
     b_lower = float(lower.iloc[-1])
     if b_upper == b_lower:
         return None, None, None
-    # %B: 0 = banda inferior, 1 = banda superior
     pct_b = (price - b_lower) / (b_upper - b_lower)
     return round(b_upper, 2), round(b_lower, 2), round(float(pct_b), 3)
 
 
-# ── Scoring ───────────────────────────────────────────────────────────────────
+# ── Helper Prime internals ────────────────────────────────────────────────────
+
+def _ema(series: pd.Series, period: int) -> pd.Series:
+    return series.ewm(span=period, adjust=False).mean()
+
+
+def _atr_series(high: pd.Series, low: pd.Series, close: pd.Series, period: int = 14) -> pd.Series:
+    tr = pd.concat(
+        [high - low, (high - close.shift()).abs(), (low - close.shift()).abs()],
+        axis=1,
+    ).max(axis=1)
+    return tr.ewm(alpha=1 / period, adjust=False).mean()
+
+
+def _compute_adx(high: pd.Series, low: pd.Series, close: pd.Series, period: int = 14):
+    """Returns (plus_di, minus_di, adx) floats for the last bar."""
+    if len(close) < period * 2:
+        return None, None, None
+    dm_up = high.diff().clip(lower=0)
+    dm_dn = (-low.diff()).clip(lower=0)
+    dm_plus  = dm_up.where(dm_up  > dm_dn, 0.0)
+    dm_minus = dm_dn.where(dm_dn  > dm_up, 0.0)
+    atr = _atr_series(high, low, close, period)
+    safe_atr = atr.replace(0, np.nan)
+    di_plus  = 100 * dm_plus.ewm(alpha=1 / period, adjust=False).mean()  / safe_atr
+    di_minus = 100 * dm_minus.ewm(alpha=1 / period, adjust=False).mean() / safe_atr
+    dx = 100 * (di_plus - di_minus).abs() / (di_plus + di_minus).replace(0, np.nan)
+    adx = dx.ewm(alpha=1 / period, adjust=False).mean()
+    return float(di_plus.iloc[-1]), float(di_minus.iloc[-1]), float(adx.iloc[-1])
+
+
+def _linreg_zone(close: pd.Series, period: int = 100):
+    """Returns ('discount'|'fair'|'premium', lr_basis, lr_dev)."""
+    if len(close) < period:
+        return "fair", None, None
+    y = close.values[-period:].astype(float)
+    x = np.arange(period, dtype=float)
+    m, b = np.polyfit(x, y, 1)
+    lr_values = m * x + b
+    lr_end = float(lr_values[-1])
+    dev = float(np.std(y - lr_values)) * 2.0
+    price = float(close.iloc[-1])
+    if price <= lr_end - dev * 0.35:
+        return "discount", lr_end, dev
+    if price >= lr_end + dev * 0.35:
+        return "premium", lr_end, dev
+    return "fair", lr_end, dev
+
+
+def _compute_poc(high: pd.Series, low: pd.Series, volume: pd.Series, period: int = 70, buckets: int = 15) -> float | None:
+    """Volume-weighted Point of Control over the last `period` bars."""
+    n = min(period, len(high))
+    h = high.values[-n:].astype(float)
+    l = low.values[-n:].astype(float)
+    v = volume.values[-n:].astype(float)
+    hi_r, lo_r = h.max(), l.min()
+    if hi_r <= lo_r:
+        return None
+    dist = (hi_r - lo_r) / buckets
+    counts = np.array([
+        v[((l <= lo_r + i * dist) & (h >= lo_r + i * dist))].sum()
+        for i in range(buckets)
+    ])
+    return float(lo_r + int(np.argmax(counts)) * dist)
+
+
+# ── Helper Prime scoring ──────────────────────────────────────────────────────
 #
-# Score 0-100 compuesto por 5 componentes:
+# Port of the Pine Script Helper Prime indicator.
+# Computes two symmetric scores (long/short) 0-100 based on:
+#   EMA alignment (15), ADX/DI direction (15), RSI-50 momentum (15),
+#   MTF proxy via daily EMA relationships (15), volatility filter (10),
+#   structural zone: discount / near support / POC (15).
+# Multi-timeframe (15m/1h/4h/1D) is approximated using 4 daily EMA signals.
+
+def helper_prime_score(
+    close: pd.Series,
+    high: pd.Series,
+    low: pd.Series,
+    volume: pd.Series,
+) -> dict:
+    price = float(close.iloc[-1])
+
+    # EMA 20 / 55 / 200
+    e20 = float(_ema(close, 20).iloc[-1])
+    e55 = float(_ema(close, 55).iloc[-1])
+    e200 = float(_ema(close, 200).iloc[-1]) if len(close) >= 200 else None
+
+    # ADX + DI
+    plus_di, minus_di, adx = _compute_adx(high, low, close)
+    adx_ok       = adx is not None and adx > 20
+    dir_long_ok  = plus_di is not None and minus_di is not None and plus_di > minus_di
+    dir_short_ok = plus_di is not None and minus_di is not None and minus_di > plus_di
+
+    # RSI-50 momentum (current vs previous bar)
+    rsi_s = _rsi_series(close)
+    mom_cur  = float(rsi_s.iloc[-1]) - 50 if not np.isnan(rsi_s.iloc[-1]) else 0.0
+    mom_prev = float(rsi_s.iloc[-2]) - 50 if len(rsi_s) >= 2 and not np.isnan(rsi_s.iloc[-2]) else mom_cur
+    mom_rising  = mom_cur > mom_prev
+    mom_falling = mom_cur < mom_prev
+
+    # Volatility filter: current ATR vs 20-bar ATR average
+    atr_s   = _atr_series(high, low, close)
+    atr_cur = float(atr_s.iloc[-1])
+    atr_sma = float(atr_s.iloc[-20:].mean()) if len(atr_s) >= 20 else atr_cur
+    volatilidad_ok = atr_cur > atr_sma * 1.05
+
+    # Linear regression zone
+    zone, lr_end, lr_dev = _linreg_zone(close)
+
+    # Support / Resistance proximity (20-bar swing high/low, excluding current bar)
+    if len(high) >= 22:
+        high_level = float(high.iloc[-22:-1].max())
+        low_level  = float(low.iloc[-22:-1].min())
+        near_support = abs(price - low_level)  <= atr_cur * 0.8
+        near_resist  = abs(price - high_level) <= atr_cur * 0.8
+    else:
+        near_support = near_resist = False
+
+    # Volume-weighted POC proximity
+    poc_price = _compute_poc(high, low, volume)
+    poc_support = poc_resist = False
+    if poc_price is not None:
+        n = min(70, len(high))
+        hi_r = float(high.values[-n:].max())
+        lo_r = float(low.values[-n:].min())
+        bucket_size = max((hi_r - lo_r) / 15.0, 1e-10)
+        poc_near    = abs(price - poc_price) <= bucket_size * 1.2
+        poc_support = poc_near and price >= poc_price
+        poc_resist  = poc_near and price <= poc_price
+
+    long_zone  = (zone == "discount") or near_support or poc_support
+    short_zone = (zone == "premium")  or near_resist  or poc_resist
+
+    # MTF proxy: 4 daily-based signals mimicking 15m/1h/4h/1D EMA200 checks
+    mtf_bull = sum([
+        price > e20,
+        price > e55,
+        e200 is not None and price > e200,
+        e20 > e55,
+    ])
+    mtf_bear  = 4 - mtf_bull
+    min_align = 3
+
+    # ── Long score (max 100) ──
+    ls = 0
+    ls += 15 if (e200 is not None and price > e200) else 0
+    ls += 15 if (e200 is not None and e20 > e55 and e55 > e200) else (8 if e20 > e55 else 0)
+    ls += 15 if (adx_ok and dir_long_ok)  else (8 if adx_ok else 0)
+    ls += 15 if (mom_cur > 0 and mom_rising)  else (8 if mom_cur > 0 else 0)
+    ls += 15 if mtf_bull >= min_align else (8 if mtf_bull == min_align - 1 else 0)
+    ls += 10 if volatilidad_ok else 0
+    ls += 15 if long_zone else 0
+
+    # ── Short score (max 100) ──
+    ss = 0
+    ss += 15 if (e200 is not None and price < e200) else 0
+    ss += 15 if (e200 is not None and e20 < e55 and e55 < e200) else (8 if e20 < e55 else 0)
+    ss += 15 if (adx_ok and dir_short_ok) else (8 if adx_ok else 0)
+    ss += 15 if (mom_cur < 0 and mom_falling) else (8 if mom_cur < 0 else 0)
+    ss += 15 if mtf_bear >= min_align else (8 if mtf_bear == min_align - 1 else 0)
+    ss += 10 if volatilidad_ok else 0
+    ss += 15 if short_zone else 0
+
+    best = max(ls, ss)
+    direction = "LONG" if ls > ss else "SHORT" if ss > ls else "NEUTRAL"
+
+    # ATR-based SL / TP levels (1.5× and 3.0×)
+    sl = tp1 = tp2 = None
+    if direction == "LONG":
+        sl  = round(price - atr_cur * 1.5, 2)
+        tp1 = round(price + atr_cur * 1.5, 2)
+        tp2 = round(price + atr_cur * 3.0, 2)
+    elif direction == "SHORT":
+        sl  = round(price + atr_cur * 1.5, 2)
+        tp1 = round(price - atr_cur * 1.5, 2)
+        tp2 = round(price - atr_cur * 3.0, 2)
+
+    return {
+        "long_score":  ls,
+        "short_score": ss,
+        "best_score":  best,
+        "direction":   direction,
+        "zone":        zone,
+        "adx":         round(adx, 1) if adx is not None else None,
+        "mom":         round(mom_cur, 1),
+        "poc":         round(poc_price, 2) if poc_price is not None else None,
+        "sl":          sl,
+        "tp1":         tp1,
+        "tp2":         tp2,
+    }
+
+
+# ── Helper Pulse divergence engine ────────────────────────────────────────────
 #
-#  Tendencia   (30 pts): precio vs MA200, MA50 vs MA200
-#  RSI         (20 pts): zona óptima de compra/venta
-#  MACD        (20 pts): dirección y cruce
-#  Volumen     (15 pts): confirmación con volumen relativo
-#  Bollinger   (15 pts): posición dentro de las bandas
-#
-# < 20  → Venta Fuerte   (señal bajista muy clara)
-# 20-39 → Venta          (presión bajista)
-# 40-59 → Neutral
-# 60-74 → Compra         (señal alcista)
-# ≥ 75  → Compra Fuerte  (confluencia de señales alcistas)
+# Port of Helper Pulse: RSI-50 momentum oscillator with regular / hidden
+# divergence detection and exhaustion signals.
 
-def compute_score(
-    price: float,
-    ma50: float | None,
-    ma200: float | None,
-    rsi: float | None,
-    macd_hist: float | None,
-    macd_line: float | None,
-    macd_signal: float | None,
-    vol_ratio: float | None,
-    pct_b: float | None,
-) -> int:
-    score = 0
+def helper_pulse_signals(
+    close: pd.Series,
+    high: pd.Series,
+    low: pd.Series,
+    pivot_len: int = 3,
+    min_bars_between: int = 5,
+) -> dict:
+    rsi_s = _rsi_series(close)
+    mom = (rsi_s - 50).ewm(span=3, adjust=False).mean().fillna(0)
+    mom_arr  = mom.values.astype(float)
+    low_arr  = low.values.astype(float)
+    high_arr = high.values.astype(float)
 
-    # Tendencia (30 pts)
-    if ma200 is not None:
-        if price > ma200:
-            score += 20          # precio sobre MA200 = tendencia alcista
-        else:
-            score -= 10          # precio bajo MA200 = tendencia bajista
-        if ma50 is not None:
-            if ma50 > ma200:
-                score += 10      # golden cross / estructura alcista
-            else:
-                score -= 5       # death cross / estructura bajista
+    def pivot_lows(arr, pl):
+        out = []
+        for i in range(pl, len(arr) - pl):
+            if all(arr[i] <= arr[i - j] for j in range(1, pl + 1)) and \
+               all(arr[i] <= arr[i + j] for j in range(1, pl + 1)):
+                out.append(i)
+        return out
 
-    # RSI (20 pts)
-    if rsi is not None:
-        if 40 <= rsi <= 60:
-            score += 20          # zona ideal: momentum sin exceso
-        elif rsi < 30:
-            score += 15          # sobreventa — rebote potencial
-        elif 30 <= rsi < 40:
-            score += 10          # acercándose a sobreventa
-        elif 60 < rsi <= 70:
-            score += 5           # momentum positivo pero vigilar
-        elif rsi > 70:
-            score -= 10          # sobrecompra
+    def pivot_highs(arr, pl):
+        out = []
+        for i in range(pl, len(arr) - pl):
+            if all(arr[i] >= arr[i - j] for j in range(1, pl + 1)) and \
+               all(arr[i] >= arr[i + j] for j in range(1, pl + 1)):
+                out.append(i)
+        return out
 
-    # MACD (20 pts)
-    if macd_hist is not None:
-        if macd_hist > 0:
-            score += 12          # histograma positivo
-        else:
-            score -= 8
-        if macd_line is not None and macd_signal is not None:
-            if macd_line > macd_signal:
-                score += 8       # MACD sobre señal = momentum alcista
-            else:
-                score -= 5
+    lo_idxs = pivot_lows(mom_arr, pivot_len)
+    hi_idxs = pivot_highs(mom_arr, pivot_len)
 
-    # Volumen (15 pts)
-    if vol_ratio is not None:
-        if vol_ratio >= 1.5:
-            score += 15          # volumen 50% sobre la media — confirma movimiento
-        elif vol_ratio >= 1.2:
-            score += 8
-        elif vol_ratio < 0.7:
-            score -= 5           # volumen bajo — movimiento no confirmado
+    TURN  = 15.0
+    DELTA = 3.0
+    signal = None
 
-    # Bollinger %B (15 pts)
-    if pct_b is not None:
-        if pct_b < 0.2:
-            score += 15          # cerca de banda inferior — sobreventa técnica
-        elif pct_b < 0.4:
-            score += 8
-        elif pct_b > 0.8:
-            score -= 10          # cerca de banda superior — sobrecompra técnica
-        elif pct_b > 0.6:
-            score -= 3
+    # Bull divergences on pivot lows
+    if len(lo_idxs) >= 2:
+        i1, i2 = lo_idxs[-2], lo_idxs[-1]
+        if i2 - i1 >= min_bars_between:
+            o1, o2 = mom_arr[i1], mom_arr[i2]
+            p1, p2 = low_arr[i1], low_arr[i2]
+            if abs(o2 - o1) >= DELTA:
+                # Regular bull: price lower low + momentum higher low (extreme zone)
+                if p2 <= p1 and o2 > o1 and (o1 < -TURN or o2 < -TURN):
+                    signal = "GIRO UP"
+                # Hidden bull: price higher low + momentum lower low (< 0)
+                elif o2 < 0 and p2 > p1 and o2 < o1:
+                    signal = "SIGUE UP"
 
-    return max(0, min(100, score))
+    # Bear divergences on pivot highs
+    if signal is None and len(hi_idxs) >= 2:
+        i1, i2 = hi_idxs[-2], hi_idxs[-1]
+        if i2 - i1 >= min_bars_between:
+            o1, o2 = mom_arr[i1], mom_arr[i2]
+            p1, p2 = high_arr[i1], high_arr[i2]
+            if abs(o2 - o1) >= DELTA:
+                # Regular bear: price higher high + momentum lower high (extreme zone)
+                if p2 >= p1 and o2 < o1 and (o1 > TURN or o2 > TURN):
+                    signal = "GIRO DN"
+                # Hidden bear: price lower high + momentum higher high (> 0)
+                elif o2 > 0 and p2 < p1 and o2 > o1:
+                    signal = "SIGUE DN"
+
+    # Exhaustion (pivot in extreme zone without divergence)
+    if signal is None:
+        if hi_idxs and mom_arr[hi_idxs[-1]] >= TURN:
+            signal = "AGOT. SUP"
+        elif lo_idxs and mom_arr[lo_idxs[-1]] <= -TURN:
+            signal = "AGOT. INF"
+
+    mom_last = float(mom_arr[-1])
+    mom_prev = float(mom_arr[-2]) if len(mom_arr) >= 2 else mom_last
+    rising  = mom_last > mom_prev
+    falling = mom_last < mom_prev
+
+    POWER = 25.0
+    if mom_last > POWER and rising:
+        state = "ALCISTA FUERTE"
+    elif mom_last > 0:
+        state = "ALCISTA"
+    elif mom_last < -POWER and falling:
+        state = "BAJISTA FUERTE"
+    elif mom_last < 0:
+        state = "BAJISTA"
+    else:
+        state = "NEUTRAL"
+
+    return {"pulse_signal": signal, "pulse_state": state, "mom": round(mom_last, 1)}
 
 
-def score_to_signal(score: int) -> str:
-    if score >= 75:
-        return "compra_fuerte"
-    if score >= 60:
-        return "compra"
-    if score >= 40:
+# ── Signal mapping ────────────────────────────────────────────────────────────
+
+def prime_to_signal(direction: str, long_score: int, short_score: int) -> str:
+    if direction == "LONG":
+        if long_score >= 75: return "compra_fuerte"
+        if long_score >= 60: return "compra"
+        if long_score >= 40: return "neutral"
         return "neutral"
-    if score >= 20:
-        return "venta"
-    return "venta_fuerte"
+    if direction == "SHORT":
+        if short_score >= 75: return "venta_fuerte"
+        if short_score >= 60: return "venta"
+        if short_score >= 40: return "neutral"
+        return "neutral"
+    return "neutral"
 
 
-# ── Screener ─────────────────────────────────────────────────────────────────
+# ── Screener ──────────────────────────────────────────────────────────────────
 
 def run_screener(tickers: list[str], on_result=None) -> list[dict]:
     data = yf.download(
@@ -241,9 +473,9 @@ def run_screener(tickers: list[str], on_result=None) -> list[dict]:
             ma50  = float(close.rolling(50).mean().iloc[-1])  if len(close) >= 50  else None
             ma200 = float(close.rolling(200).mean().iloc[-1]) if len(close) >= 200 else None
 
-            rsi                        = compute_rsi(close)
+            rsi                            = compute_rsi(close)
             macd_line, macd_sig, macd_hist = compute_macd(close)
-            bb_upper, bb_lower, pct_b  = compute_bollinger(close)
+            bb_upper, bb_lower, pct_b      = compute_bollinger(close)
 
             vol_avg   = float(volume.rolling(20).mean().iloc[-1]) if len(volume) >= 20 else None
             vol_today = float(volume.iloc[-1])
@@ -254,13 +486,29 @@ def run_screener(tickers: list[str], on_result=None) -> list[dict]:
             pct_vs_ma200  = round((price - ma200) / ma200 * 100, 2) if ma200 else None
             pct_vs_ma50   = round((price - ma50)  / ma50  * 100, 2) if ma50  else None
 
-            score  = compute_score(price, ma50, ma200, rsi, macd_hist, macd_line, macd_sig, vol_ratio, pct_b)
-            signal = score_to_signal(score)
+            prime  = helper_prime_score(close, high, low, volume)
+            pulse  = helper_pulse_signals(close, high, low)
+
+            signal = prime_to_signal(prime["direction"], prime["long_score"], prime["short_score"])
 
             result = {
                 "ticker":        ticker,
                 "price":         round(price, 2),
-                "score":         score,
+                # Helper Prime
+                "score":         prime["best_score"],
+                "long_score":    prime["long_score"],
+                "short_score":   prime["short_score"],
+                "direction":     prime["direction"],
+                "zone":          prime["zone"],
+                "adx":           prime["adx"],
+                "mom":           prime["mom"],
+                "poc":           prime["poc"],
+                "sl":            prime["sl"],
+                "tp1":           prime["tp1"],
+                "tp2":           prime["tp2"],
+                # Helper Pulse
+                "pulse_signal":  pulse["pulse_signal"],
+                "pulse_state":   pulse["pulse_state"],
                 "signal":        signal,
                 # 52 semanas
                 "high_52w":      round(high_52w, 2),
@@ -272,7 +520,7 @@ def run_screener(tickers: list[str], on_result=None) -> list[dict]:
                 "ma200":         round(ma200, 2) if ma200 else None,
                 "pct_vs_ma50":   pct_vs_ma50,
                 "pct_vs_ma200":  pct_vs_ma200,
-                # Momentum
+                # Momentum clásico (mantenidos para columnas existentes)
                 "rsi":           rsi,
                 "macd_hist":     macd_hist,
                 # Volumen

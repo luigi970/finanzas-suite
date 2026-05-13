@@ -13,19 +13,35 @@ function HelpModal({ onClose }) {
 
           <section>
             <h3 className="font-semibold text-gray-900 mb-1">1. Elegí una lista</h3>
-            <p>Seleccioná qué acciones querés analizar: S&P 500, Nasdaq 100, ETFs, ADRs Argentina, o escribí tus propios tickers. Luego presioná <strong>Analizar</strong>.</p>
+            <p>Seleccioná qué activos analizar: S&P 500, Nasdaq 100, ETFs, ADRs Argentina, o ingresá tus propios tickers. Luego presioná <strong>Analizar</strong>.</p>
           </section>
 
           <section>
-            <h3 className="font-semibold text-gray-900 mb-2">2. Leé el Score (0-100)</h3>
-            <p className="mb-2">Es el número más importante. Combina 5 indicadores automáticamente:</p>
-            <div className="space-y-1">
+            <h3 className="font-semibold text-gray-900 mb-2">2. Sistema de Score — Helper Prime</h3>
+            <p className="mb-2">El Score (0-100) combina 7 componentes del sistema Helper Prime:</p>
+            <div className="space-y-1 text-xs">
               {[
-                ["bg-emerald-500", "75-100 → Compra Fuerte", "Múltiples señales alcistas alineadas. La acción tiene momentum, volumen y tendencia a favor."],
-                ["bg-green-400",   "60-74 → Compra",         "Señales positivas pero no todas confirmadas. Buena oportunidad con menor convicción."],
-                ["bg-gray-300",    "40-59 → Neutral",         "Sin señal clara. Mejor esperar a que se defina la dirección."],
-                ["bg-orange-400",  "20-39 → Venta",           "Señales bajistas. Evitar comprar, considerar salir si tenés posición."],
-                ["bg-red-500",     "0-19 → Venta Fuerte",     "Confluencia bajista fuerte. Alta probabilidad de continuación a la baja."],
+                ["EMA 200",    "15 pts", "Precio sobre EMA 200 = tendencia alcista principal"],
+                ["Alineación", "15 pts", "EMA 20 > EMA 55 > EMA 200 = estructura alcista completa"],
+                ["ADX + DI",   "15 pts", "ADX > 20 con DI+ > DI- confirma dirección con fuerza"],
+                ["Momentum",   "15 pts", "RSI-50 positivo y creciendo = impulso alcista"],
+                ["MTF proxy",  "15 pts", "4 señales de alineación temporal (approximado con EMAs diarias)"],
+                ["Volatilidad","10 pts", "ATR por encima de su promedio 20 = volatilidad activa"],
+                ["Zona",       "15 pts", "Precio en DISCOUNT, cerca de soporte, o POC de volumen"],
+              ].map(([name, pts, desc]) => (
+                <div key={name} className="flex gap-2 items-start">
+                  <span className="font-mono bg-gray-100 px-1.5 py-0.5 rounded text-gray-700 shrink-0">{pts}</span>
+                  <div><span className="font-medium">{name}:</span> {desc}</div>
+                </div>
+              ))}
+            </div>
+            <div className="mt-3 space-y-1">
+              {[
+                ["bg-emerald-500", "75-100 → Compra Fuerte", "Todos los componentes alineados. Alta convicción."],
+                ["bg-green-400",   "60-74 → Compra",         "Mayoría de señales positivas."],
+                ["bg-gray-300",    "40-59 → Neutral",         "Sin dirección clara. Esperar."],
+                ["bg-orange-400",  "20-39 → Venta",           "Sesgo bajista, evitar comprar."],
+                ["bg-red-500",     "0-19 → Venta Fuerte",     "Confluencia bajista total."],
               ].map(([color, label, desc]) => (
                 <div key={label} className="flex gap-2 items-start">
                   <div className={`w-2.5 h-2.5 rounded-full mt-1 shrink-0 ${color}`} />
@@ -36,19 +52,18 @@ function HelpModal({ onClose }) {
           </section>
 
           <section>
-            <h3 className="font-semibold text-gray-900 mb-2">3. Entendé las columnas</h3>
-            <div className="space-y-1.5">
+            <h3 className="font-semibold text-gray-900 mb-2">3. Helper Pulse — señales de divergencia</h3>
+            <div className="space-y-1 text-xs">
               {[
-                ["RSI",       "Mide si la acción está sobrevendida (<30, posible rebote) o sobrecomprada (>70, posible baja)."],
-                ["vs MA50",   "Qué tan lejos está el precio de la media de 50 días. Positivo = por encima (bueno a corto plazo)."],
-                ["vs MA200",  "Lo mismo pero con la media de 200 días. Es el indicador de tendencia más importante. Por encima = alcista."],
-                ["Vol ×",     "Cuántas veces el volumen de hoy supera al promedio. Más de 1.5x confirma el movimiento."],
-                ["MACD ▲▼",  "▲ verde = momentum alcista. ▼ rojo = momentum bajista."],
-                ["% Máx 52s", "Qué tan lejos está del máximo del año. Cerca de 0% = está en máximos."],
-                ["% Mín 52s", "Qué tan lejos está del mínimo del año. Cerca de 0% = está en mínimos (posible oportunidad)."],
-              ].map(([col, desc]) => (
-                <div key={col} className="flex gap-2">
-                  <span className="font-mono text-xs bg-gray-100 px-1.5 py-0.5 rounded text-gray-700 shrink-0 self-start">{col}</span>
+                ["GIRO UP",    "text-cyan-700 bg-cyan-50",   "Divergencia alcista regular: precio baja, momentum sube (en zona de sobreventa). Señal de reversión."],
+                ["SIGUE UP",   "text-yellow-700 bg-yellow-50", "Divergencia alcista oculta: precio sube, momentum cae. Continuación alcista en tendencia."],
+                ["GIRO DN",    "text-red-700 bg-red-50",     "Divergencia bajista regular: precio sube, momentum baja (sobrecompra). Señal de reversión."],
+                ["SIGUE DN",   "text-orange-700 bg-orange-50","Divergencia bajista oculta: precio baja, momentum sube. Continuación bajista en tendencia."],
+                ["AGOT. SUP",  "text-pink-700 bg-pink-50",   "Agotamiento en zona alta: pivot de momentum en zona de potencia. Precaución en longs."],
+                ["AGOT. INF",  "text-blue-700 bg-blue-50",   "Agotamiento en zona baja: pivot de momentum en zona de sobreventa. Posible rebote."],
+              ].map(([label, cls, desc]) => (
+                <div key={label} className="flex gap-2 items-start">
+                  <span className={`font-mono px-1.5 py-0.5 rounded font-bold shrink-0 ${cls}`}>{label}</span>
                   <span>{desc}</span>
                 </div>
               ))}
@@ -56,18 +71,39 @@ function HelpModal({ onClose }) {
           </section>
 
           <section>
-            <h3 className="font-semibold text-gray-900 mb-1">4. Flujo de trabajo recomendado</h3>
+            <h3 className="font-semibold text-gray-900 mb-2">4. Columnas clave</h3>
+            <div className="space-y-1.5 text-xs">
+              {[
+                ["Zona",    "DISCOUNT = precio bajo la regresión lineal (zona de valor). FAIR = zona media. PREMIUM = zona extendida (cara)."],
+                ["Dir",     "LONG = setup alcista, SHORT = setup bajista. El Score mide la fuerza de esa dirección."],
+                ["SL / TP1","Stop Loss y Take Profit 1 calculados con ATR × 1.5 desde el precio actual."],
+                ["ADX",     "Fuerza de la tendencia. Sobre 20 es condición mínima. Sobre 30 es tendencia fuerte."],
+                ["Pulse",   "Última señal del oscilador de divergencias (Helper Pulse)."],
+                ["RSI",     "Sobreventa (<30) o sobrecompra (>70)."],
+                ["vs MA200","Qué tan lejos está del promedio de 200 días. Positivo = tendencia principal alcista."],
+                ["Vol ×",   "Volumen de hoy vs promedio 20 días. 1.5x+ confirma movimiento."],
+              ].map(([col, desc]) => (
+                <div key={col} className="flex gap-2">
+                  <span className="font-mono bg-gray-100 px-1.5 py-0.5 rounded text-gray-700 shrink-0 self-start">{col}</span>
+                  <span>{desc}</span>
+                </div>
+              ))}
+            </div>
+          </section>
+
+          <section>
+            <h3 className="font-semibold text-gray-900 mb-1">5. Flujo de trabajo recomendado</h3>
             <ol className="list-decimal list-inside space-y-1 text-gray-700">
-              <li>Filtrá por <strong>Compra Fuerte</strong> o <strong>Compra</strong>.</li>
-              <li>Ordená por <strong>Score</strong> de mayor a menor.</li>
-              <li>Verificá que el <strong>vs MA200 sea positivo</strong> (tendencia alcista).</li>
-              <li>Confirmá que el <strong>Vol ×</strong> sea mayor a 1.2x.</li>
-              <li>Las que pasen estos 4 filtros son las candidatas más fuertes.</li>
+              <li>Filtrá por <strong>Compra Fuerte</strong>.</li>
+              <li>Verificá que <strong>Dir</strong> sea LONG y <strong>Zona</strong> sea DISCOUNT o FAIR.</li>
+              <li>Confirmá <strong>ADX &gt; 25</strong> y <strong>vs MA200 positivo</strong>.</li>
+              <li>Si el <strong>Pulse</strong> muestra GIRO UP o SIGUE UP → mayor confluencia.</li>
+              <li>Revisá el <strong>SL/TP1</strong> para dimensionar tu riesgo antes de entrar.</li>
             </ol>
           </section>
 
           <section className="bg-amber-50 border border-amber-200 rounded-lg p-3 text-xs text-amber-800">
-            <strong>Importante:</strong> Este screener es una herramienta de filtrado, no una recomendación financiera. Siempre complementá con tu propio análisis antes de tomar decisiones de compra o venta.
+            <strong>Importante:</strong> Herramienta de filtrado técnico, no una recomendación financiera. Siempre realizá tu propio análisis antes de operar.
           </section>
 
         </div>
@@ -98,8 +134,18 @@ const LIST_CONFIG = [
   { id: "nasdaq100", label: "Nasdaq 100" },
   { id: "etfs",      label: "ETFs" },
   { id: "adrs_arg",  label: "ADRs Argentina" },
+  { id: "crypto",    label: "Crypto" },
   { id: "custom",    label: "Personalizada" },
 ];
+
+const PULSE_CONFIG = {
+  "GIRO UP":   { color: "bg-cyan-100 text-cyan-800",     title: "Divergencia alcista regular" },
+  "SIGUE UP":  { color: "bg-yellow-100 text-yellow-800", title: "Continuación alcista (hidden)" },
+  "GIRO DN":   { color: "bg-red-100 text-red-800",       title: "Divergencia bajista regular" },
+  "SIGUE DN":  { color: "bg-orange-100 text-orange-800", title: "Continuación bajista (hidden)" },
+  "AGOT. SUP": { color: "bg-pink-100 text-pink-800",     title: "Agotamiento superior" },
+  "AGOT. INF": { color: "bg-blue-100 text-blue-800",     title: "Agotamiento inferior" },
+};
 
 function SignalBadge({ signal }) {
   const cfg = SIGNAL_CONFIG[signal] ?? SIGNAL_CONFIG.neutral;
@@ -110,20 +156,25 @@ function SignalBadge({ signal }) {
   );
 }
 
-function ScoreBar({ value }) {
+function ScoreBar({ value, direction, signal }) {
   if (value == null) return <span className="text-gray-400">—</span>;
-  const signal = value >= 75 ? "compra_fuerte"
-    : value >= 60 ? "compra"
-    : value >= 40 ? "neutral"
-    : value >= 20 ? "venta"
-    : "venta_fuerte";
-  const cfg = SIGNAL_CONFIG[signal];
+  const cfg = signal ? (SIGNAL_CONFIG[signal] ?? SIGNAL_CONFIG.neutral) : SIGNAL_CONFIG.neutral;
   return (
-    <div className="flex items-center gap-2">
-      <div className="w-16 h-2 bg-gray-200 rounded-full overflow-hidden">
-        <div className={`h-2 rounded-full ${cfg.bar}`} style={{ width: `${value}%` }} />
+    <div>
+      <div className="flex items-center gap-2">
+        <div className="w-14 h-2 bg-gray-200 rounded-full overflow-hidden">
+          <div className={`h-2 rounded-full ${cfg.bar}`} style={{ width: `${value}%` }} />
+        </div>
+        <span className="text-sm tabular-nums font-medium">{value}</span>
       </div>
-      <span className="text-sm tabular-nums font-medium">{value}</span>
+      {direction && (
+        <div className={`text-[10px] font-bold mt-0.5 ${
+          direction === "LONG"  ? "text-green-600" :
+          direction === "SHORT" ? "text-red-600"   : "text-gray-400"
+        }`}>
+          {direction === "LONG" ? "↑ LONG" : direction === "SHORT" ? "↓ SHORT" : "● NEUTRAL"}
+        </div>
+      )}
     </div>
   );
 }
@@ -133,7 +184,7 @@ function RsiBar({ value }) {
   const color = value < 30 ? "bg-blue-500" : value > 70 ? "bg-red-500" : "bg-gray-400";
   return (
     <div className="flex items-center gap-2">
-      <div className="w-12 h-2 bg-gray-200 rounded-full overflow-hidden">
+      <div className="w-10 h-2 bg-gray-200 rounded-full overflow-hidden">
         <div className={`h-2 rounded-full ${color}`} style={{ width: `${Math.min(value, 100)}%` }} />
       </div>
       <span className="text-sm tabular-nums">{value}</span>
@@ -149,6 +200,42 @@ function PctCell({ value, invertColors = false }) {
     <span className={`tabular-nums font-medium ${positive ? "text-green-600" : "text-red-600"}`}>
       {sign}{value.toFixed(2)}%
     </span>
+  );
+}
+
+function ZoneBadge({ zone }) {
+  if (!zone) return <span className="text-gray-400">—</span>;
+  const cfg = {
+    discount: "bg-teal-100 text-teal-800",
+    fair:     "bg-gray-100 text-gray-600",
+    premium:  "bg-purple-100 text-purple-800",
+  };
+  const label = { discount: "DISCOUNT", fair: "FAIR", premium: "PREMIUM" };
+  return (
+    <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold whitespace-nowrap ${cfg[zone] ?? cfg.fair}`}>
+      {label[zone] ?? zone.toUpperCase()}
+    </span>
+  );
+}
+
+function PulseBadge({ signal }) {
+  if (!signal) return <span className="text-gray-400 text-xs">—</span>;
+  const cfg = PULSE_CONFIG[signal];
+  if (!cfg) return <span className="text-gray-500 text-xs">{signal}</span>;
+  return (
+    <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold whitespace-nowrap ${cfg.color}`} title={cfg.title}>
+      {signal}
+    </span>
+  );
+}
+
+function SlTpCell({ sl, tp1, direction }) {
+  if (!sl || !tp1) return <span className="text-gray-400">—</span>;
+  return (
+    <div className="text-[10px] leading-tight tabular-nums">
+      <div className="text-red-600 font-medium">SL {sl.toFixed(2)}</div>
+      <div className="text-green-600 font-medium">TP {tp1.toFixed(2)}</div>
+    </div>
   );
 }
 
@@ -178,6 +265,7 @@ export default function App() {
   const [totalTickers, setTotalTickers] = useState(0);
   const [selectedList, setSelectedList] = useState("sp500");
   const [customInput, setCustomInput] = useState("");
+  const [cryptoLimit, setCryptoLimit] = useState(20);
   const [activeListId, setActiveListId] = useState("sp500");
   const [showHelp, setShowHelp] = useState(false);
 
@@ -225,7 +313,7 @@ export default function App() {
     await fetch("/api/refresh", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ list_id: selectedList, custom }),
+      body: JSON.stringify({ list_id: selectedList, custom, crypto_limit: cryptoLimit }),
     });
     setActiveListId(selectedList);
     setStocks([]);
@@ -243,6 +331,7 @@ export default function App() {
     .sort((a, b) => {
       const va = a[sortKey] ?? -Infinity;
       const vb = b[sortKey] ?? -Infinity;
+      if (typeof va === "string") return sortDir === "asc" ? va.localeCompare(vb) : vb.localeCompare(va);
       return sortDir === "asc" ? va - vb : vb - va;
     });
 
@@ -262,11 +351,17 @@ export default function App() {
     </th>
   );
 
+  const thStatic = (label) => (
+    <th className="px-3 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider whitespace-nowrap">
+      {label}
+    </th>
+  );
+
   const activeListLabel = LIST_CONFIG.find(l => l.id === activeListId)?.label ?? "";
 
   return (
     <div className="min-h-screen bg-gray-50 p-6">
-      <div className="max-w-screen-xl mx-auto">
+      <div className="max-w-screen-2xl mx-auto">
 
         {showHelp && <HelpModal onClose={() => setShowHelp(false)} />}
 
@@ -312,6 +407,21 @@ export default function App() {
               {isBusy ? "Analizando…" : `Analizar ${LIST_CONFIG.find(l => l.id === selectedList)?.label ?? ""}`}
             </button>
           </div>
+          {selectedList === "crypto" && (
+            <div className="mt-3 flex items-center gap-4">
+              <span className="text-sm text-gray-600 shrink-0">Top</span>
+              <input
+                type="range"
+                min={10} max={100} step={10}
+                value={cryptoLimit}
+                onChange={(e) => setCryptoLimit(Number(e.target.value))}
+                className="flex-1 accent-indigo-600"
+              />
+              <span className="text-sm font-semibold text-indigo-700 w-12 text-right">
+                {cryptoLimit} cripto{cryptoLimit > 1 ? "s" : ""}
+              </span>
+            </div>
+          )}
           {selectedList === "custom" && (
             <textarea
               rows={2}
@@ -410,14 +520,17 @@ export default function App() {
                     {th("Ticker",    "ticker")}
                     {th("Precio",    "price")}
                     {th("Score",     "score")}
+                    {thStatic("Zona")}
                     {th("RSI",       "rsi")}
-                    {th("vs MA50",   "pct_vs_ma50")}
+                    {th("ADX",       "adx")}
                     {th("vs MA200",  "pct_vs_ma200")}
                     {th("Vol ×",     "vol_ratio")}
                     {th("% Máx 52s", "pct_from_high")}
                     {th("% Mín 52s", "pct_from_low")}
                     {th("MACD",      "macd_hist")}
-                    <th className="px-3 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Señal</th>
+                    {thStatic("Pulse")}
+                    {thStatic("SL / TP1")}
+                    {thStatic("Señal")}
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-100">
@@ -425,9 +538,18 @@ export default function App() {
                     <tr key={s.ticker} className="hover:bg-gray-50 transition">
                       <td className="px-3 py-3 font-semibold text-gray-900">{s.ticker}</td>
                       <td className="px-3 py-3 tabular-nums">${s.price.toFixed(2)}</td>
-                      <td className="px-3 py-3"><ScoreBar value={s.score} /></td>
+                      <td className="px-3 py-3">
+                        <ScoreBar value={s.score} direction={s.direction} signal={s.signal} />
+                      </td>
+                      <td className="px-3 py-3"><ZoneBadge zone={s.zone} /></td>
                       <td className="px-3 py-3"><RsiBar value={s.rsi} /></td>
-                      <td className="px-3 py-3"><PctCell value={s.pct_vs_ma50} /></td>
+                      <td className="px-3 py-3 tabular-nums text-xs">
+                        {s.adx != null
+                          ? <span className={s.adx >= 25 ? "font-semibold text-indigo-700" : "text-gray-600"}>
+                              {s.adx.toFixed(1)}
+                            </span>
+                          : <span className="text-gray-400">—</span>}
+                      </td>
                       <td className="px-3 py-3"><PctCell value={s.pct_vs_ma200} /></td>
                       <td className="px-3 py-3 tabular-nums">
                         {s.vol_ratio != null
@@ -436,7 +558,7 @@ export default function App() {
                             </span>
                           : <span className="text-gray-400">—</span>}
                       </td>
-                      <td className="px-3 py-3"><PctCell value={s.pct_from_high} invertColors={false} /></td>
+                      <td className="px-3 py-3"><PctCell value={s.pct_from_high} /></td>
                       <td className="px-3 py-3"><PctCell value={s.pct_from_low} /></td>
                       <td className="px-3 py-3 tabular-nums">
                         {s.macd_hist != null
@@ -444,6 +566,10 @@ export default function App() {
                               {s.macd_hist > 0 ? "▲" : "▼"} {Math.abs(s.macd_hist).toFixed(3)}
                             </span>
                           : <span className="text-gray-400">—</span>}
+                      </td>
+                      <td className="px-3 py-3"><PulseBadge signal={s.pulse_signal} /></td>
+                      <td className="px-3 py-3">
+                        <SlTpCell sl={s.sl} tp1={s.tp1} direction={s.direction} />
                       </td>
                       <td className="px-3 py-3"><SignalBadge signal={s.signal} /></td>
                     </tr>
@@ -454,7 +580,7 @@ export default function App() {
           )}
         </div>
         <p className="text-xs text-gray-400 mt-3 text-right">
-          {filtered.length} activos · Score = Tendencia (MA) + RSI + MACD + Volumen + Bollinger
+          {filtered.length} activos · Score = Helper Prime (EMA + ADX + Momentum + MTF + Zona) · Pulse = Helper Pulse (divergencias RSI)
         </p>
       </div>
     </div>

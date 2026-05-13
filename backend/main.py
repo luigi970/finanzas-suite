@@ -24,15 +24,16 @@ _lock = threading.Lock()
 class RefreshRequest(BaseModel):
     list_id: str = "sp500"
     custom: list[str] = []
+    crypto_limit: int = 20
 
 
-def _refresh_cache(list_id: str, custom: list[str]):
+def _refresh_cache(list_id: str, custom: list[str], crypto_limit: int = 20):
     _cache["status"] = "downloading"
     _cache["processed"] = 0
     _cache["data"] = []
     _cache["list_id"] = list_id
 
-    tickers = get_tickers(list_id, custom)
+    tickers = get_tickers(list_id, custom, crypto_limit)
     _cache["total_tickers"] = len(tickers)
     _cache["status"] = "loading"
 
@@ -77,7 +78,7 @@ def get_lists():
 def refresh(body: RefreshRequest, background_tasks: BackgroundTasks):
     if _cache["status"] in ("loading", "downloading"):
         return {"message": "Ya hay una carga en progreso"}
-    background_tasks.add_task(_refresh_cache, body.list_id, body.custom)
+    background_tasks.add_task(_refresh_cache, body.list_id, body.custom, body.crypto_limit)
     return {"message": "Carga iniciada"}
 
 
