@@ -79,7 +79,7 @@ cd maximos
 ```bash
 # Backend
 cd backend
-pip install -r requirements.txt
+pip install -r requirements.txt   # Linux/Mac: pip3 install -r requirements.txt
 
 # Frontend
 cd ../frontend
@@ -88,9 +88,20 @@ npm install
 
 ### 3. Levantar la app
 
+**Windows**
 ```powershell
-# Desde la raíz del proyecto
 .\start.ps1
+```
+
+**Linux / macOS**
+```bash
+chmod +x start.sh
+./start.sh
+```
+
+**Cualquier sistema con PowerShell instalado (pwsh)**
+```powershell
+pwsh start.ps1
 ```
 
 O manualmente en dos terminales:
