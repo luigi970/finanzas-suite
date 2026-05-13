@@ -1,6 +1,6 @@
 # 📈 Stock Screener
 
-> Analizá cientos de acciones en segundos y encontrá las mejores oportunidades de compra y venta con indicadores técnicos profesionales.
+> Analizá acciones, ETFs y criptomonedas en segundos con un sistema de indicadores técnicos profesionales portado desde TradingView.
 
 ![Stack](https://img.shields.io/badge/Frontend-React%20%2B%20Tailwind-61DAFB?style=flat-square&logo=react)
 ![Stack](https://img.shields.io/badge/Backend-FastAPI%20%2B%20Python-009688?style=flat-square&logo=fastapi)
@@ -11,37 +11,53 @@
 
 ## ¿Qué hace?
 
-Descarga datos históricos de Yahoo Finance, calcula indicadores técnicos y asigna un **Score 0-100** a cada acción combinando:
+Descarga datos históricos de Yahoo Finance y aplica el sistema **Helper Prime + Helper Pulse** para asignar un **Score 0-100** a cada activo y clasificarlo en 5 señales de trading.
 
-| Indicador | Peso | Qué mide |
-|-----------|------|----------|
-| Tendencia (MA50 / MA200) | 30 pts | Si la acción está en uptrend o downtrend |
-| RSI | 20 pts | Sobreventa / sobrecompra |
-| MACD | 20 pts | Momentum y dirección del movimiento |
-| Volumen relativo | 15 pts | Si el movimiento está confirmado |
-| Bollinger Bands | 15 pts | Posición dentro del rango de volatilidad |
+### Helper Prime — Score de estructura (0-100)
 
----
+| Componente | Pts | Qué evalúa |
+|---|---|---|
+| EMA 200 | 15 | Precio sobre la tendencia principal |
+| Alineación EMA 20/55/200 | 15 | Estructura alcista completa |
+| ADX + DI+/DI- | 15 | Fuerza y dirección de la tendencia |
+| Momentum RSI-50 | 15 | Impulso alcista o bajista |
+| MTF proxy | 15 | Alineación en múltiples temporalidades (aproximado) |
+| Volatilidad ATR | 10 | ATR activo por encima de su promedio |
+| Zona estructural | 15 | DISCOUNT / soporte / POC de volumen |
 
-## Señales
+### Helper Pulse — Señales de divergencia
 
-| Score | Señal | Descripción |
-|-------|-------|-------------|
-| 75–100 | 🟢 **Compra Fuerte** | Confluencia alcista en todos los indicadores |
-| 60–74 | 🟩 **Compra** | Señales positivas, buen momento de entrada |
-| 40–59 | ⬜ **Neutral** | Sin dirección clara, mejor esperar |
-| 20–39 | 🟧 **Venta** | Presión bajista, evitar comprar |
-| 0–19 | 🔴 **Venta Fuerte** | Señales bajistas alineadas |
+| Señal | Tipo | Descripción |
+|---|---|---|
+| GIRO UP | Alcista | Divergencia regular: precio baja, momentum sube |
+| SIGUE UP | Alcista | Divergencia oculta: continuación alcista |
+| GIRO DN | Bajista | Divergencia regular: precio sube, momentum baja |
+| SIGUE DN | Bajista | Divergencia oculta: continuación bajista |
+| AGOT. SUP | Precaución | Agotamiento en zona alta |
+| AGOT. INF | Oportunidad | Agotamiento en zona baja |
+
+### Señales por score
+
+| Score | Dirección | Señal |
+|---|---|---|
+| ≥ 75 | LONG | 🟢 **Compra Fuerte** |
+| 60–74 | LONG | 🟩 **Compra** |
+| 40–59 | — | ⬜ **Neutral** |
+| 60–74 | SHORT | 🟧 **Venta** |
+| ≥ 75 | SHORT | 🔴 **Venta Fuerte** |
 
 ---
 
 ## Listas disponibles
 
-- 🇺🇸 **S&P 500** — 503 acciones
-- 💻 **Nasdaq 100** — Las 100 empresas tech más grandes
-- 📦 **ETFs** — Mercado amplio, sectores, renta fija, commodities
-- 🇦🇷 **ADRs Argentina** — GGAL, YPF, MELI, GLOB, VIST y más
-- ✏️ **Lista personalizada** — Escribís los tickers que querés
+| Lista | Activos |
+|---|---|
+| 🇺🇸 **S&P 500** | 503 acciones |
+| 💻 **Nasdaq 100** | 100 empresas tech |
+| 📦 **ETFs** | 49 ETFs (sectores, renta fija, commodities) |
+| 🇦🇷 **ADRs Argentina** | GGAL, YPF, MELI, GLOB, VIST y más |
+| 🪙 **Crypto** | Top 10–100 por market cap (slider ajustable) |
+| ✏️ **Personalizada** | Los tickers que vos elijas |
 
 ---
 
@@ -51,12 +67,13 @@ Descarga datos históricos de Yahoo Finance, calcula indicadores técnicos y asi
 maximos/
 ├── backend/
 │   ├── main.py          # API REST con FastAPI
-│   ├── screener.py      # Descarga bulk + cálculo de indicadores
+│   ├── screener.py      # Helper Prime + Pulse portados a Python
 │   └── requirements.txt
 ├── frontend/
 │   └── src/
 │       └── App.jsx      # UI completa en React + Tailwind
-└── start.ps1            # Script para levantar todo
+├── start.ps1            # Script para levantar todo (Windows)
+└── start.sh             # Script para levantar todo (Linux/macOS)
 ```
 
 ---
@@ -79,7 +96,7 @@ cd maximos
 ```bash
 # Backend
 cd backend
-pip install -r requirements.txt   # Linux/Mac: pip3 install -r requirements.txt
+pip install -r requirements.txt
 
 # Frontend
 cd ../frontend
@@ -97,11 +114,6 @@ npm install
 ```bash
 chmod +x start.sh
 ./start.sh
-```
-
-**Cualquier sistema con PowerShell instalado (pwsh)**
-```powershell
-pwsh start.ps1
 ```
 
 O manualmente en dos terminales:
@@ -124,33 +136,42 @@ http://localhost:5173
 
 ## Cómo usar
 
-1. **Elegí una lista** (S&P 500, Nasdaq, ETFs, etc.)
+1. **Elegí una lista** — S&P 500, Nasdaq, Crypto (ajustá el slider), etc.
 2. **Presioná Analizar** — descarga y procesa los datos (~15s para el S&P 500)
-3. **Filtrá por señal** — enfocate en Compra Fuerte o Compra
-4. **Ordená por Score** de mayor a menor
-5. **Verificá** que `vs MA200` sea positivo y `Vol ×` mayor a 1.2x
-6. Las que pasen estos filtros son las candidatas más sólidas
+3. **Filtrá por Compra Fuerte** y revisá que Dir sea LONG
+4. **Chequeá la Zona** — DISCOUNT o FAIR son las mejores entradas
+5. **Confirmá ADX > 25** y vs MA200 positivo
+6. **Si el Pulse muestra GIRO UP o SIGUE UP** → mayor confluencia
+7. **Usá SL/TP1** para dimensionar el riesgo antes de entrar
 
-> Presioná **? Cómo usar** dentro de la app para ver la guía completa.
+> Presioná **? Cómo usar** dentro de la app para la guía completa.
 
 ---
 
 ## API
 
 | Método | Endpoint | Descripción |
-|--------|----------|-------------|
+|---|---|---|
 | `GET` | `/api/status` | Estado del análisis y progreso |
 | `GET` | `/api/stocks?signal=compra_fuerte` | Lista filtrada por señal |
 | `GET` | `/api/lists` | Listas disponibles |
 | `POST` | `/api/refresh` | Lanza un nuevo análisis |
 
+Body de `/api/refresh`:
+```json
+{ "list_id": "sp500", "custom": [], "crypto_limit": 20 }
+```
+
+`list_id`: `sp500` · `nasdaq100` · `etfs` · `adrs_arg` · `crypto` · `custom`
+
 ---
 
 ## Decisiones técnicas
 
-- **Descarga bulk**: `yf.download()` trae los 503 tickers en un solo request HTTP (~15s vs ~3min individual)
-- **Threading lock**: protege el cache compartido entre los workers y el servidor FastAPI
-- **Scoring compuesto**: 5 indicadores ponderados evitan señales falsas de un solo indicador
+- **Descarga bulk**: `yf.download()` trae todos los tickers en un solo request HTTP (~15s para 503 tickers)
+- **Threading lock**: protege el cache compartido durante escrituras concurrentes
+- **Helper Prime portado**: sistema de scoring propio originalmente desarrollado en Pine Script v6 para TradingView
+- **MTF aproximado**: las 4 temporalidades (15m/1h/4h/1D) se aproximan con señales de EMAs diarias
 - **Sin base de datos**: cache en memoria, simple y sin dependencias externas
 
 ---
