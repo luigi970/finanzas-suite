@@ -1,5 +1,6 @@
 def build_prompt(s: dict) -> str:
-    ticker = s.get("ticker", "?")
+    raw = s.get("ticker", "?")
+    ticker = raw[:-4] if raw.endswith("-USD") else raw
     signal = s.get("signal", "neutral")
     signal_label = {
         "compra_fuerte": "COMPRA FUERTE",

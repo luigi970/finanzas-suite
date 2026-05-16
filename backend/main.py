@@ -95,7 +95,8 @@ async def analyze(body: dict):
     if not api_key:
         return {"error": "GROQ_API_KEY no configurada"}
 
-    ticker = body.get("ticker", "?")
+    raw = body.get("ticker", "?")
+    ticker = raw[:-4] if raw.endswith("-USD") else raw
     signal_label = {
         "compra_fuerte": "COMPRA FUERTE", "compra": "COMPRA",
         "neutral": "NEUTRAL", "venta": "VENTA", "venta_fuerte": "VENTA FUERTE",
