@@ -157,9 +157,30 @@ npm install
 
 ## Roadmap
 
-- [ ] Deploy: backend en Render, frontend en Vercel
-- [ ] Cache persistente con PostgreSQL (análisis diario automático)
+### Deploy serverless (próximo)
+
+Reemplazar la arquitectura actual (servidor persistente + cache en memoria) por:
+
+1. **KV store** (Vercel KV o Cloudflare KV) para guardar resultados del screener
+2. **Cron job** (1x día, o on-demand) que corre `run_screener` y escribe en KV
+3. **API serverless** que solo lee del KV — respuesta instantánea, sin timeout
+4. **Frontend** en Vercel Pages o Cloudflare Pages
+
+Flujo nuevo:
+```
+Cron (diario) → run_screener() → guarda en KV
+Usuario → "Analizar" → dispara job → polling → lee del KV
+```
+
+Cambios necesarios en el código:
+- `_cache` dict → KV store
+- `BackgroundTasks` de FastAPI → cron job de Vercel/Cloudflare
+- `threading.Lock` → innecesario (KV es atómico)
+- Agregar endpoint para triggerear el job manualmente
+
+### Features pendientes
+
 - [ ] Gráfico de precio al hacer click en un ticker
-- [ ] Alertas por email o Telegram
-- [ ] Análisis con IA explicando la señal de cada acción
+- [ ] Alertas por email o Telegram cuando cambia la señal
+- [ ] Análisis con IA explicando la señal de cada activo
 - [ ] MTF real con descarga intraday para 15m/1h/4h

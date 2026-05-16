@@ -178,12 +178,35 @@ Body de `/api/refresh`:
 
 ## Roadmap
 
-- [ ] Deploy en Render (backend) + Vercel (frontend)
-- [ ] Cache persistente con PostgreSQL
-- [ ] Actualización automática diaria (cron job)
+### 🚀 Deploy (próximo)
+
+Arquitectura serverless en Vercel o Cloudflare:
+
+```
+Cron job (1x día)
+    └── corre el screener en background
+    └── guarda resultados en KV / DB
+
+API (serverless, respuesta instantánea)
+    └── lee del KV — no hace cálculos
+    └── el frontend no espera nada
+
+Frontend (Vercel / Cloudflare Pages)
+    └── "Analizar" dispara el job y hace polling
+    └── los resultados ya están pre-calculados
+```
+
+- [ ] Migrar cache en memoria → Vercel KV o Cloudflare KV
+- [ ] Convertir `run_screener` en un job asincrónico (cron diario)
+- [ ] Deploy frontend en Vercel / Cloudflare Pages
+- [ ] Deploy backend como funciones serverless Python
+
+### 🔮 Features
+
 - [ ] Gráfico de precio al hacer click en un ticker
-- [ ] Alertas por email o Telegram
-- [ ] Análisis con IA explicando la señal
+- [ ] Alertas por email o Telegram cuando cambia la señal
+- [ ] Análisis con IA explicando la señal de cada activo
+- [ ] MTF real con descarga intraday para 15m/1h/4h
 
 ---
 
