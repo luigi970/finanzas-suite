@@ -137,9 +137,12 @@ function generateRecommendation(s) {
 }
 
 function toTvSymbol(ticker) {
-  // yfinance crypto format: BTC-USD → BTCUSDT
   if (ticker.endsWith("-USD")) return ticker.slice(0, -4) + "USDT";
   return ticker;
+}
+
+function displayTicker(ticker) {
+  return ticker.endsWith("-USD") ? ticker.slice(0, -4) : ticker;
 }
 
 function TradingViewChart({ ticker }) {
@@ -242,7 +245,7 @@ function TickerModal({ stock: s, onClose }) {
           <div className="flex items-start justify-between">
             <div>
               <div className="flex items-center gap-2 mb-1">
-                <h2 className="text-2xl font-bold text-gray-900">{s.ticker}</h2>
+                <h2 className="text-2xl font-bold text-gray-900">{displayTicker(s.ticker)}</h2>
                 <span className={`px-2 py-0.5 rounded-full text-xs font-bold text-white ${sigCfg.color}`}>
                   {sigCfg.label}
                 </span>
@@ -938,7 +941,7 @@ export default function App() {
                       className="hover:bg-indigo-50 transition cursor-pointer"
                       onClick={() => setSelectedTicker(s)}
                     >
-                      <td className="px-3 py-3 font-semibold text-gray-900 underline decoration-dotted underline-offset-2">{s.ticker}</td>
+                      <td className="px-3 py-3 font-semibold text-gray-900 underline decoration-dotted underline-offset-2">{displayTicker(s.ticker)}</td>
                       <td className="px-3 py-3 tabular-nums">${s.price.toFixed(2)}</td>
                       <td className="px-3 py-3">
                         <ScoreBar value={s.score} direction={s.direction} signal={s.signal} />
