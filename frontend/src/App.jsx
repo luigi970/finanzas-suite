@@ -137,6 +137,24 @@ function generateRecommendation(s) {
 }
 
 function TickerModal({ stock: s, onClose }) {
+  const [aiRec, setAiRec] = useState(null);
+  const [aiLoading, setAiLoading] = useState(false);
+
+  useEffect(() => {
+    if (!s) return;
+    setAiRec(null);
+    setAiLoading(true);
+    fetch(`${API_BASE}/api/analyze`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(s),
+    })
+      .then(r => r.json())
+      .then(d => setAiRec(d.recommendation ?? d.error ?? "Sin respuesta"))
+      .catch(() => setAiRec("Error al conectar con la IA"))
+      .finally(() => setAiLoading(false));
+  }, [s]);
+
   if (!s) return null;
 
   const sigCfg = {
@@ -173,8 +191,6 @@ function TickerModal({ stock: s, onClose }) {
   const rr2Ratio = (slPct && tp2Pct)
     ? Math.abs(tp2Pct / slPct).toFixed(1)
     : null;
-
-  const recommendation = generateRecommendation(s);
 
   return (
     <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4" onClick={onClose}>
@@ -318,14 +334,21 @@ function TickerModal({ stock: s, onClose }) {
             </div>
           </div>
 
-          {/* Recomendación */}
+          {/* Recomendación IA */}
           <div className="bg-indigo-50 border border-indigo-100 rounded-xl p-4">
-            <div className="text-xs font-semibold text-indigo-400 uppercase tracking-wider mb-2">Recomendación</div>
-            <div className="space-y-1">
-              {recommendation.map((line, i) => (
-                <p key={i} className="text-sm text-indigo-900 leading-snug">{line}</p>
-              ))}
+            <div className="flex items-center gap-2 mb-2">
+              <span className="text-xs font-semibold text-indigo-400 uppercase tracking-wider">Recomendación IA</span>
+              {aiLoading && (
+                <svg className="animate-spin h-3 w-3 text-indigo-400" viewBox="0 0 24 24" fill="none">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z" />
+                </svg>
+              )}
             </div>
+            {aiLoading
+              ? <p className="text-sm text-indigo-400 italic">Generando análisis…</p>
+              : <p className="text-sm text-indigo-900 leading-snug">{aiRec ?? "Sin datos"}</p>
+            }
           </div>
 
         </div>

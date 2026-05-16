@@ -2,6 +2,7 @@ import json
 
 from workers import Response, fetch
 
+from providers.gemini import analyze as gemini_analyze
 from storage.db import get_latest_run, get_results, get_lists_meta
 
 ALLOWED_ORIGINS = {
@@ -111,6 +112,27 @@ async def on_fetch(request, env):
         except Exception as e:
             return _j({"error": str(e)}, status=500)
         return _j({"lists": meta})
+
+    # POST /api/analyze — AI recommendation for a single ticker
+    if method == "POST" and path == "/api/analyze":
+        try:
+            body_text = await request.text()
+            ticker_data = json.loads(body_text) if body_text else {}
+        except Exception:
+            return _j({"error": "body inválido"}, status=400)
+
+        if not ticker_data.get("ticker"):
+            return _j({"error": "falta 'ticker'"}, status=400)
+
+        api_key = getattr(env, "GOOGLE_API_KEY", None)
+        if not api_key:
+            return _j({"error": "GOOGLE_API_KEY no configurada"}, status=500)
+
+        try:
+            recommendation = await gemini_analyze(ticker_data, api_key)
+            return _j({"ticker": ticker_data["ticker"], "recommendation": recommendation})
+        except Exception as e:
+            return _j({"error": str(e)}, status=500)
 
     # POST /api/refresh — triggers GitHub Actions workflow via repository_dispatch
     if method == "POST" and path == "/api/refresh":
