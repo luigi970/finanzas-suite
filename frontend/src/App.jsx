@@ -166,7 +166,6 @@ function TradingViewChart({ ticker }) {
       underLineColor: "rgba(99,102,241,0.1)",
       isTransparent: true,
       autosize: true,
-      largeChartUrl: `https://www.tradingview.com/chart/?symbol=${symbol}`,
     });
     el.appendChild(script);
 
