@@ -1,3 +1,6 @@
+# Copiá este archivo como wrangler.toml y completá los valores.
+# account_id lo podés omitir si tenés CLOUDFLARE_ACCOUNT_ID como env var.
+
 name = "maximos-worker"
 main = "src/entry.py"
 compatibility_date = "2025-01-15"
@@ -7,7 +10,7 @@ workers_dev = true
 [[d1_databases]]
 binding = "maximos_db"
 database_name = "maximos-db"
-database_id = "b2ff197f-e7e2-47f1-a4a6-5d5ee23e7aa0"
+database_id = "TU_D1_DATABASE_ID"
 
 [ai]
 binding = "AI"

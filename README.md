@@ -58,6 +58,41 @@ El Worker es solo lectura — respuesta instantánea sin cálculos.
 
 ---
 
+## Fork & deploy propio
+
+Para correr tu propia instancia:
+
+1. **Crear los recursos en Cloudflare**
+   ```bash
+   # Crear base D1
+   npx wrangler d1 create maximos-db
+   # Aplicar schema
+   npx wrangler d1 execute maximos-db --file=worker/migrations/0001_init.sql
+   ```
+
+2. **Configurar wrangler.toml**
+   ```bash
+   cp worker/wrangler.example.toml worker/wrangler.toml
+   # Editar wrangler.toml con tu database_id
+   ```
+
+3. **Agregar secrets al Worker**
+   ```bash
+   npx wrangler secret put GH_PAT
+   npx wrangler secret put GROQ_API_KEY
+   npx wrangler secret put GOOGLE_API_KEY
+   ```
+
+4. **Agregar secrets a GitHub Actions** (Settings → Secrets → Actions):
+   - `CF_API_TOKEN` — token de Cloudflare
+   - `CF_ACCOUNT_ID` — tu account ID
+   - `CF_D1_DB_ID` — el ID de la base creada en el paso 1
+   - `VITE_API_URL` — URL de tu Worker tras el primer deploy
+
+5. **Hacer push** — los workflows de GitHub Actions se encargan del resto.
+
+---
+
 ## Desarrollo local
 
 ### Requisitos
