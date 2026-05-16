@@ -10,7 +10,6 @@ on:
 jobs:
   deploy-worker:
     runs-on: ubuntu-latest
-    if: contains(github.event.commits[0].modified, 'worker/') || contains(github.event.commits[0].added, 'worker/')
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
