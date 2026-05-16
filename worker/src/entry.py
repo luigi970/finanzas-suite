@@ -2,7 +2,7 @@ import json
 
 from workers import Response, fetch
 
-from providers.gemini import analyze as gemini_analyze
+from providers.groq import analyze as groq_analyze
 from storage.db import get_latest_run, get_results, get_lists_meta
 
 ALLOWED_ORIGINS = {
@@ -124,12 +124,12 @@ async def on_fetch(request, env):
         if not ticker_data.get("ticker"):
             return _j({"error": "falta 'ticker'"}, status=400)
 
-        api_key = getattr(env, "GOOGLE_API_KEY", None)
+        api_key = getattr(env, "GROQ_API_KEY", None)
         if not api_key:
-            return _j({"error": "GOOGLE_API_KEY no configurada"}, status=500)
+            return _j({"error": "GROQ_API_KEY no configurada"}, status=500)
 
         try:
-            recommendation = await gemini_analyze(ticker_data, api_key)
+            recommendation = await groq_analyze(ticker_data, api_key)
             return _j({"ticker": ticker_data["ticker"], "recommendation": recommendation})
         except Exception as e:
             return _j({"error": str(e)}, status=500)
