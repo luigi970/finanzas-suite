@@ -68,6 +68,26 @@ async def on_fetch(request, env):
     if method == "GET" and path == "/health":
         return _j({"status": "ok"})
 
+    if method == "GET" and path == "/debug/d1":
+        if not hasattr(env, "maximos_db"):
+            return _j({"error": "no db"}, status=500)
+        try:
+            cursor = await env.maximos_db.prepare("SELECT 1 as n").all()
+            results = cursor.results
+            row = None
+            for r in results:
+                row = r
+                break
+            return _j({
+                "cursor_type": str(type(cursor)),
+                "results_type": str(type(results)),
+                "row_type": str(type(row)),
+                "row_dir": [x for x in dir(row) if not x.startswith("_")] if row else [],
+                "has_to_py": hasattr(results, "to_py"),
+            })
+        except Exception as e:
+            return _j({"error": str(e), "type": type(e).__name__})
+
     if not hasattr(env, "maximos_db"):
         return _j({"error": "D1 no bindeada"}, status=500)
 
@@ -76,10 +96,12 @@ async def on_fetch(request, env):
     # GET /api/status?list_id=sp500
     if method == "GET" and path == "/api/status":
         list_id = qs.get("list_id", "sp500")
-        run = await get_latest_run(db, list_id)
+        try:
+            run = await get_latest_run(db, list_id)
+        except Exception as e:
+            return _j({"error": str(e), "status": "idle", "list_id": list_id}, status=500)
         if run is None:
             return _j({"status": "idle", "list_id": list_id, "processed": 0, "total_tickers": 0})
-        # Map D1 status → frontend status
         status_map = {"done": "ready", "running": "loading"}
         api_status = status_map.get(run.get("status", "idle"), "idle")
         return _j({
