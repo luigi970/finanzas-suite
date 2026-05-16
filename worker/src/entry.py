@@ -3,6 +3,7 @@ import json
 from workers import Response, fetch
 
 from providers.groq import analyze as groq_analyze
+from providers.gemini import analyze as gemini_analyze
 from storage.db import get_latest_run, get_results, get_lists_meta
 
 ALLOWED_ORIGINS = {
@@ -124,15 +125,26 @@ async def on_fetch(request, env):
         if not ticker_data.get("ticker"):
             return _j({"error": "falta 'ticker'"}, status=400)
 
-        api_key = getattr(env, "GROQ_API_KEY", None)
-        if not api_key:
-            return _j({"error": "GROQ_API_KEY no configurada"}, status=500)
+        groq_key = getattr(env, "GROQ_API_KEY", None)
+        gemini_key = getattr(env, "GOOGLE_API_KEY", None)
+
+        if not groq_key and not gemini_key:
+            return _j({"error": "No hay API key de IA configurada"}, status=500)
 
         try:
-            recommendation = await groq_analyze(ticker_data, api_key)
+            if groq_key:
+                recommendation = await groq_analyze(ticker_data, groq_key)
+            else:
+                recommendation = await gemini_analyze(ticker_data, gemini_key)
             return _j({"ticker": ticker_data["ticker"], "recommendation": recommendation})
-        except Exception as e:
-            return _j({"error": str(e)}, status=500)
+        except Exception as groq_err:
+            if gemini_key:
+                try:
+                    recommendation = await gemini_analyze(ticker_data, gemini_key)
+                    return _j({"ticker": ticker_data["ticker"], "recommendation": recommendation})
+                except Exception as gemini_err:
+                    return _j({"error": f"Groq: {groq_err} | Gemini: {gemini_err}"}, status=500)
+            return _j({"error": str(groq_err)}, status=500)
 
     # POST /api/refresh — triggers GitHub Actions workflow via repository_dispatch
     if method == "POST" and path == "/api/refresh":
