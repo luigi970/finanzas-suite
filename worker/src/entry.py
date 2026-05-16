@@ -144,6 +144,7 @@ async def on_fetch(request, env):
 
         list_id = body.get("list_id", "sp500")
         crypto_limit = body.get("crypto_limit", 20)
+        custom_tickers = body.get("custom", [])
 
         gh_token = getattr(env, "GH_PAT", None)
         gh_repo = getattr(env, "GH_REPO", "luigi970/maximos")
@@ -153,7 +154,11 @@ async def on_fetch(request, env):
 
         payload = json.dumps({
             "event_type": "run-screener",
-            "client_payload": {"list_id": list_id, "crypto_limit": crypto_limit},
+            "client_payload": {
+                "list_id": list_id,
+                "crypto_limit": crypto_limit,
+                "custom_tickers": ",".join(custom_tickers) if custom_tickers else "",
+            },
         })
 
         try:

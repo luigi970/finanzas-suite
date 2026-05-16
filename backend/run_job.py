@@ -74,6 +74,7 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--list", default="sp500", dest="list_id")
     parser.add_argument("--crypto-limit", type=int, default=20)
+    parser.add_argument("--custom-tickers", default="", dest="custom_tickers")
     args = parser.parse_args()
 
     token = os.environ.get("CF_API_TOKEN") or os.environ.get("CLOUDFLARE_API_TOKEN")
@@ -84,7 +85,8 @@ def main():
         print("ERROR: CF_API_TOKEN y CF_ACCOUNT_ID son requeridos", file=sys.stderr)
         sys.exit(1)
 
-    tickers = get_tickers(args.list_id, crypto_limit=args.crypto_limit)
+    custom = [t.strip() for t in args.custom_tickers.split(",") if t.strip()] if args.custom_tickers else None
+    tickers = get_tickers(args.list_id, custom=custom, crypto_limit=args.crypto_limit)
     print(f"[job] Lista: {args.list_id} — {len(tickers)} tickers")
 
     run_id = create_run(token, account_id, db_id, args.list_id, len(tickers))

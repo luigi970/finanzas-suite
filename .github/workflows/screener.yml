@@ -21,15 +21,12 @@ jobs:
   screener:
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    if: "!(github.event_name == 'repository_dispatch' && github.event.client_payload.list_id == 'custom')"
 
     strategy:
       fail-fast: false
       matrix:
-        list_id:
-          - sp500
-          - nasdaq100
-          - etfs
-          - adrs_arg
+        list_id: [sp500, nasdaq100, etfs, adrs_arg, crypto]
 
     steps:
       - uses: actions/checkout@v4
@@ -42,23 +39,31 @@ jobs:
       - name: Install dependencies
         run: pip install -r backend/requirements.txt
 
-      - name: Determine list_id
+      - name: Determine params
         id: list
         run: |
-          # repository_dispatch overrides matrix
-          if [ "${{ github.event_name }}" = "repository_dispatch" ]; then
-            echo "list_id=${{ github.event.client_payload.list_id || 'sp500' }}" >> $GITHUB_OUTPUT
-            echo "crypto_limit=${{ github.event.client_payload.crypto_limit || '20' }}" >> $GITHUB_OUTPUT
-            echo "skip=${{ matrix.list_id != (github.event.client_payload.list_id || 'sp500') }}" >> $GITHUB_OUTPUT
-          elif [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            echo "list_id=${{ github.event.inputs.list_id || 'sp500' }}" >> $GITHUB_OUTPUT
-            echo "crypto_limit=${{ github.event.inputs.crypto_limit || '20' }}" >> $GITHUB_OUTPUT
-            echo "skip=${{ matrix.list_id != github.event.inputs.list_id }}" >> $GITHUB_OUTPUT
-          else:
-            echo "list_id=${{ matrix.list_id }}" >> $GITHUB_OUTPUT
-            echo "crypto_limit=20" >> $GITHUB_OUTPUT
-            echo "skip=false" >> $GITHUB_OUTPUT
+          EVENT="${{ github.event_name }}"
+          MATRIX="${{ matrix.list_id }}"
+
+          if [ "$EVENT" = "repository_dispatch" ]; then
+            TARGET="${{ github.event.client_payload.list_id }}"
+            CRYPTO_LIMIT="${{ github.event.client_payload.crypto_limit }}"
+          elif [ "$EVENT" = "workflow_dispatch" ]; then
+            TARGET="${{ github.event.inputs.list_id }}"
+            CRYPTO_LIMIT="${{ github.event.inputs.crypto_limit }}"
+          else
+            # cron: corre todo el matrix, no crypto
+            TARGET="$MATRIX"
+            CRYPTO_LIMIT=20
+            [ "$MATRIX" = "crypto" ] && TARGET=""
           fi
+
+          if [ "$TARGET" = "$MATRIX" ]; then
+            echo "skip=false" >> $GITHUB_OUTPUT
+          else
+            echo "skip=true" >> $GITHUB_OUTPUT
+          fi
+          echo "crypto_limit=${CRYPTO_LIMIT:-20}" >> $GITHUB_OUTPUT
 
       - name: Run screener
         if: steps.list.outputs.skip != 'true'
@@ -68,4 +73,29 @@ jobs:
           CF_D1_DB_ID: ${{ secrets.CF_D1_DB_ID }}
         run: |
           cd backend
-          python run_job.py --list ${{ steps.list.outputs.list_id }} --crypto-limit ${{ steps.list.outputs.crypto_limit }}
+          python run_job.py --list ${{ matrix.list_id }} --crypto-limit ${{ steps.list.outputs.crypto_limit }}
+
+  screener-custom:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    if: github.event_name == 'repository_dispatch' && github.event.client_payload.list_id == 'custom'
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install -r backend/requirements.txt
+
+      - name: Run screener (custom)
+        env:
+          CF_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+          CF_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
+          CF_D1_DB_ID: ${{ secrets.CF_D1_DB_ID }}
+        run: |
+          cd backend
+          python run_job.py --list custom --custom-tickers "${{ github.event.client_payload.custom_tickers }}"
