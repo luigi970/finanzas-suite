@@ -492,7 +492,6 @@ const LIST_CONFIG = [
   { id: "etfs",      label: "ETFs" },
   { id: "adrs_arg",  label: "ADRs Argentina" },
   { id: "crypto",    label: "Crypto" },
-  { id: "custom",    label: "Personalizada" },
 ];
 
 const PULSE_CONFIG = {
@@ -621,7 +620,6 @@ export default function App() {
   const [processed, setProcessed] = useState(0);
   const [totalTickers, setTotalTickers] = useState(0);
   const [selectedList, setSelectedList] = useState("sp500");
-  const [customInput, setCustomInput] = useState("");
   const [cryptoLimit, setCryptoLimit] = useState(20);
   const [activeListId, setActiveListId] = useState("sp500");
   const [selectedTicker, setSelectedTicker] = useState(null);
@@ -666,13 +664,10 @@ export default function App() {
 
   const handleRefresh = async () => {
     setLoading(true);
-    const custom = selectedList === "custom"
-      ? customInput.split(/[\s,]+/).filter(Boolean)
-      : [];
     await fetch(`${API_BASE}/api/refresh`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ list_id: selectedList, custom, crypto_limit: cryptoLimit }),
+      body: JSON.stringify({ list_id: selectedList, crypto_limit: cryptoLimit }),
     });
     setActiveListId(selectedList);
     setStocks([]);
@@ -761,7 +756,7 @@ export default function App() {
             ))}
             <button
               onClick={handleRefresh}
-              disabled={loading || isBusy || (selectedList === "custom" && !customInput.trim())}
+              disabled={loading || isBusy}
               className="ml-auto px-5 py-2 bg-indigo-600 text-white text-sm font-medium rounded-lg hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed transition"
             >
               {isBusy ? "Analizando…" : `Analizar ${LIST_CONFIG.find(l => l.id === selectedList)?.label ?? ""}`}
@@ -781,15 +776,6 @@ export default function App() {
                 {cryptoLimit} cripto{cryptoLimit > 1 ? "s" : ""}
               </span>
             </div>
-          )}
-          {selectedList === "custom" && (
-            <textarea
-              rows={2}
-              placeholder="Escribí los tickers separados por coma o espacio. Ej: AAPL, MSFT, TSLA"
-              value={customInput}
-              onChange={(e) => setCustomInput(e.target.value)}
-              className="w-full mt-3 px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400 resize-none"
-            />
           )}
         </div>
 
@@ -839,13 +825,13 @@ export default function App() {
         )}
 
         {/* Filtros */}
-        <div className="flex flex-wrap gap-3 mb-4">
+        <div className="flex flex-wrap items-center gap-3 mb-4">
           <input
             type="text"
-            placeholder="Buscar ticker…"
+            placeholder="Buscar ticker en la lista…"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            className="px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400 w-40"
+            className="px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400 w-56"
           />
           <div className="flex flex-wrap gap-1">
             {FILTER_OPTIONS.map(({ key, label }) => (
@@ -862,6 +848,14 @@ export default function App() {
               </button>
             ))}
           </div>
+          {search && (
+            <button
+              onClick={() => setSearch("")}
+              className="text-xs text-gray-400 hover:text-gray-600"
+            >
+              ✕ limpiar
+            </button>
+          )}
         </div>
 
         {/* Tabla */}
