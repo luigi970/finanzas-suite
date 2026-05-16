@@ -640,9 +640,11 @@ export default function App() {
     try {
       const res = await fetch(`${API_BASE}/api/status?list_id=${activeListId}`);
       const data = await res.json();
-      setStatus(data.status);
       setProcessed(data.processed ?? 0);
       setTotalTickers(data.total_tickers ?? 0);
+      // "idle" means the GH Actions job hasn't created the DB record yet —
+      // don't cancel the loading state while waiting for it to start
+      if (data.status !== "idle") setStatus(data.status);
       if (data.status === "ready") fetchStocks();
     } catch { }
   }, [fetchStocks, activeListId]);

@@ -89,6 +89,12 @@ def main():
     tickers = get_tickers(args.list_id, custom=custom, crypto_limit=args.crypto_limit)
     print(f"[job] Lista: {args.list_id} — {len(tickers)} tickers")
 
+    # Custom list: clear stale results so only the requested tickers appear
+    if args.list_id == "custom":
+        d1_query(token, account_id, db_id,
+                 "DELETE FROM screener_results WHERE list_id = 'custom'")
+        print("[job] Resultados custom anteriores eliminados")
+
     run_id = create_run(token, account_id, db_id, args.list_id, len(tickers))
     print(f"[job] Run ID: {run_id}")
 
