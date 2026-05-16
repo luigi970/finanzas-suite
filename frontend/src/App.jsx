@@ -1,5 +1,245 @@
 import { useState, useEffect, useCallback } from "react";
 
+function generateRecommendation(s) {
+  const parts = [];
+  const signal = s.signal;
+  const zone   = s.zone;
+  const pulse  = s.pulse_signal;
+  const adx    = s.adx;
+
+  if (signal === "compra_fuerte") {
+    parts.push("Setup alcista de alta calidad con múltiples señales alineadas.");
+    if (zone === "discount") parts.push("El precio está en zona DISCOUNT, lo que mejora la relación riesgo/beneficio.");
+    else if (zone === "fair")    parts.push("Zona FAIR — buen punto de entrada sin pagar prima.");
+    if (pulse === "GIRO UP")   parts.push("Helper Pulse confirma divergencia alcista: señal de reversión al alza.");
+    else if (pulse === "SIGUE UP") parts.push("Helper Pulse detecta continuación alcista en la tendencia.");
+    else if (pulse === "AGOT. INF") parts.push("Agotamiento inferior detectado — posible rebote inmediato.");
+    if (adx >= 25) parts.push(`ADX ${adx} indica tendencia fuerte y sostenible.`);
+    parts.push("Considerar entrada con SL y TP1 definidos.");
+  } else if (signal === "compra") {
+    parts.push("Setup alcista con mayoría de señales positivas.");
+    if (zone === "discount") parts.push("Zona DISCOUNT favorece la entrada.");
+    else if (zone === "premium") parts.push("Zona PREMIUM — esperar un retroceso mejora el riesgo/beneficio.");
+    if (pulse === "GIRO UP" || pulse === "SIGUE UP") parts.push("Pulse acompaña el sesgo alcista.");
+    parts.push("Señal válida pero con menor convicción que Compra Fuerte. Confirmar antes de entrar.");
+  } else if (signal === "neutral") {
+    parts.push("Sin dirección clara en este momento.");
+    if (zone === "discount") parts.push("Zona DISCOUNT interesante, pero falta confirmación de tendencia.");
+    else if (zone === "premium") parts.push("En zona PREMIUM sin momentum: evitar compras.");
+    if (pulse === "AGOT. INF" || pulse === "GIRO UP") parts.push("Pulse muestra señales de piso — vigilar para posible entrada.");
+    parts.push("Esperar que el score supere 60 con dirección definida.");
+  } else if (signal === "venta") {
+    parts.push("Sesgo bajista moderado. Evitar compras.");
+    if (zone === "premium") parts.push("Zona PREMIUM — el precio está extendido hacia arriba.");
+    if (pulse === "GIRO DN" || pulse === "SIGUE DN") parts.push("Pulse confirma presión bajista.");
+    parts.push("Si tenés posición abierta, revisar el stop.");
+  } else if (signal === "venta_fuerte") {
+    parts.push("Setup bajista de alta calidad. No comprar.");
+    if (zone === "premium") parts.push("Zona PREMIUM con momentum negativo — precio extendido y cayendo.");
+    if (pulse === "GIRO DN") parts.push("Helper Pulse confirma divergencia bajista: señal de reversión a la baja.");
+    else if (pulse === "SIGUE DN") parts.push("Continuación bajista detectada por el Pulse.");
+    if (adx >= 25) parts.push(`ADX ${adx} confirma tendencia bajista fuerte.`);
+    parts.push("Proteger posiciones o esperar nuevo setup antes de operar.");
+  }
+
+  return parts.length ? parts : ["Datos insuficientes para generar recomendación."];
+}
+
+function TickerModal({ stock: s, onClose }) {
+  if (!s) return null;
+
+  const sigCfg = {
+    compra_fuerte: { label: "Compra Fuerte", color: "bg-emerald-500" },
+    compra:        { label: "Compra",        color: "bg-green-400" },
+    neutral:       { label: "Neutral",       color: "bg-gray-400" },
+    venta:         { label: "Venta",         color: "bg-orange-400" },
+    venta_fuerte:  { label: "Venta Fuerte",  color: "bg-red-500" },
+  }[s.signal] ?? { label: "—", color: "bg-gray-400" };
+
+  const zoneCfg = {
+    discount: { label: "DISCOUNT", cls: "bg-teal-100 text-teal-800" },
+    fair:     { label: "FAIR",     cls: "bg-gray-100 text-gray-600" },
+    premium:  { label: "PREMIUM",  cls: "bg-purple-100 text-purple-800" },
+  }[s.zone] ?? { label: "—", cls: "bg-gray-100 text-gray-600" };
+
+  const pulseCfg = {
+    "GIRO UP":   "bg-cyan-100 text-cyan-800",
+    "SIGUE UP":  "bg-yellow-100 text-yellow-800",
+    "GIRO DN":   "bg-red-100 text-red-800",
+    "SIGUE DN":  "bg-orange-100 text-orange-800",
+    "AGOT. SUP": "bg-pink-100 text-pink-800",
+    "AGOT. INF": "bg-blue-100 text-blue-800",
+  }[s.pulse_signal] ?? "bg-gray-100 text-gray-500";
+
+  const pct = (val, base) => base ? ((val - base) / base * 100).toFixed(2) : null;
+  const slPct  = s.sl  ? pct(s.sl,  s.price) : null;
+  const tp1Pct = s.tp1 ? pct(s.tp1, s.price) : null;
+  const tp2Pct = s.tp2 ? pct(s.tp2, s.price) : null;
+
+  const rrRatio = (slPct && tp1Pct)
+    ? Math.abs(tp1Pct / slPct).toFixed(1)
+    : null;
+  const rr2Ratio = (slPct && tp2Pct)
+    ? Math.abs(tp2Pct / slPct).toFixed(1)
+    : null;
+
+  const recommendation = generateRecommendation(s);
+
+  return (
+    <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4" onClick={onClose}>
+      <div
+        className="bg-white rounded-2xl shadow-2xl w-full max-w-md max-h-[90vh] overflow-y-auto"
+        onClick={e => e.stopPropagation()}
+      >
+        {/* Header */}
+        <div className="p-5 border-b border-gray-100">
+          <div className="flex items-start justify-between">
+            <div>
+              <div className="flex items-center gap-2 mb-1">
+                <h2 className="text-2xl font-bold text-gray-900">{s.ticker}</h2>
+                <span className={`px-2 py-0.5 rounded-full text-xs font-bold text-white ${sigCfg.color}`}>
+                  {sigCfg.label}
+                </span>
+              </div>
+              <div className="text-xl font-semibold text-gray-700">${s.price?.toFixed(2)}</div>
+              <div className="flex items-center gap-2 mt-1.5">
+                <span className={`text-xs font-bold ${s.direction === "LONG" ? "text-green-600" : s.direction === "SHORT" ? "text-red-600" : "text-gray-400"}`}>
+                  {s.direction === "LONG" ? "↑ LONG" : s.direction === "SHORT" ? "↓ SHORT" : "● NEUTRAL"}
+                </span>
+                <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold ${zoneCfg.cls}`}>{zoneCfg.label}</span>
+                {s.adx != null && <span className="text-xs text-gray-500">ADX {s.adx}</span>}
+              </div>
+            </div>
+            <button onClick={onClose} className="text-gray-400 hover:text-gray-600 text-xl leading-none mt-1">✕</button>
+          </div>
+        </div>
+
+        <div className="p-5 space-y-5">
+
+          {/* Score */}
+          <div>
+            <div className="flex items-center justify-between mb-2">
+              <span className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Helper Prime Score</span>
+              <span className="text-2xl font-bold text-gray-900">{s.score}<span className="text-sm text-gray-400">/100</span></span>
+            </div>
+            <div className="space-y-1.5">
+              <div>
+                <div className="flex justify-between text-xs text-gray-500 mb-0.5">
+                  <span className="text-green-600 font-medium">↑ Long</span>
+                  <span>{s.long_score}</span>
+                </div>
+                <div className="w-full h-2 bg-gray-100 rounded-full overflow-hidden">
+                  <div className="h-2 bg-green-400 rounded-full" style={{ width: `${s.long_score}%` }} />
+                </div>
+              </div>
+              <div>
+                <div className="flex justify-between text-xs text-gray-500 mb-0.5">
+                  <span className="text-red-500 font-medium">↓ Short</span>
+                  <span>{s.short_score}</span>
+                </div>
+                <div className="w-full h-2 bg-gray-100 rounded-full overflow-hidden">
+                  <div className="h-2 bg-red-400 rounded-full" style={{ width: `${s.short_score}%` }} />
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Métricas */}
+          <div>
+            <div className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">Métricas</div>
+            <div className="grid grid-cols-3 gap-2">
+              {[
+                ["RSI",       s.rsi?.toFixed(1),     s.rsi < 30 ? "text-blue-600" : s.rsi > 70 ? "text-red-600" : "text-gray-700"],
+                ["vs MA200",  s.pct_vs_ma200 != null ? (s.pct_vs_ma200 >= 0 ? "+" : "") + s.pct_vs_ma200?.toFixed(2) + "%" : "—", s.pct_vs_ma200 >= 0 ? "text-green-600" : "text-red-600"],
+                ["Vol ×",     s.vol_ratio != null ? s.vol_ratio?.toFixed(2) + "x" : "—", s.vol_ratio >= 1.5 ? "text-indigo-600 font-semibold" : "text-gray-700"],
+                ["% Máx 52s", s.pct_from_high != null ? s.pct_from_high?.toFixed(2) + "%" : "—", s.pct_from_high >= 0 ? "text-green-600" : "text-red-600"],
+                ["% Mín 52s", s.pct_from_low  != null ? "+" + s.pct_from_low?.toFixed(2) + "%" : "—", "text-gray-700"],
+                ["MACD",      s.macd_hist != null ? (s.macd_hist > 0 ? "▲" : "▼") + " " + Math.abs(s.macd_hist)?.toFixed(3) : "—", s.macd_hist > 0 ? "text-green-600" : "text-red-600"],
+              ].map(([label, val, cls]) => (
+                <div key={label} className="bg-gray-50 rounded-lg p-2 text-center">
+                  <div className="text-[10px] text-gray-400 mb-0.5">{label}</div>
+                  <div className={`text-sm font-semibold tabular-nums ${cls}`}>{val ?? "—"}</div>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* Niveles SL / TP */}
+          {(s.sl || s.tp1) && (
+            <div>
+              <div className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">Niveles de Riesgo</div>
+              <div className="space-y-1.5 text-sm">
+                <div className="flex justify-between items-center py-1 border-b border-gray-50">
+                  <span className="text-gray-500">Entrada</span>
+                  <span className="font-semibold tabular-nums">${s.price?.toFixed(2)}</span>
+                </div>
+                {s.sl && (
+                  <div className="flex justify-between items-center py-1 border-b border-gray-50">
+                    <span className="text-red-500 font-medium">Stop Loss</span>
+                    <span className="tabular-nums">
+                      <span className="font-semibold">${s.sl.toFixed(2)}</span>
+                      {slPct && <span className="text-xs text-red-400 ml-1">({slPct}%)</span>}
+                    </span>
+                  </div>
+                )}
+                {s.tp1 && (
+                  <div className="flex justify-between items-center py-1 border-b border-gray-50">
+                    <span className="text-green-500 font-medium">TP1</span>
+                    <span className="tabular-nums">
+                      <span className="font-semibold">${s.tp1.toFixed(2)}</span>
+                      {tp1Pct && <span className="text-xs text-green-400 ml-1">(+{tp1Pct}%)</span>}
+                      {rrRatio && <span className="text-xs text-gray-400 ml-2">R/R 1:{rrRatio}</span>}
+                    </span>
+                  </div>
+                )}
+                {s.tp2 && (
+                  <div className="flex justify-between items-center py-1">
+                    <span className="text-green-600 font-medium">TP2</span>
+                    <span className="tabular-nums">
+                      <span className="font-semibold">${s.tp2.toFixed(2)}</span>
+                      {tp2Pct && <span className="text-xs text-green-400 ml-1">(+{tp2Pct}%)</span>}
+                      {rr2Ratio && <span className="text-xs text-gray-400 ml-2">R/R 1:{rr2Ratio}</span>}
+                    </span>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* Helper Pulse */}
+          <div>
+            <div className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">Helper Pulse</div>
+            <div className="flex items-center gap-2">
+              <span className="text-sm text-gray-700">{s.pulse_state ?? "—"}</span>
+              {s.pulse_signal && (
+                <span className={`px-2 py-0.5 rounded text-xs font-bold ${pulseCfg}`}>
+                  {s.pulse_signal}
+                </span>
+              )}
+              {s.mom != null && (
+                <span className={`text-xs ml-auto tabular-nums ${s.mom > 0 ? "text-green-600" : s.mom < 0 ? "text-red-600" : "text-gray-400"}`}>
+                  mom {s.mom > 0 ? "+" : ""}{s.mom}
+                </span>
+              )}
+            </div>
+          </div>
+
+          {/* Recomendación */}
+          <div className="bg-indigo-50 border border-indigo-100 rounded-xl p-4">
+            <div className="text-xs font-semibold text-indigo-400 uppercase tracking-wider mb-2">Recomendación</div>
+            <div className="space-y-1">
+              {recommendation.map((line, i) => (
+                <p key={i} className="text-sm text-indigo-900 leading-snug">{line}</p>
+              ))}
+            </div>
+          </div>
+
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function HelpModal({ onClose }) {
   return (
     <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4" onClick={onClose}>
@@ -267,6 +507,7 @@ export default function App() {
   const [customInput, setCustomInput] = useState("");
   const [cryptoLimit, setCryptoLimit] = useState(20);
   const [activeListId, setActiveListId] = useState("sp500");
+  const [selectedTicker, setSelectedTicker] = useState(null);
   const [showHelp, setShowHelp] = useState(false);
 
   const fetchStocks = useCallback(async () => {
@@ -364,6 +605,7 @@ export default function App() {
       <div className="max-w-screen-2xl mx-auto">
 
         {showHelp && <HelpModal onClose={() => setShowHelp(false)} />}
+        {selectedTicker && <TickerModal stock={selectedTicker} onClose={() => setSelectedTicker(null)} />}
 
         {/* Header */}
         <div className="flex items-start justify-between mb-6">
@@ -535,8 +777,12 @@ export default function App() {
                 </thead>
                 <tbody className="divide-y divide-gray-100">
                   {filtered.map((s) => (
-                    <tr key={s.ticker} className="hover:bg-gray-50 transition">
-                      <td className="px-3 py-3 font-semibold text-gray-900">{s.ticker}</td>
+                    <tr
+                      key={s.ticker}
+                      className="hover:bg-indigo-50 transition cursor-pointer"
+                      onClick={() => setSelectedTicker(s)}
+                    >
+                      <td className="px-3 py-3 font-semibold text-gray-900 underline decoration-dotted underline-offset-2">{s.ticker}</td>
                       <td className="px-3 py-3 tabular-nums">${s.price.toFixed(2)}</td>
                       <td className="px-3 py-3">
                         <ScoreBar value={s.score} direction={s.direction} signal={s.signal} />
