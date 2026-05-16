@@ -2,44 +2,133 @@ import { useState, useEffect, useCallback } from "react";
 
 function generateRecommendation(s) {
   const parts = [];
-  const signal = s.signal;
-  const zone   = s.zone;
-  const pulse  = s.pulse_signal;
-  const adx    = s.adx;
+  const { signal, zone, pulse_signal: pulse, pulse_state, adx, mom,
+          rsi, macd_hist, vol_ratio, pct_b, pct_from_high, pct_from_low,
+          long_score, short_score, poc, price } = s;
 
-  if (signal === "compra_fuerte") {
-    parts.push("Setup alcista de alta calidad con múltiples señales alineadas.");
-    if (zone === "discount") parts.push("El precio está en zona DISCOUNT, lo que mejora la relación riesgo/beneficio.");
-    else if (zone === "fair")    parts.push("Zona FAIR — buen punto de entrada sin pagar prima.");
-    if (pulse === "GIRO UP")   parts.push("Helper Pulse confirma divergencia alcista: señal de reversión al alza.");
-    else if (pulse === "SIGUE UP") parts.push("Helper Pulse detecta continuación alcista en la tendencia.");
-    else if (pulse === "AGOT. INF") parts.push("Agotamiento inferior detectado — posible rebote inmediato.");
-    if (adx >= 25) parts.push(`ADX ${adx} indica tendencia fuerte y sostenible.`);
-    parts.push("Considerar entrada con SL y TP1 definidos.");
-  } else if (signal === "compra") {
-    parts.push("Setup alcista con mayoría de señales positivas.");
-    if (zone === "discount") parts.push("Zona DISCOUNT favorece la entrada.");
-    else if (zone === "premium") parts.push("Zona PREMIUM — esperar un retroceso mejora el riesgo/beneficio.");
-    if (pulse === "GIRO UP" || pulse === "SIGUE UP") parts.push("Pulse acompaña el sesgo alcista.");
-    parts.push("Señal válida pero con menor convicción que Compra Fuerte. Confirmar antes de entrar.");
+  // ── 1. Apertura: calidad del setup ────────────────────────────────────────
+  if (signal === "compra_fuerte")
+    parts.push(`Setup alcista de alta calidad (Long ${long_score}/100). Múltiples señales alineadas — alta convicción.`);
+  else if (signal === "compra")
+    parts.push(`Setup alcista moderado (Long ${long_score}/100). Mayoría de señales positivas, pero no todas confirmadas.`);
+  else if (signal === "neutral")
+    parts.push(`Sin dirección operativa clara (Long ${long_score} / Short ${short_score}). Mercado en equilibrio.`);
+  else if (signal === "venta")
+    parts.push(`Sesgo bajista moderado (Short ${short_score}/100). Evitar compras en este nivel.`);
+  else if (signal === "venta_fuerte")
+    parts.push(`Setup bajista de alta calidad (Short ${short_score}/100). No comprar — presión vendedora dominante.`);
+
+  // ── 2. Zona estructural ───────────────────────────────────────────────────
+  if (zone === "discount")
+    parts.push("Zona DISCOUNT: precio por debajo de la regresión lineal — excelente relación riesgo/beneficio para longs.");
+  else if (zone === "premium")
+    parts.push("Zona PREMIUM: precio extendido por encima de la regresión lineal — comprar acá implica pagar caro.");
+  else if (zone === "fair")
+    parts.push("Zona FAIR: precio en zona media de la regresión — entrada neutra, sin ventaja estructural marcada.");
+
+  if (poc != null && price != null) {
+    const distPct = ((price - poc) / poc * 100).toFixed(1);
+    if (Math.abs(price - poc) / poc < 0.02)
+      parts.push(`Precio muy cerca del POC ($${poc.toFixed(2)}) — nivel de mayor concentración de volumen, zona de decisión clave.`);
+    else if (price > poc)
+      parts.push(`Precio ${distPct}% sobre el POC ($${poc.toFixed(2)}) — el soporte volumétrico queda abajo.`);
+    else
+      parts.push(`Precio ${Math.abs(distPct)}% bajo el POC ($${poc.toFixed(2)}) — resistencia volumétrica arriba.`);
+  }
+
+  // ── 3. Momentum ───────────────────────────────────────────────────────────
+  const momentumParts = [];
+  if (rsi != null) {
+    if (rsi < 30)        momentumParts.push(`RSI ${rsi} en sobreventa extrema — posible rebote técnico`);
+    else if (rsi < 40)   momentumParts.push(`RSI ${rsi} en zona de sobreventa — momentum débil pero mejorando`);
+    else if (rsi > 70)   momentumParts.push(`RSI ${rsi} en sobrecompra — riesgo de corrección a corto plazo`);
+    else if (rsi > 60)   momentumParts.push(`RSI ${rsi} con momentum positivo pero vigilar sobrecompra`);
+    else                 momentumParts.push(`RSI ${rsi} en zona neutral`);
+  }
+  if (mom != null) {
+    if (Math.abs(mom) >= 15)
+      momentumParts.push(`momentum RSI-50 ${mom > 0 ? "+" : ""}${mom} (zona de potencia ${mom > 0 ? "alcista" : "bajista"})`);
+    else if (mom !== 0)
+      momentumParts.push(`momentum RSI-50 ${mom > 0 ? "+" : ""}${mom}`);
+  }
+  if (macd_hist != null)
+    momentumParts.push(`MACD histograma ${macd_hist > 0 ? "positivo ▲" : "negativo ▼"}`);
+  if (momentumParts.length)
+    parts.push(momentumParts.join(", ") + ".");
+
+  // ── 4. Volumen ────────────────────────────────────────────────────────────
+  if (vol_ratio != null) {
+    if (vol_ratio >= 2.0)
+      parts.push(`Volumen ${vol_ratio.toFixed(1)}x el promedio — movimiento fuertemente confirmado.`);
+    else if (vol_ratio >= 1.5)
+      parts.push(`Volumen ${vol_ratio.toFixed(1)}x el promedio — confirmación sólida del movimiento.`);
+    else if (vol_ratio >= 1.2)
+      parts.push(`Volumen ${vol_ratio.toFixed(1)}x el promedio — confirmación moderada.`);
+    else if (vol_ratio < 0.7)
+      parts.push(`Volumen ${vol_ratio.toFixed(1)}x el promedio — movimiento sin confirmación de volumen, mayor riesgo de fakeout.`);
+  }
+
+  // ── 5. Bollinger %B ───────────────────────────────────────────────────────
+  if (pct_b != null) {
+    if (pct_b < 0.1)
+      parts.push(`%B ${(pct_b * 100).toFixed(0)}%: precio tocando la banda inferior de Bollinger — sobreventa técnica, posible rebote.`);
+    else if (pct_b < 0.25)
+      parts.push(`%B ${(pct_b * 100).toFixed(0)}%: precio cerca de la banda inferior — zona de valor técnico.`);
+    else if (pct_b > 0.9)
+      parts.push(`%B ${(pct_b * 100).toFixed(0)}%: precio tocando la banda superior de Bollinger — sobrecompra técnica.`);
+    else if (pct_b > 0.75)
+      parts.push(`%B ${(pct_b * 100).toFixed(0)}%: precio cerca de la banda superior — zona extendida.`);
+  }
+
+  // ── 6. Distancia 52 semanas ───────────────────────────────────────────────
+  if (pct_from_high != null && pct_from_low != null) {
+    if (pct_from_high > -5)
+      parts.push(`En máximos del año (${pct_from_high.toFixed(1)}% del techo) — momentum fuerte pero recorrido limitado al alza.`);
+    else if (pct_from_high < -40)
+      parts.push(`${Math.abs(pct_from_high).toFixed(0)}% debajo del máximo anual — amplio recorrido potencial si recupera tendencia.`);
+    else if (pct_from_low < 15)
+      parts.push(`Solo ${pct_from_low.toFixed(1)}% sobre el mínimo anual — zona de piso, vigilar soporte.`);
+  }
+
+  // ── 7. ADX y fuerza de tendencia ─────────────────────────────────────────
+  if (adx != null) {
+    if (adx >= 30)
+      parts.push(`ADX ${adx}: tendencia muy fuerte — alta probabilidad de continuación.`);
+    else if (adx >= 20)
+      parts.push(`ADX ${adx}: tendencia activa con fuerza suficiente.`);
+    else
+      parts.push(`ADX ${adx} por debajo de 20 — tendencia débil o mercado lateral, mayor riesgo de señales falsas.`);
+  }
+
+  // ── 8. Helper Pulse ───────────────────────────────────────────────────────
+  if (pulse_state === "ALCISTA FUERTE")
+    parts.push("Pulse en estado ALCISTA FUERTE: momentum RSI-50 en zona de potencia y creciendo.");
+  else if (pulse_state === "BAJISTA FUERTE")
+    parts.push("Pulse en estado BAJISTA FUERTE: momentum RSI-50 en zona de potencia negativa y cayendo.");
+
+  if (pulse === "GIRO UP")
+    parts.push("Pulse detecta divergencia alcista regular (GIRO UP): precio marcó mínimo más bajo pero el momentum no — señal clásica de reversión al alza.");
+  else if (pulse === "SIGUE UP")
+    parts.push("Pulse detecta divergencia alcista oculta (SIGUE UP): el momentum confirma continuación de la tendencia alcista.");
+  else if (pulse === "GIRO DN")
+    parts.push("Pulse detecta divergencia bajista regular (GIRO DN): precio marcó máximo más alto pero el momentum no — señal de reversión a la baja.");
+  else if (pulse === "SIGUE DN")
+    parts.push("Pulse detecta divergencia bajista oculta (SIGUE DN): el momentum confirma continuación de la tendencia bajista.");
+  else if (pulse === "AGOT. SUP")
+    parts.push("Pulse en agotamiento superior: momentum en zona alta sin divergencia — precaución con posiciones largas.");
+  else if (pulse === "AGOT. INF")
+    parts.push("Pulse en agotamiento inferior: posible piso de momentum — vigilar señal de entrada.");
+
+  // ── 9. Cierre operativo ───────────────────────────────────────────────────
+  if (signal === "compra_fuerte" || signal === "compra") {
+    if (zone === "premium" && (rsi == null || rsi > 65))
+      parts.push("Considerar esperar retroceso a zona FAIR antes de entrar para mejorar el R/R.");
+    else
+      parts.push("Entrada válida respetando el SL definido por ATR.");
   } else if (signal === "neutral") {
-    parts.push("Sin dirección clara en este momento.");
-    if (zone === "discount") parts.push("Zona DISCOUNT interesante, pero falta confirmación de tendencia.");
-    else if (zone === "premium") parts.push("En zona PREMIUM sin momentum: evitar compras.");
-    if (pulse === "AGOT. INF" || pulse === "GIRO UP") parts.push("Pulse muestra señales de piso — vigilar para posible entrada.");
-    parts.push("Esperar que el score supere 60 con dirección definida.");
-  } else if (signal === "venta") {
-    parts.push("Sesgo bajista moderado. Evitar compras.");
-    if (zone === "premium") parts.push("Zona PREMIUM — el precio está extendido hacia arriba.");
-    if (pulse === "GIRO DN" || pulse === "SIGUE DN") parts.push("Pulse confirma presión bajista.");
-    parts.push("Si tenés posición abierta, revisar el stop.");
-  } else if (signal === "venta_fuerte") {
-    parts.push("Setup bajista de alta calidad. No comprar.");
-    if (zone === "premium") parts.push("Zona PREMIUM con momentum negativo — precio extendido y cayendo.");
-    if (pulse === "GIRO DN") parts.push("Helper Pulse confirma divergencia bajista: señal de reversión a la baja.");
-    else if (pulse === "SIGUE DN") parts.push("Continuación bajista detectada por el Pulse.");
-    if (adx >= 25) parts.push(`ADX ${adx} confirma tendencia bajista fuerte.`);
-    parts.push("Proteger posiciones o esperar nuevo setup antes de operar.");
+    parts.push("Esperar que el score supere 60 con dirección definida antes de operar.");
+  } else {
+    parts.push("No operar en largo hasta que las condiciones mejoren.");
   }
 
   return parts.length ? parts : ["Datos insuficientes para generar recomendación."];
@@ -153,8 +242,11 @@ function TickerModal({ stock: s, onClose }) {
                 ["vs MA200",  s.pct_vs_ma200 != null ? (s.pct_vs_ma200 >= 0 ? "+" : "") + s.pct_vs_ma200?.toFixed(2) + "%" : "—", s.pct_vs_ma200 >= 0 ? "text-green-600" : "text-red-600"],
                 ["Vol ×",     s.vol_ratio != null ? s.vol_ratio?.toFixed(2) + "x" : "—", s.vol_ratio >= 1.5 ? "text-indigo-600 font-semibold" : "text-gray-700"],
                 ["% Máx 52s", s.pct_from_high != null ? s.pct_from_high?.toFixed(2) + "%" : "—", s.pct_from_high >= 0 ? "text-green-600" : "text-red-600"],
-                ["% Mín 52s", s.pct_from_low  != null ? "+" + s.pct_from_low?.toFixed(2) + "%" : "—", "text-gray-700"],
+                ["% Mín 52s", s.pct_from_low  != null ? "+" + s.pct_from_low?.toFixed(2) + "%" : "—", "text-green-700"],
                 ["MACD",      s.macd_hist != null ? (s.macd_hist > 0 ? "▲" : "▼") + " " + Math.abs(s.macd_hist)?.toFixed(3) : "—", s.macd_hist > 0 ? "text-green-600" : "text-red-600"],
+                ["Bollinger %B", s.pct_b != null ? (s.pct_b * 100).toFixed(0) + "%" : "—", s.pct_b < 0.2 ? "text-blue-600" : s.pct_b > 0.8 ? "text-red-600" : "text-gray-700"],
+                ["Momentum",  s.mom != null ? (s.mom > 0 ? "+" : "") + s.mom : "—", s.mom > 0 ? "text-green-600" : s.mom < 0 ? "text-red-600" : "text-gray-400"],
+                ["POC",       s.poc != null ? "$" + s.poc?.toFixed(2) : "—", "text-gray-700"],
               ].map(([label, val, cls]) => (
                 <div key={label} className="bg-gray-50 rounded-lg p-2 text-center">
                   <div className="text-[10px] text-gray-400 mb-0.5">{label}</div>
