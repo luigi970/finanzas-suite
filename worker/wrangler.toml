@@ -1,0 +1,13 @@
+name = "maximos-worker"
+main = "src/entry.py"
+compatibility_date = "2024-01-01"
+compatibility_flags = ["python_workers"]
+account_id = "b8a601d407a3f7f43d18f363a07ece91"
+
+[[d1_databases]]
+binding = "maximos_db"
+database_name = "maximos-db"
+database_id = "b2ff197f-e7e2-47f1-a4a6-5d5ee23e7aa0"
+
+[vars]
+ENVIRONMENT = "production"

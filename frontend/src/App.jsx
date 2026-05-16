@@ -1,5 +1,7 @@
 import { useState, useEffect, useCallback } from "react";
 
+const API_BASE = import.meta.env.VITE_API_URL ?? "";
+
 function generateRecommendation(s) {
   const parts = [];
   const { signal, zone, pulse_signal: pulse, pulse_state, adx, mom,
@@ -604,7 +606,7 @@ export default function App() {
 
   const fetchStocks = useCallback(async () => {
     try {
-      const res = await fetch(`/api/stocks?signal=${signalFilter}`);
+      const res = await fetch(`${API_BASE}/api/stocks?signal=${signalFilter}`);
       const data = await res.json();
       setStocks(data.stocks ?? []);
       setStatus(data.status);
@@ -614,7 +616,7 @@ export default function App() {
 
   const checkStatus = useCallback(async () => {
     try {
-      const res = await fetch("/api/status");
+      const res = await fetch(`${API_BASE}/api/status`);
       const data = await res.json();
       setStatus(data.status);
       setProcessed(data.processed ?? 0);
@@ -643,7 +645,7 @@ export default function App() {
     const custom = selectedList === "custom"
       ? customInput.split(/[\s,]+/).filter(Boolean)
       : [];
-    await fetch("/api/refresh", {
+    await fetch(`${API_BASE}/api/refresh`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ list_id: selectedList, custom, crypto_limit: cryptoLimit }),

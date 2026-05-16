@@ -1,0 +1,71 @@
+name: Run Screener
+
+on:
+  schedule:
+    # Corre a las 2am UTC (11pm ARG / 10pm EST) de lunes a viernes
+    - cron: "0 2 * * 1-5"
+  repository_dispatch:
+    types: [run-screener]
+  workflow_dispatch:
+    inputs:
+      list_id:
+        description: "Lista a analizar"
+        required: false
+        default: "sp500"
+      crypto_limit:
+        description: "Máximo de criptos (si list_id=crypto)"
+        required: false
+        default: "20"
+
+jobs:
+  screener:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    strategy:
+      fail-fast: false
+      matrix:
+        list_id:
+          - sp500
+          - nasdaq100
+          - etfs
+          - adrs_arg
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install -r backend/requirements.txt
+
+      - name: Determine list_id
+        id: list
+        run: |
+          # repository_dispatch overrides matrix
+          if [ "${{ github.event_name }}" = "repository_dispatch" ]; then
+            echo "list_id=${{ github.event.client_payload.list_id || 'sp500' }}" >> $GITHUB_OUTPUT
+            echo "crypto_limit=${{ github.event.client_payload.crypto_limit || '20' }}" >> $GITHUB_OUTPUT
+            echo "skip=${{ matrix.list_id != (github.event.client_payload.list_id || 'sp500') }}" >> $GITHUB_OUTPUT
+          elif [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "list_id=${{ github.event.inputs.list_id || 'sp500' }}" >> $GITHUB_OUTPUT
+            echo "crypto_limit=${{ github.event.inputs.crypto_limit || '20' }}" >> $GITHUB_OUTPUT
+            echo "skip=${{ matrix.list_id != github.event.inputs.list_id }}" >> $GITHUB_OUTPUT
+          else:
+            echo "list_id=${{ matrix.list_id }}" >> $GITHUB_OUTPUT
+            echo "crypto_limit=20" >> $GITHUB_OUTPUT
+            echo "skip=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Run screener
+        if: steps.list.outputs.skip != 'true'
+        env:
+          CF_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+          CF_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
+          CF_D1_DB_ID: ${{ secrets.CF_D1_DB_ID }}
+        run: |
+          cd backend
+          python run_job.py --list ${{ steps.list.outputs.list_id }} --crypto-limit ${{ steps.list.outputs.crypto_limit }}

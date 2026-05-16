@@ -538,3 +538,82 @@ def run_screener(tickers: list[str], on_result=None) -> list[dict]:
             on_result(result, i + 1)
 
     return sorted(results, key=lambda x: x["score"], reverse=True)
+
+
+def compute_all(tickers: list[str], on_result=None, on_error=None) -> list[dict]:
+    """Alias for run_screener with separate on_error callback, used by run_job.py."""
+    results = []
+
+    def _on_result(row, idx):
+        results.append(row)
+        if on_result:
+            on_result(row)
+
+    data = yf.download(
+        " ".join(tickers), period="1y", progress=False, auto_adjust=True
+    )
+
+    if isinstance(data.columns, pd.MultiIndex):
+        close_df  = data["Close"]
+        high_df   = data["High"]
+        low_df    = data["Low"]
+        volume_df = data["Volume"]
+    else:
+        close_df  = data[["Close"]].rename(columns={"Close": tickers[0]})
+        high_df   = data[["High"]].rename(columns={"High": tickers[0]})
+        low_df    = data[["Low"]].rename(columns={"Low": tickers[0]})
+        volume_df = data[["Volume"]].rename(columns={"Volume": tickers[0]})
+
+    for i, ticker in enumerate(tickers):
+        try:
+            if ticker not in close_df.columns:
+                raise KeyError(ticker)
+            close  = close_df[ticker].dropna()
+            high   = high_df[ticker].dropna()
+            low    = low_df[ticker].dropna()
+            volume = volume_df[ticker].dropna()
+            if len(close) < 30:
+                raise ValueError("insufficient data")
+
+            price    = float(close.iloc[-1])
+            high_52w = float(high.max())
+            low_52w  = float(low.min())
+            ma50  = float(close.rolling(50).mean().iloc[-1])  if len(close) >= 50  else None
+            ma200 = float(close.rolling(200).mean().iloc[-1]) if len(close) >= 200 else None
+            rsi                            = compute_rsi(close)
+            macd_line, macd_sig, macd_hist = compute_macd(close)
+            bb_upper, bb_lower, pct_b      = compute_bollinger(close)
+            vol_avg   = float(volume.rolling(20).mean().iloc[-1]) if len(volume) >= 20 else None
+            vol_today = float(volume.iloc[-1])
+            vol_ratio = round(vol_today / vol_avg, 2) if vol_avg and vol_avg > 0 else None
+            pct_from_high = round((price - high_52w) / high_52w * 100, 2)
+            pct_from_low  = round((price - low_52w)  / low_52w  * 100, 2)
+            pct_vs_ma200  = round((price - ma200) / ma200 * 100, 2) if ma200 else None
+            pct_vs_ma50   = round((price - ma50)  / ma50  * 100, 2) if ma50  else None
+            prime  = helper_prime_score(close, high, low, volume)
+            pulse  = helper_pulse_signals(close, high, low)
+            signal = prime_to_signal(prime["direction"], prime["long_score"], prime["short_score"])
+            row = {
+                "ticker": ticker, "price": round(price, 2),
+                "score": prime["best_score"], "long_score": prime["long_score"],
+                "short_score": prime["short_score"], "direction": prime["direction"],
+                "zone": prime["zone"], "adx": prime["adx"], "mom": prime["mom"],
+                "poc": prime["poc"], "sl": prime["sl"], "tp1": prime["tp1"], "tp2": prime["tp2"],
+                "pulse_signal": pulse["pulse_signal"], "pulse_state": pulse["pulse_state"],
+                "signal": signal,
+                "high_52w": round(high_52w, 2), "low_52w": round(low_52w, 2),
+                "pct_from_high": pct_from_high, "pct_from_low": pct_from_low,
+                "ma50": round(ma50, 2) if ma50 else None,
+                "ma200": round(ma200, 2) if ma200 else None,
+                "pct_vs_ma50": pct_vs_ma50, "pct_vs_ma200": pct_vs_ma200,
+                "rsi": rsi, "macd_hist": macd_hist, "vol_ratio": vol_ratio,
+                "bb_upper": bb_upper, "bb_lower": bb_lower, "pct_b": pct_b,
+            }
+            results.append(row)
+            if on_result:
+                on_result(row)
+        except Exception as e:
+            if on_error:
+                on_error(ticker, e)
+
+    return sorted(results, key=lambda x: x["score"], reverse=True)
