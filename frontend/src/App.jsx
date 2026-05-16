@@ -137,8 +137,8 @@ function generateRecommendation(s) {
 }
 
 function toTvSymbol(ticker) {
-  // yfinance crypto format: BTC-USD → BTCUSD
-  if (ticker.endsWith("-USD")) return ticker.slice(0, -4) + "USD";
+  // yfinance crypto format: BTC-USD → BTCUSDT
+  if (ticker.endsWith("-USD")) return ticker.slice(0, -4) + "USDT";
   return ticker;
 }
 
