@@ -606,29 +606,28 @@ export default function App() {
 
   const fetchStocks = useCallback(async () => {
     try {
-      const res = await fetch(`${API_BASE}/api/stocks?signal=${signalFilter}`);
+      const res = await fetch(`${API_BASE}/api/stocks?signal=${signalFilter}&list_id=${activeListId}`);
       const data = await res.json();
       setStocks(data.stocks ?? []);
-      setStatus(data.status);
-      setLastUpdated(data.last_updated);
+      if (data.status) setStatus(data.status);
     } catch { }
-  }, [signalFilter]);
+  }, [signalFilter, activeListId]);
 
   const checkStatus = useCallback(async () => {
     try {
-      const res = await fetch(`${API_BASE}/api/status`);
+      const res = await fetch(`${API_BASE}/api/status?list_id=${activeListId}`);
       const data = await res.json();
       setStatus(data.status);
       setProcessed(data.processed ?? 0);
       setTotalTickers(data.total_tickers ?? 0);
       if (data.status === "ready") fetchStocks();
     } catch { }
-  }, [fetchStocks]);
+  }, [fetchStocks, activeListId]);
 
   useEffect(() => { checkStatus(); }, [checkStatus]);
 
   useEffect(() => {
-    if (status !== "loading" && status !== "downloading") return;
+    if (status !== "loading") return;
     const interval = setInterval(() => {
       checkStatus();
       if (status === "loading") fetchStocks();
@@ -652,7 +651,7 @@ export default function App() {
     });
     setActiveListId(selectedList);
     setStocks([]);
-    setStatus("downloading");
+    setStatus("loading");
     setLoading(false);
   };
 

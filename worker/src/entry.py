@@ -79,8 +79,11 @@ async def on_fetch(request, env):
         run = await get_latest_run(db, list_id)
         if run is None:
             return _j({"status": "idle", "list_id": list_id, "processed": 0, "total_tickers": 0})
+        # Map D1 status → frontend status
+        status_map = {"done": "ready", "running": "loading"}
+        api_status = status_map.get(run.get("status", "idle"), "idle")
         return _j({
-            "status": run.get("status", "idle"),
+            "status": api_status,
             "list_id": list_id,
             "processed": run.get("processed", 0),
             "total_tickers": run.get("total", 0),
