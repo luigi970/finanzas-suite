@@ -2,12 +2,14 @@ import json
 
 from workers import fetch
 
+from providers.prompt import build_prompt
+
 GROQ_URL = "https://api.groq.com/openai/v1/chat/completions"
 MODEL = "llama-3.3-70b-versatile"
 
 
 async def analyze(ticker_data: dict, api_key: str) -> str:
-    prompt = _build_prompt(ticker_data)
+    prompt = build_prompt(ticker_data)
 
     payload = {
         "model": MODEL,
@@ -35,7 +37,7 @@ async def analyze(ticker_data: dict, api_key: str) -> str:
     return data["choices"][0]["message"]["content"].strip()
 
 
-def _build_prompt(s: dict) -> str:
+def _build_prompt(s: dict) -> str:  # kept for backwards compat
     ticker = s.get("ticker", "?")
     price = s.get("price")
     signal = s.get("signal", "neutral")

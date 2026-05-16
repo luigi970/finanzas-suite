@@ -2,6 +2,7 @@ import json
 
 from workers import Response, fetch
 
+from providers.cf_ai import analyze as cf_analyze
 from providers.groq import analyze as groq_analyze
 from providers.gemini import analyze as gemini_analyze
 from storage.db import get_latest_run, get_results, get_lists_meta
@@ -125,26 +126,24 @@ async def on_fetch(request, env):
         if not ticker_data.get("ticker"):
             return _j({"error": "falta 'ticker'"}, status=400)
 
+        cf_ai = getattr(env, "AI", None)
         groq_key = getattr(env, "GROQ_API_KEY", None)
         gemini_key = getattr(env, "GOOGLE_API_KEY", None)
 
-        if not groq_key and not gemini_key:
-            return _j({"error": "No hay API key de IA configurada"}, status=500)
+        if not cf_ai and not groq_key and not gemini_key:
+            return _j({"error": "No hay proveedor de IA configurado"}, status=500)
 
-        try:
-            if groq_key:
-                recommendation = await groq_analyze(ticker_data, groq_key)
-            else:
-                recommendation = await gemini_analyze(ticker_data, gemini_key)
-            return _j({"ticker": ticker_data["ticker"], "recommendation": recommendation})
-        except Exception as groq_err:
-            if gemini_key:
-                try:
-                    recommendation = await gemini_analyze(ticker_data, gemini_key)
-                    return _j({"ticker": ticker_data["ticker"], "recommendation": recommendation})
-                except Exception as gemini_err:
-                    return _j({"error": f"Groq: {groq_err} | Gemini: {gemini_err}"}, status=500)
-            return _j({"error": str(groq_err)}, status=500)
+        last_err = None
+        for provider, arg in [(cf_analyze, cf_ai), (groq_analyze, groq_key), (gemini_analyze, gemini_key)]:
+            if not arg:
+                continue
+            try:
+                recommendation = await provider(ticker_data, arg)
+                return _j({"ticker": ticker_data["ticker"], "recommendation": recommendation})
+            except Exception as e:
+                last_err = str(e)
+
+        return _j({"error": last_err or "Error desconocido"}, status=500)
 
     # POST /api/refresh — triggers GitHub Actions workflow via repository_dispatch
     if method == "POST" and path == "/api/refresh":

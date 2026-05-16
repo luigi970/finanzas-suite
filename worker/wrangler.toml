@@ -10,5 +10,8 @@ binding = "maximos_db"
 database_name = "maximos-db"
 database_id = "b2ff197f-e7e2-47f1-a4a6-5d5ee23e7aa0"
 
+[ai]
+binding = "AI"
+
 [vars]
 ENVIRONMENT = "production"
