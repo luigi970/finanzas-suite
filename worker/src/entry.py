@@ -68,25 +68,6 @@ async def on_fetch(request, env):
     if method == "GET" and path == "/health":
         return _j({"status": "ok"})
 
-    if method == "GET" and path == "/debug/d1":
-        if not hasattr(env, "maximos_db"):
-            return _j({"error": "no db"}, status=500)
-        try:
-            cursor = await env.maximos_db.prepare("SELECT 1 as n").all()
-            results = cursor.results
-            row = None
-            for r in results:
-                row = r
-                break
-            return _j({
-                "cursor_type": str(type(cursor)),
-                "results_type": str(type(results)),
-                "row_type": str(type(row)),
-                "row_dir": [x for x in dir(row) if not x.startswith("_")] if row else [],
-                "has_to_py": hasattr(results, "to_py"),
-            })
-        except Exception as e:
-            return _j({"error": str(e), "type": type(e).__name__})
 
     if not hasattr(env, "maximos_db"):
         return _j({"error": "D1 no bindeada"}, status=500)
