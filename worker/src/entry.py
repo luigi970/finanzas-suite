@@ -1,6 +1,6 @@
 import json
 
-from workers import Response
+from workers import Response, fetch
 
 from storage.db import get_latest_run, get_results, get_lists_meta
 
@@ -128,21 +128,25 @@ async def on_fetch(request, env):
             "client_payload": {"list_id": list_id, "crypto_limit": crypto_limit},
         })
 
-        resp = await fetch(
-            f"https://api.github.com/repos/{gh_repo}/dispatches",
-            method="POST",
-            headers={
-                "Authorization": f"Bearer {gh_token}",
-                "Accept": "application/vnd.github+json",
-                "Content-Type": "application/json",
-                "X-GitHub-Api-Version": "2022-11-28",
-            },
-            body=payload,
-        )
-
-        if resp.status == 204:
-            return _j({"ok": True, "list_id": list_id, "message": "Job disparado"})
-        err_text = await resp.text()
-        return _j({"error": f"GitHub API error {resp.status}: {err_text}"}, status=500)
+        try:
+            resp = await fetch(
+                f"https://api.github.com/repos/{gh_repo}/dispatches",
+                {
+                    "method": "POST",
+                    "headers": {
+                        "Authorization": f"Bearer {gh_token}",
+                        "Accept": "application/vnd.github+json",
+                        "Content-Type": "application/json",
+                        "X-GitHub-Api-Version": "2022-11-28",
+                    },
+                    "body": payload,
+                },
+            )
+            if resp.status == 204:
+                return _j({"ok": True, "list_id": list_id, "message": "Job disparado"})
+            err_text = await resp.text()
+            return _j({"error": f"GitHub API {resp.status}: {err_text}"}, status=500)
+        except Exception as e:
+            return _j({"error": f"fetch error: {type(e).__name__}: {e}"}, status=500)
 
     return _j({"error": "not found"}, status=404)
