@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 
 const API_BASE = import.meta.env.VITE_API_URL ?? "";
 
@@ -136,6 +136,46 @@ function generateRecommendation(s) {
   return parts.length ? parts : ["Datos insuficientes para generar recomendación."];
 }
 
+function toTvSymbol(ticker) {
+  // yfinance crypto format: BTC-USD → BTCUSD
+  if (ticker.endsWith("-USD")) return ticker.slice(0, -4) + "USD";
+  return ticker;
+}
+
+function TradingViewChart({ ticker }) {
+  const containerRef = useRef(null);
+  const symbol = toTvSymbol(ticker);
+
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el) return;
+    el.innerHTML = "";
+
+    const script = document.createElement("script");
+    script.src = "https://s3.tradingview.com/external-embedding/embed-widget-mini-symbol-overview.js";
+    script.type = "text/javascript";
+    script.async = true;
+    script.innerHTML = JSON.stringify({
+      symbol,
+      width: "100%",
+      height: 200,
+      locale: "es",
+      dateRange: "3M",
+      colorTheme: "light",
+      trendLineColor: "rgba(99,102,241,1)",
+      underLineColor: "rgba(99,102,241,0.1)",
+      isTransparent: true,
+      autosize: true,
+      largeChartUrl: `https://www.tradingview.com/chart/?symbol=${symbol}`,
+    });
+    el.appendChild(script);
+
+    return () => { el.innerHTML = ""; };
+  }, [symbol]);
+
+  return <div ref={containerRef} className="w-full" style={{ height: 200 }} />;
+}
+
 function TickerModal({ stock: s, onClose }) {
   const [aiRec, setAiRec] = useState(null);
   const [aiLoading, setAiLoading] = useState(false);
@@ -195,7 +235,7 @@ function TickerModal({ stock: s, onClose }) {
   return (
     <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4" onClick={onClose}>
       <div
-        className="bg-white rounded-2xl shadow-2xl w-full max-w-md max-h-[90vh] overflow-y-auto"
+        className="bg-white rounded-2xl shadow-2xl w-full max-w-lg max-h-[90vh] overflow-y-auto"
         onClick={e => e.stopPropagation()}
       >
         {/* Header */}
@@ -219,6 +259,11 @@ function TickerModal({ stock: s, onClose }) {
             </div>
             <button onClick={onClose} className="text-gray-400 hover:text-gray-600 text-xl leading-none mt-1">✕</button>
           </div>
+        </div>
+
+        {/* Gráfico TradingView */}
+        <div className="px-2 pt-2">
+          <TradingViewChart ticker={s.ticker} />
         </div>
 
         <div className="p-5 space-y-5">
