@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from "react";
+import { createPortal } from "react-dom";
 
 const API_BASE = import.meta.env.VITE_API_URL ?? "";
 
@@ -145,6 +146,8 @@ function displayTicker(ticker) {
   return ticker.endsWith("-USD") ? ticker.slice(0, -4) : ticker;
 }
 
+const ANIM_DELAY = 280; // ms — wait for slideUp animation to finish before injecting iframes
+
 function TradingViewChart({ ticker }) {
   const containerRef = useRef(null);
   const symbol = toTvSymbol(ticker);
@@ -153,39 +156,379 @@ function TradingViewChart({ ticker }) {
     const el = containerRef.current;
     if (!el) return;
     el.innerHTML = "";
-
-    const script = document.createElement("script");
-    script.src = "https://s3.tradingview.com/external-embedding/embed-widget-mini-symbol-overview.js";
-    script.type = "text/javascript";
-    script.async = true;
-    script.innerHTML = JSON.stringify({
-      symbol,
-      width: "100%",
-      height: 200,
-      locale: "es",
-      dateRange: "3M",
-      colorTheme: "light",
-      trendLineColor: "rgba(99,102,241,1)",
-      underLineColor: "rgba(99,102,241,0.1)",
-      isTransparent: true,
-      autosize: true,
-    });
-    el.appendChild(script);
-
-    return () => { el.innerHTML = ""; };
+    const tid = setTimeout(() => {
+      const wrap = document.createElement("div");
+      wrap.className = "tradingview-widget-container";
+      wrap.style.cssText = "width:100%;height:100%";
+      const inner = document.createElement("div");
+      inner.className = "tradingview-widget-container__widget";
+      inner.style.cssText = "width:100%;height:100%";
+      const script = document.createElement("script");
+      script.src = "https://s3.tradingview.com/external-embedding/embed-widget-mini-symbol-overview.js";
+      script.async = true;
+      script.innerHTML = JSON.stringify({
+        symbol, width: "100%", height: "100%", locale: "es",
+        dateRange: "3M", colorTheme: "light",
+        trendLineColor: "rgba(99,102,241,1)",
+        underLineColor: "rgba(99,102,241,0.1)",
+        isTransparent: true, autosize: true,
+      });
+      wrap.appendChild(inner);
+      wrap.appendChild(script);
+      el.appendChild(wrap);
+    }, ANIM_DELAY);
+    return () => { clearTimeout(tid); el.innerHTML = ""; };
   }, [symbol]);
 
   return <div ref={containerRef} className="w-full" style={{ height: 200 }} />;
 }
 
-function TickerModal({ stock: s, onClose }) {
+function TradingViewEmbed({ ticker, widgetSrc, config }) {
+  const containerRef = useRef(null);
+  const symbol = toTvSymbol(ticker);
+
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el) return;
+    el.innerHTML = "";
+    const tid = setTimeout(() => {
+      const wrap = document.createElement("div");
+      wrap.className = "tradingview-widget-container";
+      wrap.style.cssText = "width:100%;height:100%";
+      const inner = document.createElement("div");
+      inner.className = "tradingview-widget-container__widget";
+      inner.style.cssText = "width:100%;height:100%";
+      const script = document.createElement("script");
+      script.src = widgetSrc;
+      script.async = true;
+      script.innerHTML = JSON.stringify({ symbol, locale: "es", colorTheme: "light", width: "100%", height: "100%", ...config });
+      wrap.appendChild(inner);
+      wrap.appendChild(script);
+      el.appendChild(wrap);
+    }, ANIM_DELAY);
+    return () => { clearTimeout(tid); el.innerHTML = ""; };
+  }, [symbol, widgetSrc]);
+
+  return <div ref={containerRef} className="w-full h-full" />;
+}
+
+const TV_BASE = "https://s3.tradingview.com/external-embedding";
+
+function Tooltip({ text, children }) {
+  const [pos, setPos] = useState(null);
+  const ref = useRef(null);
+
+  const show = () => {
+    if (!ref.current) return;
+    const r = ref.current.getBoundingClientRect();
+    const x = Math.max(120, Math.min(window.innerWidth - 120, r.left + r.width / 2));
+    setPos({ x, y: r.top + window.scrollY });
+  };
+
+  return (
+    <>
+      <span ref={ref} onMouseEnter={show} onMouseLeave={() => setPos(null)} className="inline-block">
+        {children}
+      </span>
+      {pos && createPortal(
+        <div className="absolute z-[9999] pointer-events-none"
+          style={{ left: pos.x, top: pos.y - 10, transform: "translate(-50%, -100%)" }}>
+          <div className="bg-gray-900 text-white text-[11px] rounded-xl px-3 py-2.5 leading-relaxed shadow-2xl max-w-[240px] whitespace-normal text-left">
+            {text}
+          </div>
+          <div className="absolute top-full left-1/2 -translate-x-1/2 border-[5px] border-transparent border-t-gray-900" />
+        </div>,
+        document.body
+      )}
+    </>
+  );
+}
+
+function BottomSheet({ onClose, children, className = "" }) {
+  return (
+    <div className="fixed inset-0 bg-black/60 z-50 flex items-end" onClick={onClose}>
+      <div
+        className={`w-full bg-slate-50 rounded-t-2xl shadow-2xl flex flex-col ${className}`}
+        style={{ animation: "slideUp 0.25s ease-out both" }}
+        onClick={e => e.stopPropagation()}
+      >
+        {children}
+      </div>
+    </div>
+  );
+}
+
+
+function NewsFeed({ ticker }) {
+  const [news, setNews] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const symbol = ticker.endsWith("-USD") ? ticker.replace("-USD", "-USD") : ticker;
+
+  useEffect(() => {
+    setLoading(true);
+    setNews([]);
+    fetch(`${API_BASE}/api/news?ticker=${symbol}`)
+      .then(r => r.json())
+      .then(d => { setNews(d.news || []); setLoading(false); })
+      .catch(() => setLoading(false));
+  }, [symbol]);
+
+  if (loading) return <div className="flex items-center justify-center h-full text-gray-400 text-sm">Cargando noticias...</div>;
+  if (!news.length) return <div className="flex items-center justify-center h-full text-gray-400 text-sm">Sin noticias disponibles.</div>;
+
+  return (
+    <div className="h-full overflow-y-auto space-y-3 pr-1">
+      {news.map((n, i) => (
+        <a key={i} href={n.link} target="_blank" rel="noreferrer"
+          className="flex gap-3 p-3 rounded-xl border border-gray-100 hover:border-amber-200 hover:bg-amber-50 transition group">
+          {n.thumbnail && (
+            <img src={n.thumbnail} alt="" className="w-20 h-16 object-cover rounded-lg shrink-0" onError={e => e.target.style.display="none"} />
+          )}
+          <div className="flex-1 min-w-0">
+            <p className="text-sm font-medium text-gray-900 group-hover:text-amber-700 line-clamp-2 leading-snug">{n.title}</p>
+            {n.summary && <p className="text-xs text-gray-500 mt-1 line-clamp-2">{n.summary}</p>}
+            <div className="flex items-center gap-2 mt-1.5">
+              {n.publisher && <span className="text-xs text-gray-400 font-medium">{n.publisher}</span>}
+              {n.time && <span className="text-xs text-gray-300">{new Date(n.time).toLocaleDateString("es-AR", { day:"2-digit", month:"short", year:"numeric" })}</span>}
+            </div>
+          </div>
+        </a>
+      ))}
+    </div>
+  );
+}
+
+function HistoryTab({ ticker, listId }) {
+  const [history, setHistory] = useState([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    setLoading(true);
+    fetch(`${API_BASE}/api/history?list_id=${listId}&ticker=${ticker}`)
+      .then(r => r.json())
+      .then(d => { setHistory(d.history || []); setLoading(false); })
+      .catch(() => setLoading(false));
+  }, [ticker, listId]);
+
+  const SIG = {
+    compra_fuerte: { label: "C.Fuerte", cls: "bg-emerald-100 text-emerald-800" },
+    compra:        { label: "Compra",   cls: "bg-green-100 text-green-700" },
+    neutral:       { label: "Neutral",  cls: "bg-gray-100 text-gray-500" },
+    venta:         { label: "Venta",    cls: "bg-orange-100 text-orange-700" },
+    venta_fuerte:  { label: "V.Fuerte", cls: "bg-red-100 text-red-700" },
+  };
+
+  const pctCell = (v) => {
+    if (v == null) return <span className="text-gray-300">—</span>;
+    const pos = v >= 0;
+    return (
+      <span className={`font-semibold tabular-nums ${pos ? "text-green-600" : "text-red-600"}`}>
+        {pos ? "+" : ""}{v.toFixed(1)}%
+      </span>
+    );
+  };
+
+  if (loading) return <div className="flex items-center justify-center h-full text-gray-400 text-sm">Cargando historial…</div>;
+  if (!history.length) return (
+    <div className="flex flex-col items-center justify-center h-full text-center gap-2 px-6">
+      <div className="text-2xl">📊</div>
+      <div className="text-gray-500 text-sm font-medium">Sin historial todavía</div>
+      <div className="text-gray-400 text-xs">Los datos se acumulan con cada run del screener. Volvé en unos días para ver el rendimiento de las señales.</div>
+    </div>
+  );
+
+  // Stats summary per signal
+  const stats = {};
+  for (const h of history) {
+    if (!stats[h.signal]) stats[h.signal] = { n: 0, s5: [], s10: [], s20: [] };
+    stats[h.signal].n++;
+    if (h.pct_5d  != null) stats[h.signal].s5.push(h.pct_5d);
+    if (h.pct_10d != null) stats[h.signal].s10.push(h.pct_10d);
+    if (h.pct_20d != null) stats[h.signal].s20.push(h.pct_20d);
+  }
+  const avg = (arr) => arr.length ? (arr.reduce((a, b) => a + b, 0) / arr.length).toFixed(1) : null;
+
+  return (
+    <div className="h-full overflow-y-auto flex flex-col gap-4">
+      {/* Summary */}
+      {Object.keys(stats).length > 0 && (
+        <div className="shrink-0">
+          <div className="text-[10px] font-semibold text-gray-400 uppercase tracking-wider px-1 mb-1.5">Rendimiento promedio por señal</div>
+          <div className="space-y-1">
+            {Object.entries(stats).map(([sig, s]) => {
+              const cfg = SIG[sig] ?? { label: sig, cls: "bg-gray-100 text-gray-500" };
+              return (
+                <div key={sig} className="flex items-center gap-2 text-xs">
+                  <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold w-16 text-center shrink-0 ${cfg.cls}`}>{cfg.label}</span>
+                  <span className="text-gray-400 w-8 shrink-0">{s.n}x</span>
+                  <div className="flex gap-3">
+                    {[["5d", avg(s.s5)], ["10d", avg(s.s10)], ["20d", avg(s.s20)]].map(([label, v]) => (
+                      <div key={label} className="flex items-center gap-0.5">
+                        <span className="text-gray-300">{label}:</span>
+                        {v != null
+                          ? <span className={`font-semibold ${Number(v) >= 0 ? "text-green-600" : "text-red-600"}`}>{Number(v) >= 0 ? "+" : ""}{v}%</span>
+                          : <span className="text-gray-300">—</span>}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {/* History table */}
+      <div className="flex-1 min-h-0">
+        <div className="text-[10px] font-semibold text-gray-400 uppercase tracking-wider px-1 mb-1.5">Detalle</div>
+        <table className="w-full text-xs">
+          <thead className="bg-gray-50 sticky top-0">
+            <tr>
+              <th className="px-2 py-2 text-left text-gray-500 font-semibold">Fecha</th>
+              <th className="px-2 py-2 text-left text-gray-500 font-semibold">Señal</th>
+              <th className="px-2 py-2 text-right text-gray-500 font-semibold">Precio</th>
+              <th className="px-2 py-2 text-right text-gray-500 font-semibold">+5d</th>
+              <th className="px-2 py-2 text-right text-gray-500 font-semibold">+10d</th>
+              <th className="px-2 py-2 text-right text-gray-500 font-semibold">+20d</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-gray-100">
+            {history.map((h, i) => {
+              const cfg = SIG[h.signal] ?? { label: h.signal, cls: "bg-gray-100 text-gray-500" };
+              return (
+                <tr key={i} className="hover:bg-gray-50">
+                  <td className="px-2 py-2 text-gray-500 tabular-nums">{h.recorded_at}</td>
+                  <td className="px-2 py-2">
+                    <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold ${cfg.cls}`}>{cfg.label}</span>
+                  </td>
+                  <td className="px-2 py-2 text-right tabular-nums text-gray-700">${h.price.toFixed(2)}</td>
+                  <td className="px-2 py-2 text-right">{pctCell(h.pct_5d)}</td>
+                  <td className="px-2 py-2 text-right">{pctCell(h.pct_10d)}</td>
+                  <td className="px-2 py-2 text-right">{pctCell(h.pct_20d)}</td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
+function AnalysisModal({ ticker, listId, onClose }) {
+  const [tab, setTab] = useState("tecnico");
+  const tvSymbol = toTvSymbol(ticker);
+  const tabs = [
+    { id: "tecnico",   label: "Técnico" },
+    { id: "empresa",   label: "Empresa" },
+    { id: "noticias",  label: "Noticias" },
+    { id: "historial", label: "Historial" },
+  ];
+
+  return (
+    <BottomSheet onClose={onClose} className="h-[88vh]">
+      <div className="flex items-center justify-between px-4 py-3 border-b border-gray-200 shrink-0">
+        <div className="flex items-center gap-3 min-w-0">
+          <span className="font-semibold text-gray-800 shrink-0">{ticker.endsWith("-USD") ? ticker.replace("-USD","") : ticker}</span>
+          <div className="flex gap-1">
+            {tabs.map(t => (
+              <button key={t.id} onClick={() => setTab(t.id)}
+                className={`text-xs px-3 py-1 rounded-full font-medium transition ${tab === t.id ? "bg-amber-500 text-white" : "text-gray-500 hover:bg-gray-100"}`}>
+                {t.label}
+              </button>
+            ))}
+          </div>
+        </div>
+        <div className="flex items-center gap-3 shrink-0 ml-2">
+          <a href={`https://www.tradingview.com/symbols/${tvSymbol}/`} target="_blank" rel="noreferrer" className="text-xs text-amber-500 hover:underline hidden sm:inline">TradingView ↗</a>
+          <button onClick={onClose} className="text-gray-400 hover:text-gray-600 text-xl leading-none">✕</button>
+        </div>
+      </div>
+      <div className="flex-1 overflow-hidden p-3">
+        {tab === "tecnico" && (
+          <TradingViewEmbed ticker={ticker}
+            widgetSrc={`${TV_BASE}/embed-widget-technical-analysis.js`}
+            config={{ interval: "1D", showIntervalTabs: true }} />
+        )}
+        {tab === "empresa" && (
+          <TradingViewEmbed ticker={ticker}
+            widgetSrc={`${TV_BASE}/embed-widget-financials.js`}
+            config={{ displayMode: "compact" }} />
+        )}
+        {tab === "noticias" && (
+          <NewsFeed ticker={ticker} />
+        )}
+        {tab === "historial" && (
+          <HistoryTab ticker={ticker} listId={listId} />
+        )}
+      </div>
+    </BottomSheet>
+  );
+}
+
+function TradingViewFullChart({ ticker }) {
+  const containerRef = useRef(null);
+  const symbol = toTvSymbol(ticker);
+
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el) return;
+    el.innerHTML = "";
+    const script = document.createElement("script");
+    script.src = "https://s3.tradingview.com/tv.js";
+    script.async = true;
+    script.onload = () => {
+      if (window.TradingView) {
+        new window.TradingView.widget({
+          container_id: el.id,
+          symbol,
+          interval: "D",
+          timezone: "America/Argentina/Buenos_Aires",
+          theme: "light",
+          style: "1",
+          locale: "es",
+          width: "100%",
+          height: "100%",
+          hide_side_toolbar: false,
+          allow_symbol_change: true,
+          save_image: false,
+        });
+      }
+    };
+    el.appendChild(script);
+    return () => { el.innerHTML = ""; };
+  }, [symbol]);
+
+  return <div id={`tv-full-${ticker}`} ref={containerRef} className="w-full h-full" />;
+}
+
+function ChartModal({ ticker, onClose }) {
+  return (
+    <BottomSheet onClose={onClose} className="h-[85vh]">
+      <div className="flex items-center justify-between px-4 py-3 border-b border-gray-200 shrink-0">
+        <span className="font-semibold text-gray-800">{ticker.endsWith("-USD") ? ticker.replace("-USD", "") : ticker} — Gráfico</span>
+        <button onClick={onClose} className="text-gray-400 hover:text-gray-600 text-xl leading-none">✕</button>
+      </div>
+      <div className="flex-1 overflow-hidden">
+        <TradingViewFullChart ticker={ticker} />
+      </div>
+    </BottomSheet>
+  );
+}
+
+function TickerModal({ stock: s, listId, onClose }) {
   const [aiRec, setAiRec] = useState(null);
   const [aiLoading, setAiLoading] = useState(false);
+  const [info, setInfo] = useState(null);
+  const [showChart, setShowChart] = useState(false);
+  const [showAnalysis, setShowAnalysis] = useState(false);
+  const [pivotType, setPivotType] = useState("classic");
 
   useEffect(() => {
     if (!s) return;
     setAiRec(null);
     setAiLoading(true);
+    setInfo(null);
     fetch(`${API_BASE}/api/analyze`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -195,6 +538,11 @@ function TickerModal({ stock: s, onClose }) {
       .then(d => setAiRec(d.recommendation ?? d.error ?? "Sin respuesta"))
       .catch(() => setAiRec("Error al conectar con la IA"))
       .finally(() => setAiLoading(false));
+
+    fetch(`${API_BASE}/api/info?ticker=${s.ticker}`)
+      .then(r => r.json())
+      .then(d => { if (Object.keys(d.info || {}).length) setInfo(d.info); })
+      .catch(() => {});
   }, [s]);
 
   if (!s) return null;
@@ -235,40 +583,71 @@ function TickerModal({ stock: s, onClose }) {
     : null;
 
   return (
-    <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4" onClick={onClose}>
-      <div
-        className="bg-white rounded-2xl shadow-2xl w-full max-w-lg max-h-[90vh] overflow-y-auto"
-        onClick={e => e.stopPropagation()}
-      >
+    <>
+      <BottomSheet onClose={onClose} className="max-h-[92vh]">
+        <div className="overflow-y-auto flex flex-col">
         {/* Header */}
-        <div className="p-5 border-b border-gray-100">
+        <div className="p-4 sm:p-5 bg-slate-900 rounded-t-2xl shrink-0" style={{ borderTop: "3px solid #f59e0b" }}>
           <div className="flex items-start justify-between">
             <div>
               <div className="flex items-center gap-2 mb-1">
-                <h2 className="text-2xl font-bold text-gray-900">{displayTicker(s.ticker)}</h2>
+                <h2 className="text-xl sm:text-2xl font-bold text-white">{displayTicker(s.ticker)}</h2>
                 <span className={`px-2 py-0.5 rounded-full text-xs font-bold text-white ${sigCfg.color}`}>
                   {sigCfg.label}
                 </span>
               </div>
-              <div className="text-xl font-semibold text-gray-700">${s.price?.toFixed(2)}</div>
-              <div className="flex items-center gap-2 mt-1.5">
-                <span className={`text-xs font-bold ${s.direction === "LONG" ? "text-green-600" : s.direction === "SHORT" ? "text-red-600" : "text-gray-400"}`}>
+              <div className="text-lg sm:text-xl font-semibold text-slate-200">${s.price?.toFixed(2)}</div>
+              <div className="flex items-center gap-2 mt-1.5 flex-wrap">
+                <span className={`text-xs font-bold ${s.direction === "LONG" ? "text-green-400" : s.direction === "SHORT" ? "text-red-400" : "text-slate-400"}`}>
                   {s.direction === "LONG" ? "↑ LONG" : s.direction === "SHORT" ? "↓ SHORT" : "● NEUTRAL"}
                 </span>
                 <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold ${zoneCfg.cls}`}>{zoneCfg.label}</span>
-                {s.adx != null && <span className="text-xs text-gray-500">ADX {s.adx}</span>}
+                {s.adx != null && <span className="text-xs text-slate-400">ADX {s.adx}</span>}
+                {s.candle_pattern && <CandlePatternBadge pattern={s.candle_pattern} />}
+                {info?.earnings_date && (() => {
+                  const days = Math.round((new Date(info.earnings_date) - new Date()) / 86400000);
+                  const urgent = days >= 0 && days <= 14;
+                  const passed = days < 0;
+                  return (
+                    <Tooltip text={
+                      passed ? `Earnings: ${info.earnings_date} (ya reportó)` :
+                      urgent ? `⚠️ Earnings en ${days} días (${info.earnings_date}). El precio puede moverse mucho en esa fecha.` :
+                      `Próximos earnings: ${info.earnings_date} (en ${days} días)`
+                    }>
+                      <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold ${urgent ? "bg-orange-100 text-orange-700" : passed ? "bg-gray-100 text-gray-400" : "bg-blue-50 text-blue-700"}`}>
+                        📅 {urgent ? `Earnings ${days}d` : info.earnings_date}
+                      </span>
+                    </Tooltip>
+                  );
+                })()}
               </div>
             </div>
-            <button onClick={onClose} className="text-gray-400 hover:text-gray-600 text-xl leading-none mt-1">✕</button>
+            <button onClick={onClose} className="text-slate-400 hover:text-white text-xl leading-none mt-1">✕</button>
           </div>
         </div>
 
-        {/* Gráfico TradingView */}
-        <div className="px-2 pt-2">
-          <TradingViewChart ticker={s.ticker} />
+        <div className="px-2 pt-2 shrink-0">
+          <div className="relative group">
+            <TradingViewChart ticker={s.ticker} />
+            <div className="absolute inset-0 z-10 cursor-pointer" onClick={() => setShowChart(true)} />
+            <div className="absolute inset-0 z-20 flex items-end justify-end pb-2 pr-2 opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none">
+              <span className="bg-amber-500 text-white text-xs px-2 py-1 rounded-lg shadow">Ver gráfico ↗</span>
+            </div>
+          </div>
+          <div className="flex gap-2 mt-2">
+            <button onClick={() => setShowChart(true)} className="flex-1 text-xs py-1.5 rounded-lg border border-amber-200 text-amber-600 hover:bg-amber-50 transition font-medium">
+              Gráfico completo
+            </button>
+            <button
+              onClick={() => setShowAnalysis(true)}
+              className="flex-1 text-xs py-1.5 rounded-lg border border-gray-200 text-gray-600 hover:bg-gray-50 transition font-medium"
+            >
+              Análisis técnico
+            </button>
+          </div>
         </div>
 
-        <div className="p-5 space-y-5">
+        <div className="p-4 sm:p-5 space-y-4 sm:space-y-5">
 
           {/* Score */}
           <div>
@@ -305,7 +684,7 @@ function TickerModal({ stock: s, onClose }) {
               {[
                 ["RSI",       s.rsi?.toFixed(1),     s.rsi < 30 ? "text-blue-600" : s.rsi > 70 ? "text-red-600" : "text-gray-700"],
                 ["vs MA200",  s.pct_vs_ma200 != null ? (s.pct_vs_ma200 >= 0 ? "+" : "") + s.pct_vs_ma200?.toFixed(2) + "%" : "—", s.pct_vs_ma200 >= 0 ? "text-green-600" : "text-red-600"],
-                ["Vol ×",     s.vol_ratio != null ? s.vol_ratio?.toFixed(2) + "x" : "—", s.vol_ratio >= 1.5 ? "text-indigo-600 font-semibold" : "text-gray-700"],
+                ["Vol ×",     s.vol_ratio != null ? s.vol_ratio?.toFixed(2) + "x" : "—", s.vol_ratio >= 1.5 ? "text-amber-600 font-semibold" : "text-gray-700"],
                 ["% Máx 52s", s.pct_from_high != null ? s.pct_from_high?.toFixed(2) + "%" : "—", s.pct_from_high >= 0 ? "text-green-600" : "text-red-600"],
                 ["% Mín 52s", s.pct_from_low  != null ? "+" + s.pct_from_low?.toFixed(2) + "%" : "—", "text-green-700"],
                 ["MACD",      s.macd_hist != null ? (s.macd_hist > 0 ? "▲" : "▼") + " " + Math.abs(s.macd_hist)?.toFixed(3) : "—", s.macd_hist > 0 ? "text-green-600" : "text-red-600"],
@@ -321,107 +700,279 @@ function TickerModal({ stock: s, onClose }) {
             </div>
           </div>
 
-          {/* Niveles SL / TP */}
-          {(s.sl || s.tp1) && (
-            <div>
-              <div className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">Niveles de Riesgo</div>
-              <div className="space-y-1.5 text-sm">
-                <div className="flex justify-between items-center py-1 border-b border-gray-50">
-                  <span className="text-gray-500">Entrada</span>
-                  <span className="font-semibold tabular-nums">${s.price?.toFixed(2)}</span>
-                </div>
-                {s.sl && (
-                  <div className="flex justify-between items-center py-1 border-b border-gray-50">
-                    <span className="text-red-500 font-medium">Stop Loss</span>
-                    <span className="tabular-nums">
-                      <span className="font-semibold">${s.sl.toFixed(2)}</span>
-                      {slPct && <span className="text-xs text-red-400 ml-1">({slPct}%)</span>}
-                    </span>
-                  </div>
-                )}
-                {s.tp1 && (
-                  <div className="flex justify-between items-center py-1 border-b border-gray-50">
-                    <span className="text-green-500 font-medium">TP1</span>
-                    <span className="tabular-nums">
-                      <span className="font-semibold">${s.tp1.toFixed(2)}</span>
-                      {tp1Pct && <span className="text-xs text-green-400 ml-1">(+{tp1Pct}%)</span>}
-                      {rrRatio && <span className="text-xs text-gray-400 ml-2">R/R 1:{rrRatio}</span>}
-                    </span>
-                  </div>
-                )}
-                {s.tp2 && (
-                  <div className="flex justify-between items-center py-1">
-                    <span className="text-green-600 font-medium">TP2</span>
-                    <span className="tabular-nums">
-                      <span className="font-semibold">${s.tp2.toFixed(2)}</span>
-                      {tp2Pct && <span className="text-xs text-green-400 ml-1">(+{tp2Pct}%)</span>}
-                      {rr2Ratio && <span className="text-xs text-gray-400 ml-2">R/R 1:{rr2Ratio}</span>}
-                    </span>
-                  </div>
-                )}
-              </div>
-            </div>
-          )}
+          {/* Desktop: 2 columnas | Mobile: una sola columna */}
+          <div className="sm:grid sm:grid-cols-2 sm:gap-5 space-y-4 sm:space-y-0">
 
-          {/* Helper Pulse */}
-          <div>
-            <div className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">Helper Pulse</div>
-            <div className="flex items-center gap-2">
-              <span className="text-sm text-gray-700">{s.pulse_state ?? "—"}</span>
-              {s.pulse_signal && (
-                <span className={`px-2 py-0.5 rounded text-xs font-bold ${pulseCfg}`}>
-                  {s.pulse_signal}
-                </span>
+            {/* Columna izquierda: Niveles de Riesgo + Helper Pulse */}
+            <div className="space-y-4">
+
+              {/* Niveles SL / TP */}
+              {(s.sl || s.tp1) && (
+                <div>
+                  <div className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">Niveles de Riesgo</div>
+                  <div className="space-y-1.5 text-sm">
+                    <div className="flex justify-between items-center py-1 border-b border-gray-50">
+                      <span className="text-gray-500">Entrada</span>
+                      <span className="font-semibold tabular-nums">${s.price?.toFixed(2)}</span>
+                    </div>
+                    {s.sl && (
+                      <div className="flex justify-between items-center py-1 border-b border-gray-50">
+                        <span className="text-red-500 font-medium">Stop Loss</span>
+                        <span className="tabular-nums">
+                          <span className="font-semibold">${s.sl.toFixed(2)}</span>
+                          {slPct && <span className="text-xs text-red-400 ml-1">({slPct}%)</span>}
+                        </span>
+                      </div>
+                    )}
+                    {s.tp1 && (
+                      <div className="flex justify-between items-center py-1 border-b border-gray-50">
+                        <span className="text-green-500 font-medium">TP1</span>
+                        <span className="tabular-nums">
+                          <span className="font-semibold">${s.tp1.toFixed(2)}</span>
+                          {tp1Pct && <span className="text-xs text-green-400 ml-1">(+{tp1Pct}%)</span>}
+                          {rrRatio && <span className="text-xs text-gray-400 ml-2">R/R 1:{rrRatio}</span>}
+                        </span>
+                      </div>
+                    )}
+                    {s.tp2 && (
+                      <div className="flex justify-between items-center py-1">
+                        <span className="text-green-600 font-medium">TP2</span>
+                        <span className="tabular-nums">
+                          <span className="font-semibold">${s.tp2.toFixed(2)}</span>
+                          {tp2Pct && <span className="text-xs text-green-400 ml-1">(+{tp2Pct}%)</span>}
+                          {rr2Ratio && <span className="text-xs text-gray-400 ml-2">R/R 1:{rr2Ratio}</span>}
+                        </span>
+                      </div>
+                    )}
+                  </div>
+                </div>
               )}
-              {s.mom != null && (
-                <span className={`text-xs ml-auto tabular-nums ${s.mom > 0 ? "text-green-600" : s.mom < 0 ? "text-red-600" : "text-gray-400"}`}>
-                  mom {s.mom > 0 ? "+" : ""}{s.mom}
-                </span>
+
+              {/* Helper Pulse */}
+              <div>
+                <div className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">Helper Pulse</div>
+                <div className="flex items-center gap-2">
+                  <span className="text-sm text-gray-700">{s.pulse_state ?? "—"}</span>
+                  {s.pulse_signal && (
+                    <span className={`px-2 py-0.5 rounded text-xs font-bold ${pulseCfg}`}>
+                      {s.pulse_signal}
+                    </span>
+                  )}
+                  {s.mom != null && (
+                    <span className={`text-xs ml-auto tabular-nums ${s.mom > 0 ? "text-green-600" : s.mom < 0 ? "text-red-600" : "text-gray-400"}`}>
+                      mom {s.mom > 0 ? "+" : ""}{s.mom}
+                    </span>
+                  )}
+                </div>
+              </div>
+
+            </div>{/* fin col izquierda */}
+
+            {/* Columna derecha: Analistas + Medias Móviles + Pivots */}
+            <div className="space-y-4">
+
+              {/* Analyst ratings */}
+              {info && (info.recommendation_key || info.target_price) && (() => {
+                const REC = {
+                  strong_buy:   { label: "Compra Fuerte", cls: "bg-emerald-100 text-emerald-800" },
+                  buy:          { label: "Compra",        cls: "bg-green-100 text-green-700" },
+                  hold:         { label: "Mantener",      cls: "bg-yellow-100 text-yellow-700" },
+                  underperform: { label: "Subperformance",cls: "bg-orange-100 text-orange-700" },
+                  sell:         { label: "Venta",         cls: "bg-red-100 text-red-700" },
+                };
+                const rec = REC[info.recommendation_key] ?? { label: info.recommendation_key, cls: "bg-gray-100 text-gray-600" };
+                const upside = info.target_price && s.price
+                  ? ((info.target_price - s.price) / s.price * 100).toFixed(1)
+                  : null;
+                return (
+                  <div>
+                    <div className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">Analistas</div>
+                    <div className="flex flex-wrap items-center gap-3">
+                      {info.recommendation_key && (
+                        <Tooltip text={`Consenso de ${info.analyst_count ?? "?"} analistas. Escala: Compra Fuerte → Compra → Mantener → Subperformance → Venta.`}>
+                          <span className={`px-2.5 py-1 rounded-full text-xs font-bold ${rec.cls}`}>{rec.label}</span>
+                        </Tooltip>
+                      )}
+                      {info.analyst_count && (
+                        <span className="text-xs text-gray-400">{info.analyst_count} analistas</span>
+                      )}
+                      {info.target_price && (
+                        <Tooltip text={`Precio objetivo promedio: $${info.target_price.toFixed(2)}. Rango: $${info.target_low?.toFixed(2) ?? "?"} – $${info.target_high?.toFixed(2) ?? "?"}. Basado en el consenso de analistas.`}>
+                          <div className="flex items-center gap-1.5">
+                            <span className="text-xs text-gray-500">Target</span>
+                            <span className="text-sm font-semibold tabular-nums">${info.target_price.toFixed(2)}</span>
+                            {upside && (
+                              <span className={`text-xs font-bold ${Number(upside) >= 0 ? "text-green-600" : "text-red-500"}`}>
+                                {Number(upside) >= 0 ? "+" : ""}{upside}%
+                              </span>
+                            )}
+                          </div>
+                        </Tooltip>
+                      )}
+                      {info.target_low && info.target_high && (
+                        <span className="text-[10px] text-gray-400 tabular-nums">
+                          ${info.target_low.toFixed(2)} – ${info.target_high.toFixed(2)}
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                );
+              })()}
+
+              {/* Medias Móviles */}
+              {[s.ma5, s.ma10, s.ma20, s.ma50, s.ma200].some(v => v != null) && (
+                <div>
+                  <div className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">Medias Móviles</div>
+                  <div className="space-y-1.5">
+                    {[
+                      ["MA 5",   s.ma5,   s.pct_vs_ma5],
+                      ["MA 10",  s.ma10,  s.pct_vs_ma10],
+                      ["MA 20",  s.ma20,  s.pct_vs_ma20],
+                      ["MA 50",  s.ma50,  s.pct_vs_ma50],
+                      ["MA 200", s.ma200, s.pct_vs_ma200],
+                    ].filter(([, v]) => v != null).map(([label, val, p]) => {
+                      const above = p >= 0;
+                      return (
+                        <Tooltip key={label} text={`Precio ${above ? "por encima" : "por debajo"} de la ${label} un ${Math.abs(p).toFixed(2)}%. Valor actual de la ${label}: $${val?.toFixed(2)}.`}>
+                          <div className="flex items-center gap-2">
+                            <span className="w-12 text-xs text-gray-500 font-medium shrink-0">{label}</span>
+                            <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold shrink-0 ${above ? "bg-green-100 text-green-700" : "bg-red-100 text-red-600"}`}>
+                              {above ? "↑ Arriba" : "↓ Abajo"}
+                            </span>
+                            <div className="flex-1 h-1 bg-gray-100 rounded-full overflow-hidden">
+                              <div className={`h-1 rounded-full ${above ? "bg-green-400" : "bg-red-400"}`} style={{ width: `${Math.min(Math.abs(p) * 3, 100)}%` }} />
+                            </div>
+                            <span className="text-[10px] text-gray-400 tabular-nums shrink-0">${val?.toFixed(2)}</span>
+                            <span className={`text-xs font-semibold tabular-nums w-14 text-right shrink-0 ${above ? "text-green-600" : "text-red-600"}`}>
+                              {above ? "+" : ""}{p?.toFixed(2)}%
+                            </span>
+                          </div>
+                        </Tooltip>
+                      );
+                    })}
+                  </div>
+                </div>
               )}
-            </div>
-          </div>
+
+              {/* Pivot Points */}
+              {s.pivots && (s.pivots.classic || s.pivots.fibonacci) && (
+                <div>
+                  <div className="flex items-center justify-between mb-2">
+                    <span className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Pivots</span>
+                    <div className="flex rounded-lg overflow-hidden border border-gray-200 text-[10px]">
+                      {["classic", "fibonacci"].map(t => (
+                        <button key={t} onClick={() => setPivotType(t)}
+                          className={`px-2.5 py-1 font-medium transition ${pivotType === t ? "bg-amber-500 text-white" : "bg-white text-gray-500 hover:bg-gray-50"}`}>
+                          {t === "classic" ? "Clásico" : "Fibonacci"}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                  {(() => {
+                    const pts = s.pivots[pivotType];
+                    if (!pts) return null;
+                    const levels = [
+                      { key: "R3", cls: "text-red-700 font-semibold" },
+                      { key: "R2", cls: "text-red-500" },
+                      { key: "R1", cls: "text-red-400" },
+                      { key: "P",  cls: "text-gray-700 font-bold" },
+                      { key: "S1", cls: "text-green-400" },
+                      { key: "S2", cls: "text-green-500" },
+                      { key: "S3", cls: "text-green-700 font-semibold" },
+                    ];
+                    return (
+                      <div className="space-y-0.5">
+                        {levels.map(({ key, cls }) => {
+                          const val = pts[key];
+                          if (val == null) return null;
+                          const diff = ((val - s.price) / s.price * 100).toFixed(2);
+                          const isAbove = val > s.price;
+                          const isP = key === "P";
+                          return (
+                            <Tooltip key={key} text={
+                              isP ? `Pivot central: $${val.toFixed(2)}. El precio está ${isAbove ? "por debajo" : "por encima"} del pivot.` :
+                              key.startsWith("R") ? `Resistencia ${key}: $${val.toFixed(2)}. Zona donde el precio puede frenar su suba (+${diff}% desde precio actual).` :
+                              `Soporte ${key}: $${val.toFixed(2)}. Zona donde el precio puede encontrar piso (${diff}% desde precio actual).`
+                            }>
+                              <div className={`flex items-center gap-2 py-0.5 ${isP ? "border-y border-gray-100 my-0.5 py-1" : ""}`}>
+                                <span className={`w-8 text-xs shrink-0 ${cls}`}>{key}</span>
+                                <div className={`w-2 h-2 rounded-full shrink-0 ${isP ? "bg-gray-400" : isAbove ? "bg-red-300" : "bg-green-300"}`} />
+                                <span className={`text-xs tabular-nums font-medium ${cls}`}>${val.toFixed(2)}</span>
+                                {!isP && (
+                                  <span className={`ml-auto text-[10px] tabular-nums ${isAbove ? "text-red-400" : "text-green-500"}`}>
+                                    {isAbove ? "+" : ""}{diff}%
+                                  </span>
+                                )}
+                                {isP && <span className="ml-auto text-[10px] text-gray-400">— actual ${s.price?.toFixed(2)}</span>}
+                              </div>
+                            </Tooltip>
+                          );
+                        })}
+                      </div>
+                    );
+                  })()}
+                </div>
+              )}
+
+            </div>{/* fin col derecha */}
+
+          </div>{/* fin grid 2 cols */}
 
           {/* Recomendación IA */}
-          <div className="bg-indigo-50 border border-indigo-100 rounded-xl p-4">
+          <div className="bg-amber-50 border border-amber-100 rounded-xl p-4">
             <div className="flex items-center gap-2 mb-2">
-              <span className="text-xs font-semibold text-indigo-400 uppercase tracking-wider">Recomendación IA</span>
+              <span className="text-xs font-semibold text-amber-600 uppercase tracking-wider">Recomendación IA</span>
               {aiLoading && (
-                <svg className="animate-spin h-3 w-3 text-indigo-400" viewBox="0 0 24 24" fill="none">
+                <svg className="animate-spin h-3 w-3 text-amber-500" viewBox="0 0 24 24" fill="none">
                   <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
                   <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z" />
                 </svg>
               )}
             </div>
             {aiLoading
-              ? <p className="text-sm text-indigo-400 italic">Generando análisis…</p>
-              : <p className="text-sm text-indigo-900 leading-snug">{aiRec ?? "Sin datos"}</p>
+              ? <p className="text-sm text-amber-500 italic">Generando análisis…</p>
+              : <p className="text-sm text-gray-800 leading-snug">{aiRec ?? "Sin datos"}</p>
             }
           </div>
 
         </div>
-      </div>
-    </div>
+        </div>{/* overflow-y-auto */}
+      </BottomSheet>
+      {showChart && <ChartModal ticker={s.ticker} onClose={() => setShowChart(false)} />}
+      {showAnalysis && <AnalysisModal ticker={s.ticker} listId={listId} onClose={() => setShowAnalysis(false)} />}
+    </>
   );
 }
 
 function HelpModal({ onClose }) {
   return (
-    <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4" onClick={onClose}>
-      <div className="bg-white rounded-2xl shadow-xl max-w-lg w-full p-6 overflow-y-auto max-h-[90vh]" onClick={e => e.stopPropagation()}>
-        <div className="flex items-center justify-between mb-4">
+    <BottomSheet onClose={onClose} className="max-h-[92vh]">
+      <div className="overflow-y-auto">
+        <div className="flex items-center justify-between px-4 py-3 border-b border-gray-200 sticky top-0 bg-white z-10">
           <h2 className="text-lg font-bold text-gray-900">Cómo usar el Screener</h2>
           <button onClick={onClose} className="text-gray-400 hover:text-gray-600 text-xl leading-none">✕</button>
         </div>
 
-        <div className="space-y-5 text-sm text-gray-700">
+        <div className="space-y-5 text-sm text-gray-700 p-4 sm:p-5">
 
           <section>
-            <h3 className="font-semibold text-gray-900 mb-1">1. Elegí una lista</h3>
-            <p>Seleccioná qué activos analizar: S&P 500, Nasdaq 100, ETFs, ADRs Argentina, o ingresá tus propios tickers. Luego presioná <strong>Analizar</strong>.</p>
+            <h3 className="font-semibold text-gray-900 mb-1">1. Elegí una lista y analizá</h3>
+            <p>Seleccioná qué activos analizar: S&P 500, Nasdaq 100, ETFs, ADRs Argentina o Crypto. Presioná <strong>Analizar</strong> para cargar los resultados. Una vez cargados, podés filtrar dentro de la lista usando el buscador.</p>
           </section>
 
           <section>
-            <h3 className="font-semibold text-gray-900 mb-2">2. Sistema de Score — Helper Prime</h3>
+            <h3 className="font-semibold text-gray-900 mb-1">2. Hacé clic en un ticker</h3>
+            <p className="mb-1">Al tocar cualquier activo de la tabla abrís su panel de detalle, que incluye:</p>
+            <ul className="list-disc list-inside space-y-0.5 text-xs text-gray-700">
+              <li><strong>Gráfico de precio</strong> (últimos 3 meses, via TradingView)</li>
+              <li><strong>Score y señal</strong> con dirección, zona estructural y niveles SL/TP</li>
+              <li><strong>Recomendación de IA</strong> generada automáticamente con los indicadores del activo</li>
+              <li><strong>Link a TradingView</strong> para ver el gráfico completo</li>
+            </ul>
+          </section>
+
+          <section>
+            <h3 className="font-semibold text-gray-900 mb-2">3. Sistema de Score — Helper Prime</h3>
             <p className="mb-2">El Score (0-100) combina 7 componentes del sistema Helper Prime:</p>
             <div className="space-y-1 text-xs">
               {[
@@ -456,7 +1007,7 @@ function HelpModal({ onClose }) {
           </section>
 
           <section>
-            <h3 className="font-semibold text-gray-900 mb-2">3. Helper Pulse — señales de divergencia</h3>
+            <h3 className="font-semibold text-gray-900 mb-2">4. Helper Pulse — señales de divergencia</h3>
             <div className="space-y-1 text-xs">
               {[
                 ["GIRO UP",    "text-cyan-700 bg-cyan-50",   "Divergencia alcista regular: precio baja, momentum sube (en zona de sobreventa). Señal de reversión."],
@@ -475,7 +1026,7 @@ function HelpModal({ onClose }) {
           </section>
 
           <section>
-            <h3 className="font-semibold text-gray-900 mb-2">4. Columnas clave</h3>
+            <h3 className="font-semibold text-gray-900 mb-2">5. Columnas clave</h3>
             <div className="space-y-1.5 text-xs">
               {[
                 ["Zona",    "DISCOUNT = precio bajo la regresión lineal (zona de valor). FAIR = zona media. PREMIUM = zona extendida (cara)."],
@@ -496,12 +1047,14 @@ function HelpModal({ onClose }) {
           </section>
 
           <section>
-            <h3 className="font-semibold text-gray-900 mb-1">5. Flujo de trabajo recomendado</h3>
+            <h3 className="font-semibold text-gray-900 mb-1">6. Flujo de trabajo recomendado</h3>
             <ol className="list-decimal list-inside space-y-1 text-gray-700">
-              <li>Filtrá por <strong>Compra Fuerte</strong>.</li>
+              <li>Elegí la lista y presioná <strong>Analizar</strong>.</li>
+              <li>Filtrá por <strong>Compra Fuerte</strong> en el selector de señal.</li>
               <li>Verificá que <strong>Dir</strong> sea LONG y <strong>Zona</strong> sea DISCOUNT o FAIR.</li>
               <li>Confirmá <strong>ADX &gt; 25</strong> y <strong>vs MA200 positivo</strong>.</li>
               <li>Si el <strong>Pulse</strong> muestra GIRO UP o SIGUE UP → mayor confluencia.</li>
+              <li>Hacé clic en el ticker para ver el gráfico y la recomendación de IA.</li>
               <li>Revisá el <strong>SL/TP1</strong> para dimensionar tu riesgo antes de entrar.</li>
             </ol>
           </section>
@@ -511,17 +1064,17 @@ function HelpModal({ onClose }) {
           </section>
 
         </div>
-      </div>
-    </div>
+      </div>{/* overflow-y-auto */}
+    </BottomSheet>
   );
 }
 
 const SIGNAL_CONFIG = {
-  compra_fuerte: { label: "Compra Fuerte", color: "bg-emerald-100 text-emerald-800", bar: "bg-emerald-500" },
-  compra:        { label: "Compra",        color: "bg-green-100 text-green-700",     bar: "bg-green-400" },
-  neutral:       { label: "Neutral",       color: "bg-gray-100 text-gray-600",       bar: "bg-gray-300" },
-  venta:         { label: "Venta",         color: "bg-orange-100 text-orange-700",   bar: "bg-orange-400" },
-  venta_fuerte:  { label: "Venta Fuerte",  color: "bg-red-100 text-red-700",         bar: "bg-red-500" },
+  compra_fuerte: { label: "Compra Fuerte", color: "bg-emerald-100 text-emerald-800", bar: "bg-emerald-500", border: "border-l-emerald-500",  count: "text-emerald-700" },
+  compra:        { label: "Compra",        color: "bg-green-100 text-green-700",     bar: "bg-green-400",   border: "border-l-green-400",    count: "text-green-700" },
+  neutral:       { label: "Neutral",       color: "bg-gray-100 text-gray-600",       bar: "bg-gray-300",    border: "border-l-gray-400",     count: "text-gray-600" },
+  venta:         { label: "Venta",         color: "bg-orange-100 text-orange-700",   bar: "bg-orange-400",  border: "border-l-orange-400",   count: "text-orange-600" },
+  venta_fuerte:  { label: "Venta Fuerte",  color: "bg-red-100 text-red-700",         bar: "bg-red-500",     border: "border-l-red-500",      count: "text-red-600" },
 };
 
 const FILTER_OPTIONS = [
@@ -550,48 +1103,73 @@ const PULSE_CONFIG = {
   "AGOT. INF": { color: "bg-blue-100 text-blue-800",     title: "Agotamiento inferior" },
 };
 
+const SIGNAL_TOOLTIPS = {
+  compra_fuerte: "Score ≥75 alcista. Todos los filtros alineados: tendencia, momentum, zona y volatilidad. Setup de máxima calidad con alta probabilidad de continuación.",
+  compra:        "Score 60-74 alcista. La mayoría de los indicadores son positivos. Setup válido — operar con gestión de riesgo.",
+  neutral:       "Score menor a 60 en ambas direcciones. El mercado no muestra ventaja clara. Mejor esperar una señal más definida.",
+  venta:         "Score 60-74 bajista. Sesgo vendedor moderado. Evitar compras y esperar que el precio recupere antes de evaluar entrada.",
+  venta_fuerte:  "Score ≥75 bajista. Confluencia bajista total. No operar en largo — la presión vendedora domina todos los indicadores.",
+};
+
 function SignalBadge({ signal }) {
   const cfg = SIGNAL_CONFIG[signal] ?? SIGNAL_CONFIG.neutral;
   return (
-    <span className={`px-2 py-0.5 rounded-full text-xs font-semibold whitespace-nowrap ${cfg.color}`}>
-      {cfg.label}
-    </span>
+    <Tooltip text={SIGNAL_TOOLTIPS[signal] ?? ""}>
+      <span className={`px-2 py-0.5 rounded-full text-xs font-semibold whitespace-nowrap ${cfg.color}`}>
+        {cfg.label}
+      </span>
+    </Tooltip>
   );
 }
 
 function ScoreBar({ value, direction, signal }) {
   if (value == null) return <span className="text-gray-400">—</span>;
   const cfg = signal ? (SIGNAL_CONFIG[signal] ?? SIGNAL_CONFIG.neutral) : SIGNAL_CONFIG.neutral;
+  const dirLabel = direction === "LONG" ? "alcista" : direction === "SHORT" ? "bajista" : "sin dirección";
+  const quality = value >= 75 ? "Todos los filtros alineados. Setup de máxima calidad."
+    : value >= 60 ? "Mayoría de condiciones cumplidas. Setup válido."
+    : value >= 40 ? "Condiciones mixtas. Sin ventaja operativa clara."
+    : "Condiciones desfavorables.";
+  const tipText = `Score ${value}/100 — Sesgo ${dirLabel}. ${quality} Combina: EMA 200, alineación de medias, ADX, momentum RSI, MTF, volatilidad y zona estructural.`;
   return (
-    <div>
-      <div className="flex items-center gap-2">
-        <div className="w-14 h-2 bg-gray-200 rounded-full overflow-hidden">
-          <div className={`h-2 rounded-full ${cfg.bar}`} style={{ width: `${value}%` }} />
+    <Tooltip text={tipText}>
+      <div>
+        <div className="flex items-center gap-2">
+          <div className="w-14 h-2 bg-gray-200 rounded-full overflow-hidden">
+            <div className={`h-2 rounded-full ${cfg.bar}`} style={{ width: `${value}%` }} />
+          </div>
+          <span className="text-sm tabular-nums font-medium">{value}</span>
         </div>
-        <span className="text-sm tabular-nums font-medium">{value}</span>
+        {direction && (
+          <div className={`text-[10px] font-bold mt-0.5 ${
+            direction === "LONG"  ? "text-green-600" :
+            direction === "SHORT" ? "text-red-600"   : "text-gray-400"
+          }`}>
+            {direction === "LONG" ? "↑ LONG" : direction === "SHORT" ? "↓ SHORT" : "● NEUTRAL"}
+          </div>
+        )}
       </div>
-      {direction && (
-        <div className={`text-[10px] font-bold mt-0.5 ${
-          direction === "LONG"  ? "text-green-600" :
-          direction === "SHORT" ? "text-red-600"   : "text-gray-400"
-        }`}>
-          {direction === "LONG" ? "↑ LONG" : direction === "SHORT" ? "↓ SHORT" : "● NEUTRAL"}
-        </div>
-      )}
-    </div>
+    </Tooltip>
   );
 }
 
 function RsiBar({ value }) {
   if (value == null) return <span className="text-gray-400">—</span>;
   const color = value < 30 ? "bg-blue-500" : value > 70 ? "bg-red-500" : "bg-gray-400";
+  const tip = value < 30 ? `RSI ${value}: sobreventa extrema. El precio cayó muy rápido — posible rebote técnico próximo.`
+    : value < 40 ? `RSI ${value}: zona de sobreventa. Momentum débil, puede estar acercándose a un piso.`
+    : value > 70 ? `RSI ${value}: sobrecompra. El precio subió muy rápido — posible corrección a corto plazo.`
+    : value > 60 ? `RSI ${value}: momentum positivo. Tendencia alcista activa, vigilar si supera 70.`
+    : `RSI ${value}: zona neutral (30-60). Sin exceso de compradores ni vendedores.`;
   return (
-    <div className="flex items-center gap-2">
-      <div className="w-10 h-2 bg-gray-200 rounded-full overflow-hidden">
-        <div className={`h-2 rounded-full ${color}`} style={{ width: `${Math.min(value, 100)}%` }} />
+    <Tooltip text={tip}>
+      <div className="flex items-center gap-2">
+        <div className="w-10 h-2 bg-gray-200 rounded-full overflow-hidden">
+          <div className={`h-2 rounded-full ${color}`} style={{ width: `${Math.min(value, 100)}%` }} />
+        </div>
+        <span className="text-sm tabular-nums">{value}</span>
       </div>
-      <span className="text-sm tabular-nums">{value}</span>
-    </div>
+    </Tooltip>
   );
 }
 
@@ -606,6 +1184,12 @@ function PctCell({ value, invertColors = false }) {
   );
 }
 
+const ZONE_TOOLTIPS = {
+  discount: "DISCOUNT — Precio por debajo de la regresión lineal de 100 ruedas. Zona de valor estructural: el activo está 'barato' respecto a su tendencia. Mejor relación riesgo/beneficio para compras.",
+  fair:     "FAIR — Precio en la zona media de la regresión lineal. Sin ventaja estructural clara. Entrada neutra — ni barato ni caro respecto a la tendencia.",
+  premium:  "PREMIUM — Precio extendido por encima de la regresión lineal. El activo está 'caro' respecto a su tendencia. Mayor riesgo de corrección — comprar acá implica pagar más.",
+};
+
 function ZoneBadge({ zone }) {
   if (!zone) return <span className="text-gray-400">—</span>;
   const cfg = {
@@ -615,30 +1199,71 @@ function ZoneBadge({ zone }) {
   };
   const label = { discount: "DISCOUNT", fair: "FAIR", premium: "PREMIUM" };
   return (
-    <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold whitespace-nowrap ${cfg[zone] ?? cfg.fair}`}>
-      {label[zone] ?? zone.toUpperCase()}
-    </span>
+    <Tooltip text={ZONE_TOOLTIPS[zone] ?? ""}>
+      <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold whitespace-nowrap ${cfg[zone] ?? cfg.fair}`}>
+        {label[zone] ?? zone.toUpperCase()}
+      </span>
+    </Tooltip>
   );
 }
+
+const PULSE_TOOLTIPS = {
+  "GIRO UP":   "Divergencia alcista regular — El precio marcó un mínimo más bajo pero el momentum RSI no lo acompañó. Señal clásica de reversión al alza. Aparece en zonas de sobreventa.",
+  "SIGUE UP":  "Divergencia alcista oculta — El precio hizo un mínimo más alto mientras el momentum confirmó. Señal de que la tendencia alcista va a continuar.",
+  "GIRO DN":   "Divergencia bajista regular — El precio marcó un máximo más alto pero el momentum RSI bajó. Señal de agotamiento y posible reversión a la baja.",
+  "SIGUE DN":  "Divergencia bajista oculta — El precio hizo un máximo más bajo y el momentum lo confirma. Señal de que la tendencia bajista va a continuar.",
+  "AGOT. SUP": "Agotamiento superior — El oscilador llegó a zona de sobrecompra (>15) sin divergencia visible. Precaución con compras — el momentum podría revertir pronto.",
+  "AGOT. INF": "Agotamiento inferior — El oscilador llegó a zona de sobreventa (<-15). Posible piso de momentum — vigilar señal de entrada al alza.",
+};
 
 function PulseBadge({ signal }) {
   if (!signal) return <span className="text-gray-400 text-xs">—</span>;
   const cfg = PULSE_CONFIG[signal];
   if (!cfg) return <span className="text-gray-500 text-xs">{signal}</span>;
   return (
-    <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold whitespace-nowrap ${cfg.color}`} title={cfg.title}>
-      {signal}
-    </span>
+    <Tooltip text={PULSE_TOOLTIPS[signal] ?? cfg.title}>
+      <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold whitespace-nowrap ${cfg.color}`}>
+        {signal}
+      </span>
+    </Tooltip>
+  );
+}
+
+const CANDLE_TOOLTIPS = {
+  "Doji":              "Doji — Apertura y cierre casi iguales. El mercado está indeciso: compradores y vendedores se equilibraron. Esperar la próxima vela para confirmar dirección.",
+  "Hammer":            "Martillo (alcista) — Sombra inferior larga, cuerpo pequeño arriba. Los vendedores empujaron el precio abajo pero los compradores recuperaron el control al cierre. Posible reversal al alza.",
+  "Shooting Star":     "Shooting Star (bajista) — Sombra superior larga, cuerpo pequeño abajo. Los compradores intentaron subir pero los vendedores tomaron el control al cierre. Posible reversal a la baja.",
+  "Engulfing Alcista": "Engulfing Alcista — La vela de hoy (verde) envuelve completamente la de ayer (roja). Los compradores superaron a los vendedores con fuerza. Señal de reversión al alza.",
+  "Engulfing Bajista": "Engulfing Bajista — La vela de hoy (roja) envuelve completamente la de ayer (verde). Los vendedores superaron a los compradores con fuerza. Señal de reversión a la baja.",
+  "Morning Star":      "Morning Star (alcista) — 3 velas: bajista grande, vela pequeña o doji, alcista grande. El mercado agotó la caída y los compradores tomaron el control. Señal de reversión al alza.",
+  "Evening Star":      "Evening Star (bajista) — 3 velas: alcista grande, vela pequeña o doji, bajista grande. El mercado agotó la suba y los vendedores tomaron el control. Señal de reversión a la baja.",
+};
+
+function CandlePatternBadge({ pattern }) {
+  if (!pattern) return <span className="text-gray-400 text-xs">—</span>;
+  const colors = {
+    bullish: "bg-emerald-50 text-emerald-800",
+    bearish: "bg-red-50 text-red-800",
+    neutral: "bg-gray-100 text-gray-600",
+  };
+  return (
+    <Tooltip text={CANDLE_TOOLTIPS[pattern.name] ?? pattern.name}>
+      <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold whitespace-nowrap ${colors[pattern.type] ?? colors.neutral}`}>
+        {pattern.name}
+      </span>
+    </Tooltip>
   );
 }
 
 function SlTpCell({ sl, tp1, direction }) {
   if (!sl || !tp1) return <span className="text-gray-400">—</span>;
   return (
-    <div className="text-[10px] leading-tight tabular-nums">
-      <div className="text-red-600 font-medium">SL {sl.toFixed(2)}</div>
-      <div className="text-green-600 font-medium">TP {tp1.toFixed(2)}</div>
-    </div>
+    <Tooltip text={`Stop Loss: si el precio llega a $${sl.toFixed(2)} la tesis de la operación se invalida — salir para limitar la pérdida. TP1: primer objetivo de ganancia en $${tp1.toFixed(2)}. Ambos calculados con ATR × 1.5 desde el precio actual.`}>
+      <div className="text-[10px] leading-tight tabular-nums">
+        <div className="text-red-600 font-medium">SL {sl.toFixed(2)}</div>
+        <div className="text-green-600 font-medium">TP {tp1.toFixed(2)}</div>
+      </div>
+    </Tooltip>
   );
 }
 
@@ -647,9 +1272,9 @@ function SummaryCard({ signal, count, active, onClick }) {
   return (
     <button
       onClick={onClick}
-      className={`p-3 rounded-xl border text-left transition bg-white hover:shadow-sm ${active ? "ring-2 ring-indigo-500" : ""}`}
+      className={`p-3 rounded-xl border-l-4 border border-gray-100 text-left transition bg-white hover:shadow-md ${cfg.border} ${active ? "ring-2 ring-amber-500 shadow-md" : "hover:border-l-4"}`}
     >
-      <div className="text-xl font-bold text-gray-900">{count}</div>
+      <div className={`text-2xl font-extrabold ${cfg.count}`}>{count}</div>
       <div className={`text-xs font-semibold mt-0.5 ${cfg.color.split(" ")[1]}`}>{cfg.label}</div>
     </button>
   );
@@ -671,6 +1296,11 @@ export default function App() {
   const [activeListId, setActiveListId] = useState("sp500");
   const [selectedTicker, setSelectedTicker] = useState(null);
   const [showHelp, setShowHelp] = useState(false);
+  const [watchlist, setWatchlist] = useState(() => {
+    try { return JSON.parse(localStorage.getItem("watchlist") || "[]"); } catch { return []; }
+  });
+  const [quotes, setQuotes] = useState({});
+  const [quotesUpdated, setQuotesUpdated] = useState(null);
 
   const fetchStocks = useCallback(async () => {
     try {
@@ -743,58 +1373,112 @@ export default function App() {
     return <span className="ml-1">{sortDir === "asc" ? "↑" : "↓"}</span>;
   };
 
-  const th = (label, col) => (
+  const th = (label, col, hide = "") => (
     <th
-      className="px-3 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100 select-none whitespace-nowrap"
+      className={`px-3 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100 select-none whitespace-nowrap ${hide}`}
       onClick={() => handleSort(col)}
     >
       {label}<SortIcon col={col} />
     </th>
   );
 
-  const thStatic = (label) => (
-    <th className="px-3 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider whitespace-nowrap">
+  const thStatic = (label, hide = "") => (
+    <th className={`px-3 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider whitespace-nowrap ${hide}`}>
       {label}
     </th>
   );
 
   const activeListLabel = LIST_CONFIG.find(l => l.id === activeListId)?.label ?? "";
 
+  // Persist watchlist
+  useEffect(() => {
+    localStorage.setItem("watchlist", JSON.stringify(watchlist));
+  }, [watchlist]);
+
+  // Poll Alpaca quotes every 30s for watchlist stocks (skip crypto -USD)
+  useEffect(() => {
+    const stockWatchlist = watchlist.filter(t => !t.endsWith("-USD"));
+    if (stockWatchlist.length === 0) return;
+    const fetchQuotes = async () => {
+      try {
+        const res = await fetch(`${API_BASE}/api/quotes?tickers=${stockWatchlist.join(",")}`);
+        const data = await res.json();
+        if (data.quotes) { setQuotes(data.quotes); setQuotesUpdated(new Date()); }
+      } catch {}
+    };
+    fetchQuotes();
+    const id = setInterval(fetchQuotes, 30000);
+    return () => clearInterval(id);
+  }, [watchlist]);
+
+  const toggleWatch = (ticker, e) => {
+    e.stopPropagation();
+    setWatchlist(prev => prev.includes(ticker) ? prev.filter(t => t !== ticker) : [...prev, ticker]);
+  };
+
   return (
-    <div className="min-h-screen bg-gray-50 p-6">
-      <div className="max-w-screen-2xl mx-auto">
+    <div className="min-h-screen bg-gray-50">
+      {showHelp && <HelpModal onClose={() => setShowHelp(false)} />}
+      {selectedTicker && <TickerModal stock={selectedTicker} listId={activeListId} onClose={() => setSelectedTicker(null)} />}
 
-        {showHelp && <HelpModal onClose={() => setShowHelp(false)} />}
-        {selectedTicker && <TickerModal stock={selectedTicker} onClose={() => setSelectedTicker(null)} />}
-
-        {/* Header */}
-        <div className="flex items-start justify-between mb-6">
-          <div>
-            <h1 className="text-2xl font-bold text-gray-900">Stock Screener</h1>
-            <p className="text-sm text-gray-500 mt-0.5">
-              {lastUpdated
-                ? `${activeListLabel} · Actualizado: ${new Date(lastUpdated * 1000).toLocaleString("es-AR")}`
-                : "Seleccioná una lista y presioná Analizar"}
-            </p>
+      {/* ── Header oscuro ── */}
+      <header className="bg-slate-900 shadow-lg" style={{ borderTop: "3px solid #f59e0b" }}>
+        <div className="max-w-screen-2xl mx-auto px-3 sm:px-6 py-3 sm:py-4 flex items-center justify-between gap-4">
+          {/* Brand */}
+          <div className="flex items-center gap-3 min-w-0">
+            <div className="w-8 h-8 bg-amber-500 rounded-lg flex items-center justify-center shrink-0 shadow-md">
+              <svg className="w-4 h-4 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                <polyline points="22 12 18 12 15 21 9 3 6 12 2 12" />
+              </svg>
+            </div>
+            <div className="min-w-0">
+              <div className="flex items-center gap-2">
+                <h1 className="text-lg sm:text-xl font-bold text-white tracking-tight">máximos</h1>
+                <span className="hidden sm:block text-slate-500 text-xs font-normal">— stock screener</span>
+              </div>
+              <p className="text-[11px] text-slate-400 truncate mt-0.5">
+                {lastUpdated
+                  ? `${activeListLabel} · ${new Date(lastUpdated * 1000).toLocaleString("es-AR", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })}`
+                  : "Helper Prime + Pulse · IA integrada"}
+              </p>
+            </div>
           </div>
-          <button
-            onClick={() => setShowHelp(true)}
-            className="px-4 py-2 text-sm font-medium text-indigo-600 border border-indigo-300 rounded-lg hover:bg-indigo-50 transition"
-          >
-            ? Cómo usar
-          </button>
+          {/* Status + ayuda */}
+          <div className="flex items-center gap-2 sm:gap-3 shrink-0">
+            {status === "ready" && stocks.length > 0 && (
+              <div className="hidden sm:flex items-center gap-1.5">
+                <div className="w-1.5 h-1.5 rounded-full bg-emerald-400 shadow-sm" />
+                <span className="text-xs text-slate-400">{stocks.length} activos</span>
+              </div>
+            )}
+            {isBusy && (
+              <div className="hidden sm:flex items-center gap-1.5">
+                <div className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse" />
+                <span className="text-xs text-slate-400">Analizando…</span>
+              </div>
+            )}
+            <button
+              onClick={() => setShowHelp(true)}
+              className="text-xs sm:text-sm text-slate-300 hover:text-white border border-slate-700 hover:border-slate-500 px-2.5 sm:px-3 py-1.5 rounded-lg transition"
+            >
+              ? Ayuda
+            </button>
+          </div>
         </div>
+      </header>
+
+      <div className="max-w-screen-2xl mx-auto p-3 sm:p-6">
 
         {/* Selector de lista + botón */}
-        <div className="bg-white rounded-xl border border-gray-200 p-4 mb-6">
+        <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-3 sm:p-4 mb-4 sm:mb-5">
           <div className="flex flex-wrap items-center gap-2">
             {LIST_CONFIG.map((l) => (
               <button
                 key={l.id}
                 onClick={() => setSelectedList(l.id)}
-                className={`px-4 py-2 rounded-lg text-sm font-medium transition ${
+                className={`px-3 sm:px-4 py-1.5 sm:py-2 rounded-lg text-sm font-medium transition ${
                   selectedList === l.id
-                    ? "bg-indigo-600 text-white"
+                    ? "bg-amber-500 text-white"
                     : "bg-gray-100 text-gray-700 hover:bg-gray-200"
                 }`}
               >
@@ -804,7 +1488,7 @@ export default function App() {
             <button
               onClick={handleRefresh}
               disabled={loading || isBusy}
-              className="ml-auto px-5 py-2 bg-indigo-600 text-white text-sm font-medium rounded-lg hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed transition"
+              className="w-full sm:w-auto sm:ml-auto mt-1 sm:mt-0 px-5 py-2 bg-amber-500 text-white text-sm font-medium rounded-lg hover:bg-amber-600 disabled:opacity-50 disabled:cursor-not-allowed transition"
             >
               {isBusy ? "Analizando…" : `Analizar ${LIST_CONFIG.find(l => l.id === selectedList)?.label ?? ""}`}
             </button>
@@ -817,9 +1501,9 @@ export default function App() {
                 min={10} max={100} step={10}
                 value={cryptoLimit}
                 onChange={(e) => setCryptoLimit(Number(e.target.value))}
-                className="flex-1 accent-indigo-600"
+                className="flex-1 accent-amber-500"
               />
-              <span className="text-sm font-semibold text-indigo-700 w-12 text-right">
+              <span className="text-sm font-semibold text-amber-700 w-12 text-right">
                 {cryptoLimit} cripto{cryptoLimit > 1 ? "s" : ""}
               </span>
             </div>
@@ -828,7 +1512,7 @@ export default function App() {
 
         {/* Loading banner */}
         {isBusy && (
-          <div className="mb-4 p-4 bg-indigo-50 border border-indigo-200 rounded-lg text-sm text-indigo-700">
+          <div className="mb-4 p-4 bg-amber-50 border border-amber-200 rounded-lg text-sm text-amber-800">
             <div className="flex items-center gap-2 mb-2">
               <svg className="animate-spin h-4 w-4 shrink-0" viewBox="0 0 24 24" fill="none">
                 <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
@@ -840,25 +1524,74 @@ export default function App() {
                   : `Calculando indicadores… ${processed} / ${totalTickers}`}
               </span>
             </div>
-            <div className="w-full bg-indigo-100 rounded-full h-2 overflow-hidden">
+            <div className="w-full bg-amber-100 rounded-full h-2 overflow-hidden">
               {status === "downloading" ? (
-                <div className="h-2 bg-indigo-400 rounded-full animate-pulse w-full" />
+                <div className="h-2 bg-amber-400 rounded-full animate-pulse w-full" />
               ) : (
                 <div
-                  className="bg-indigo-500 h-2 rounded-full transition-all duration-300"
+                  className="bg-amber-500 h-2 rounded-full transition-all duration-300"
                   style={{ width: `${totalTickers > 0 ? Math.round((processed / totalTickers) * 100) : 0}%` }}
                 />
               )}
             </div>
-            <p className="text-xs text-indigo-500 mt-1 text-right">
+            <p className="text-xs text-amber-600 mt-1 text-right">
               {status === "downloading" ? "Conectando…" : `${Math.round((processed / totalTickers) * 100)}%`}
             </p>
           </div>
         )}
 
+        {/* Watchlist */}
+        {watchlist.length > 0 && (
+          <div className="mb-6 bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
+            <div className="flex items-center justify-between px-4 py-2.5 border-b border-gray-100 bg-gray-50">
+              <span className="text-sm font-semibold text-gray-700">Watchlist</span>
+              <span className="text-xs text-gray-400">
+                {quotesUpdated ? `Actualizado ${quotesUpdated.toLocaleTimeString("es-AR", { hour: "2-digit", minute: "2-digit", second: "2-digit" })}` : "Cargando..."}
+              </span>
+            </div>
+            <div className="flex flex-wrap gap-3 p-4">
+              {watchlist.map(ticker => {
+                const q = quotes[ticker.replace("-USD", "").replace("-", "")];
+                const stockKey = ticker.endsWith("-USD") ? null : ticker;
+                const qd = stockKey ? quotes[stockKey] : null;
+                const isCrypto = ticker.endsWith("-USD");
+                const cached = stocks.find(s => s.ticker === ticker);
+                const displayPrice = qd?.price ?? cached?.price;
+                const change = qd?.change;
+                const changePct = qd?.change_pct;
+                return (
+                  <div
+                    key={ticker}
+                    className="flex items-center gap-3 bg-gray-50 hover:bg-amber-50 rounded-lg px-3 py-2 border border-gray-200 min-w-[160px] cursor-pointer transition"
+                    onClick={() => cached && setSelectedTicker(cached)}
+                  >
+                    <div className="flex-1">
+                      <div className="flex items-center gap-2">
+                        <span className="font-semibold text-sm text-gray-900">{displayTicker(ticker)}</span>
+                        {isCrypto && <span className="text-xs text-gray-400">Binance</span>}
+                      </div>
+                      <div className="flex items-center gap-2 mt-0.5">
+                        <span className="text-sm tabular-nums font-mono">
+                          {displayPrice != null ? `$${displayPrice.toFixed(2)}` : "—"}
+                        </span>
+                        {changePct != null && (
+                          <span className={`text-xs font-semibold ${changePct >= 0 ? "text-green-600" : "text-red-500"}`}>
+                            {changePct >= 0 ? "+" : ""}{changePct.toFixed(2)}%
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                    <button onClick={(e) => toggleWatch(ticker, e)} className="text-gray-300 hover:text-red-400 text-lg leading-none">✕</button>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
         {/* Resumen por señal */}
         {stocks.length > 0 && (
-          <div className="grid grid-cols-5 gap-3 mb-6">
+          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-2 sm:gap-3 mb-4 sm:mb-6">
             {Object.keys(SIGNAL_CONFIG).map((key) => (
               <SummaryCard
                 key={key}
@@ -872,13 +1605,13 @@ export default function App() {
         )}
 
         {/* Filtros */}
-        <div className="flex flex-wrap items-center gap-3 mb-4">
+        <div className="flex flex-wrap items-center gap-2 sm:gap-3 mb-4">
           <input
             type="text"
-            placeholder="Buscar ticker en la lista…"
+            placeholder="Buscar ticker…"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            className="px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400 w-56"
+            className="px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-amber-400 w-full sm:w-48"
           />
           <div className="flex flex-wrap gap-1">
             {FILTER_OPTIONS.map(({ key, label }) => (
@@ -887,7 +1620,7 @@ export default function App() {
                 onClick={() => setSignalFilter(key)}
                 className={`px-3 py-1.5 rounded-lg text-xs font-medium transition ${
                   signalFilter === key
-                    ? "bg-indigo-600 text-white"
+                    ? "bg-amber-500 text-white"
                     : "bg-white border border-gray-300 text-gray-600 hover:bg-gray-50"
                 }`}
               >
@@ -919,18 +1652,19 @@ export default function App() {
                 <thead className="bg-gray-50 border-b border-gray-200">
                   <tr>
                     {th("Ticker",    "ticker")}
-                    {th("Precio",    "price")}
+                    {th("Precio",    "price",         "hidden sm:table-cell")}
                     {th("Score",     "score")}
-                    {thStatic("Zona")}
-                    {th("RSI",       "rsi")}
-                    {th("ADX",       "adx")}
-                    {th("vs MA200",  "pct_vs_ma200")}
-                    {th("Vol ×",     "vol_ratio")}
-                    {th("% Máx 52s", "pct_from_high")}
-                    {th("% Mín 52s", "pct_from_low")}
-                    {th("MACD",      "macd_hist")}
-                    {thStatic("Pulse")}
-                    {thStatic("SL / TP1")}
+                    {thStatic("Zona",                 "hidden sm:table-cell")}
+                    {th("RSI",       "rsi",           "hidden md:table-cell")}
+                    {th("ADX",       "adx",           "hidden md:table-cell")}
+                    {th("vs MA200",  "pct_vs_ma200",  "hidden lg:table-cell")}
+                    {th("Vol ×",     "vol_ratio",     "hidden lg:table-cell")}
+                    {th("% Máx 52s", "pct_from_high", "hidden lg:table-cell")}
+                    {th("% Mín 52s", "pct_from_low",  "hidden lg:table-cell")}
+                    {th("MACD",      "macd_hist",     "hidden lg:table-cell")}
+                    {thStatic("Pulse",                "hidden md:table-cell")}
+                    {thStatic("Patrón",              "hidden md:table-cell")}
+                    {thStatic("SL / TP1",             "hidden md:table-cell")}
                     {thStatic("Señal")}
                   </tr>
                 </thead>
@@ -938,42 +1672,101 @@ export default function App() {
                   {filtered.map((s) => (
                     <tr
                       key={s.ticker}
-                      className="hover:bg-indigo-50 transition cursor-pointer"
+                      className="hover:bg-amber-50 transition cursor-pointer"
                       onClick={() => setSelectedTicker(s)}
                     >
-                      <td className="px-3 py-3 font-semibold text-gray-900 underline decoration-dotted underline-offset-2">{displayTicker(s.ticker)}</td>
-                      <td className="px-3 py-3 tabular-nums">${s.price.toFixed(2)}</td>
+                      <td className="px-3 py-3">
+                        <div className="flex items-center gap-1.5">
+                          <button
+                            onClick={(e) => toggleWatch(s.ticker, e)}
+                            className={`text-base leading-none transition-colors ${watchlist.includes(s.ticker) ? "text-amber-400" : "text-gray-400 hover:text-amber-400"}`}
+                          >{watchlist.includes(s.ticker) ? "★" : "☆"}</button>
+                          <span className="font-semibold text-gray-900 underline decoration-dotted underline-offset-2">{displayTicker(s.ticker)}</span>
+                        </div>
+                      </td>
+                      <td className="px-3 py-3 tabular-nums hidden sm:table-cell">${s.price.toFixed(2)}</td>
                       <td className="px-3 py-3">
                         <ScoreBar value={s.score} direction={s.direction} signal={s.signal} />
                       </td>
-                      <td className="px-3 py-3"><ZoneBadge zone={s.zone} /></td>
-                      <td className="px-3 py-3"><RsiBar value={s.rsi} /></td>
-                      <td className="px-3 py-3 tabular-nums text-xs">
+                      <td className="px-3 py-3 hidden sm:table-cell"><ZoneBadge zone={s.zone} /></td>
+                      <td className="px-3 py-3 hidden md:table-cell"><RsiBar value={s.rsi} /></td>
+                      <td className="px-3 py-3 tabular-nums text-xs hidden md:table-cell">
                         {s.adx != null
-                          ? <span className={s.adx >= 25 ? "font-semibold text-indigo-700" : "text-gray-600"}>
-                              {s.adx.toFixed(1)}
-                            </span>
+                          ? <Tooltip text={
+                              s.adx >= 30 ? `ADX ${s.adx.toFixed(1)}: tendencia muy fuerte. Alta probabilidad de continuación en la dirección actual.`
+                            : s.adx >= 25 ? `ADX ${s.adx.toFixed(1)}: tendencia moderada-fuerte. Señales más confiables.`
+                            : s.adx >= 20 ? `ADX ${s.adx.toFixed(1)}: tendencia activa pero no muy fuerte. Condición mínima para operar.`
+                            : `ADX ${s.adx.toFixed(1)}: tendencia débil o mercado lateral. Mayor riesgo de señales falsas — esperar que supere 20.`
+                            }>
+                              <span className={s.adx >= 25 ? "font-semibold text-amber-700" : "text-gray-600"}>
+                                {s.adx.toFixed(1)}
+                              </span>
+                            </Tooltip>
                           : <span className="text-gray-400">—</span>}
                       </td>
-                      <td className="px-3 py-3"><PctCell value={s.pct_vs_ma200} /></td>
-                      <td className="px-3 py-3 tabular-nums">
+                      <td className="px-3 py-3 hidden lg:table-cell">
+                        {s.pct_vs_ma200 != null
+                          ? <Tooltip text={
+                              s.pct_vs_ma200 >= 0
+                                ? `+${s.pct_vs_ma200.toFixed(2)}% sobre la MA200. El precio está por encima de su promedio de 200 días — tendencia principal alcista.`
+                                : `${s.pct_vs_ma200.toFixed(2)}% bajo la MA200. El precio está por debajo de su promedio de 200 días — tendencia principal bajista.`
+                            }>
+                              <PctCell value={s.pct_vs_ma200} />
+                            </Tooltip>
+                          : <span className="text-gray-400">—</span>}
+                      </td>
+                      <td className="px-3 py-3 tabular-nums hidden lg:table-cell">
                         {s.vol_ratio != null
-                          ? <span className={s.vol_ratio >= 1.5 ? "font-semibold text-indigo-600" : "text-gray-700"}>
-                              {s.vol_ratio.toFixed(2)}x
-                            </span>
+                          ? <Tooltip text={
+                              s.vol_ratio >= 2.0 ? `Volumen ${s.vol_ratio.toFixed(2)}x el promedio de 20 días. Movimiento fuertemente confirmado — alta participación del mercado.`
+                            : s.vol_ratio >= 1.5 ? `Volumen ${s.vol_ratio.toFixed(2)}x el promedio. Buena confirmación del movimiento.`
+                            : s.vol_ratio >= 1.0 ? `Volumen ${s.vol_ratio.toFixed(2)}x el promedio. Actividad normal.`
+                            : `Volumen ${s.vol_ratio.toFixed(2)}x el promedio. Movimiento sin confirmación de volumen — mayor riesgo de fakeout.`
+                            }>
+                              <span className={s.vol_ratio >= 1.5 ? "font-semibold text-amber-600" : "text-gray-700"}>
+                                {s.vol_ratio.toFixed(2)}x
+                              </span>
+                            </Tooltip>
                           : <span className="text-gray-400">—</span>}
                       </td>
-                      <td className="px-3 py-3"><PctCell value={s.pct_from_high} /></td>
-                      <td className="px-3 py-3"><PctCell value={s.pct_from_low} /></td>
-                      <td className="px-3 py-3 tabular-nums">
+                      <td className="px-3 py-3 hidden lg:table-cell">
+                        {s.pct_from_high != null
+                          ? <Tooltip text={
+                              s.pct_from_high > -5 ? `${s.pct_from_high.toFixed(2)}% del máximo anual. En zona de máximos — momentum muy fuerte pero poco recorrido adicional al alza.`
+                            : s.pct_from_high > -20 ? `${s.pct_from_high.toFixed(2)}% del máximo anual. Relativamente cerca del techo — analizar si puede superarlo.`
+                            : `${s.pct_from_high.toFixed(2)}% del máximo anual. Lejos del techo — amplio recorrido potencial si recupera la tendencia.`
+                            }>
+                              <PctCell value={s.pct_from_high} />
+                            </Tooltip>
+                          : <span className="text-gray-400">—</span>}
+                      </td>
+                      <td className="px-3 py-3 hidden lg:table-cell">
+                        {s.pct_from_low != null
+                          ? <Tooltip text={
+                              s.pct_from_low < 15 ? `+${s.pct_from_low.toFixed(2)}% sobre el mínimo anual. Precio muy cerca del piso — zona de soporte, vigilar que no lo rompa.`
+                            : s.pct_from_low < 50 ? `+${s.pct_from_low.toFixed(2)}% sobre el mínimo anual. Recuperación moderada desde los mínimos.`
+                            : `+${s.pct_from_low.toFixed(2)}% sobre el mínimo anual. Lejos del piso — fuerte recuperación desde mínimos.`
+                            }>
+                              <PctCell value={s.pct_from_low} />
+                            </Tooltip>
+                          : <span className="text-gray-400">—</span>}
+                      </td>
+                      <td className="px-3 py-3 tabular-nums hidden lg:table-cell">
                         {s.macd_hist != null
-                          ? <span className={s.macd_hist > 0 ? "text-green-600 font-medium" : "text-red-600 font-medium"}>
-                              {s.macd_hist > 0 ? "▲" : "▼"} {Math.abs(s.macd_hist).toFixed(3)}
-                            </span>
+                          ? <Tooltip text={
+                              s.macd_hist > 0
+                                ? `MACD histograma positivo (${s.macd_hist.toFixed(3)}). La línea MACD está por encima de su señal — momentum alcista activo.`
+                                : `MACD histograma negativo (${s.macd_hist.toFixed(3)}). La línea MACD está por debajo de su señal — momentum bajista activo.`
+                            }>
+                              <span className={s.macd_hist > 0 ? "text-green-600 font-medium" : "text-red-600 font-medium"}>
+                                {s.macd_hist > 0 ? "▲" : "▼"} {Math.abs(s.macd_hist).toFixed(3)}
+                              </span>
+                            </Tooltip>
                           : <span className="text-gray-400">—</span>}
                       </td>
-                      <td className="px-3 py-3"><PulseBadge signal={s.pulse_signal} /></td>
-                      <td className="px-3 py-3">
+                      <td className="px-3 py-3 hidden md:table-cell"><PulseBadge signal={s.pulse_signal} /></td>
+                      <td className="px-3 py-3 hidden md:table-cell"><CandlePatternBadge pattern={s.candle_pattern} /></td>
+                      <td className="px-3 py-3 hidden md:table-cell">
                         <SlTpCell sl={s.sl} tp1={s.tp1} direction={s.direction} />
                       </td>
                       <td className="px-3 py-3"><SignalBadge signal={s.signal} /></td>
@@ -987,6 +1780,7 @@ export default function App() {
         <p className="text-xs text-gray-400 mt-3 text-right">
           {filtered.length} activos · Score = Helper Prime (EMA + ADX + Momentum + MTF + Zona) · Pulse = Helper Pulse (divergencias RSI)
         </p>
+
       </div>
     </div>
   );

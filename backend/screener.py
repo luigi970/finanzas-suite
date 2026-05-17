@@ -1,4 +1,5 @@
 import io
+import concurrent.futures
 import httpx
 import pandas as pd
 import numpy as np
@@ -77,6 +78,122 @@ def get_tickers(list_id: str, custom: list[str] | None = None, crypto_limit: int
     if list_id == "crypto":
         return LISTS["crypto"][:max(1, crypto_limit)]
     return LISTS.get(list_id, [])
+
+
+# ── Binance MTF ───────────────────────────────────────────────────────────────
+
+BINANCE_BASE = "https://api.binance.com/api/v3"
+_MTF_INTERVALS = ["15m", "1h", "4h", "1d"]
+
+
+def _to_binance_symbol(ticker: str) -> str:
+    """BTC-USD → BTCUSDT"""
+    return ticker[:-4] + "USDT" if ticker.endswith("-USD") else ticker
+
+
+def _fetch_binance_klines(symbol: str, interval: str, limit: int = 30) -> pd.DataFrame | None:
+    try:
+        resp = httpx.get(
+            f"{BINANCE_BASE}/klines",
+            params={"symbol": symbol, "interval": interval, "limit": limit},
+            timeout=10,
+        )
+        data = resp.json()
+        if not isinstance(data, list) or len(data) < 20:
+            return None
+        df = pd.DataFrame(data, columns=[
+            "open_time", "open", "high", "low", "close", "volume",
+            "close_time", "quote_volume", "num_trades",
+            "taker_buy_base", "taker_buy_quote", "ignore",
+        ])
+        for col in ["open", "high", "low", "close", "volume"]:
+            df[col] = df[col].astype(float)
+        return df
+    except Exception:
+        return None
+
+
+def _fetch_all_binance_daily(tickers: list[str], limit: int = 300) -> dict[str, pd.DataFrame | None]:
+    """Fetch Binance 1d candles for all crypto tickers in parallel (primary data source)."""
+    crypto = [t for t in tickers if t.endswith("-USD")]
+    if not crypto:
+        return {}
+    with concurrent.futures.ThreadPoolExecutor(max_workers=min(len(crypto), 10)) as ex:
+        futures = {t: ex.submit(_fetch_binance_klines, _to_binance_symbol(t), "1d", limit) for t in crypto}
+    return {t: fut.result() for t, fut in futures.items()}
+
+
+def _fetch_all_binance_mtf(tickers: list[str]) -> dict[str, tuple[int, int] | None]:
+    """Fetch Binance MTF for all crypto tickers in one parallel batch.
+    Returns {ticker: (mtf_bull, mtf_bear) | None}."""
+    crypto = [t for t in tickers if t.endswith("-USD")]
+    if not crypto:
+        return {}
+
+    def fetch(ticker, interval):
+        return ticker, interval, _fetch_binance_klines(_to_binance_symbol(ticker), interval)
+
+    raw: dict[str, dict] = {t: {} for t in crypto}
+    tasks = [(t, iv) for t in crypto for iv in _MTF_INTERVALS]
+    with concurrent.futures.ThreadPoolExecutor(max_workers=min(len(tasks), 20)) as ex:
+        for fut in concurrent.futures.as_completed(ex.submit(fetch, t, iv) for t, iv in tasks):
+            ticker, interval, df = fut.result()
+            raw[ticker][interval] = df
+
+    counts = {}
+    for ticker in crypto:
+        dfs = raw[ticker]
+        if any(dfs.get(iv) is None for iv in _MTF_INTERVALS):
+            counts[ticker] = None  # fall back to daily proxy
+            continue
+        bull = sum(
+            1 for iv in _MTF_INTERVALS
+            if float(dfs[iv]["close"].iloc[-1]) > float(dfs[iv]["close"].ewm(span=20, adjust=False).mean().iloc[-1])
+        )
+        counts[ticker] = (bull, 4 - bull)
+    return counts
+
+
+# ── Yahoo Finance MTF (stocks, listas pequeñas) ──────────────────────────────
+
+_YF_MTF_INTERVALS = [
+    ("15m", "5d"),   # 15m closes, últimos 5 días
+    ("60m", "1mo"),  # 1h closes, último mes
+    ("1d",  "1y"),   # daily (proxy 4h)
+]
+
+
+def _fetch_yf_mtf_one(ticker: str) -> tuple[int, int] | None:
+    """Fetch Yahoo Finance intraday data for one stock and compute MTF bull/bear counts."""
+    try:
+        closes = []
+        for interval, period in _YF_MTF_INTERVALS:
+            df = yf.download(ticker, period=period, interval=interval,
+                             progress=False, auto_adjust=True)
+            if df.empty or len(df) < 20:
+                return None
+            # handle possible MultiIndex (single ticker shouldn't produce it, but be safe)
+            c = df["Close"] if "Close" in df.columns else df.iloc[:, 0]
+            closes.append(float(c.iloc[-1]) > float(c.ewm(span=20, adjust=False).mean().iloc[-1]))
+        # 4th signal: daily close > ema20 (already in closes[2]) — add ema55 check
+        df_d = yf.download(ticker, period="1y", interval="1d",
+                           progress=False, auto_adjust=True)
+        c_d = df_d["Close"] if "Close" in df_d.columns else df_d.iloc[:, 0]
+        closes.append(float(c_d.iloc[-1]) > float(c_d.ewm(span=55, adjust=False).mean().iloc[-1]))
+        bull = sum(closes)
+        return (bull, 4 - bull)
+    except Exception:
+        return None
+
+
+def _fetch_all_yf_mtf(tickers: list[str]) -> dict[str, tuple[int, int] | None]:
+    """Fetch YF MTF for all stock tickers in parallel. Only used for small lists."""
+    stocks = [t for t in tickers if not t.endswith("-USD")]
+    if not stocks:
+        return {}
+    with concurrent.futures.ThreadPoolExecutor(max_workers=min(len(stocks), 8)) as ex:
+        futures = {t: ex.submit(_fetch_yf_mtf_one, t) for t in stocks}
+    return {t: fut.result() for t, fut in futures.items()}
 
 
 # ── Indicadores base ──────────────────────────────────────────────────────────
@@ -208,6 +325,7 @@ def helper_prime_score(
     high: pd.Series,
     low: pd.Series,
     volume: pd.Series,
+    mtf_counts: tuple[int, int] | None = None,
 ) -> dict:
     price = float(close.iloc[-1])
 
@@ -262,14 +380,17 @@ def helper_prime_score(
     long_zone  = (zone == "discount") or near_support or poc_support
     short_zone = (zone == "premium")  or near_resist  or poc_resist
 
-    # MTF proxy: 4 daily-based signals mimicking 15m/1h/4h/1D EMA200 checks
-    mtf_bull = sum([
-        price > e20,
-        price > e55,
-        e200 is not None and price > e200,
-        e20 > e55,
-    ])
-    mtf_bear  = 4 - mtf_bull
+    # MTF: real Binance counts (15m/1h/4h/1d) if provided, else daily EMA proxy
+    if mtf_counts is not None:
+        mtf_bull, mtf_bear = mtf_counts
+    else:
+        mtf_bull = sum([
+            price > e20,
+            price > e55,
+            e200 is not None and price > e200,
+            e20 > e55,
+        ])
+        mtf_bear = 4 - mtf_bull
     min_align = 3
 
     # ── Long score (max 100) ──
@@ -417,6 +538,86 @@ def helper_pulse_signals(
     return {"pulse_signal": signal, "pulse_state": state, "mom": round(mom_last, 1)}
 
 
+# ── Candlestick pattern detection ────────────────────────────────────────────
+
+def detect_candle_pattern(
+    open_: pd.Series,
+    high: pd.Series,
+    low: pd.Series,
+    close: pd.Series,
+) -> dict | None:
+    """Detect common 1-3 bar candlestick patterns on the last 3 bars."""
+    if len(close) < 3:
+        return None
+    o0, h0, l0, c0 = float(open_.iloc[-1]), float(high.iloc[-1]), float(low.iloc[-1]), float(close.iloc[-1])
+    o1 = float(open_.iloc[-2]); c1 = float(close.iloc[-2])
+    o2 = float(open_.iloc[-3]); c2 = float(close.iloc[-3])
+
+    rng0 = h0 - l0
+    if rng0 <= 0:
+        return None
+
+    body0  = abs(c0 - o0)
+    body1  = abs(c1 - o1)
+    body2  = abs(c2 - o2)
+    top0   = max(c0, o0);  bot0  = min(c0, o0)
+    upper0 = h0 - top0;    lower0 = bot0 - l0
+    bull0 = c0 > o0;  bear0 = c0 < o0
+    bull1 = c1 > o1;  bear1 = c1 < o1
+    bull2 = c2 > o2
+
+    # Doji — body < 10% of range
+    if body0 < rng0 * 0.10:
+        return {"name": "Doji", "type": "neutral"}
+    # Hammer — small body at top, lower shadow ≥ 2× body
+    if body0 < rng0 * 0.35 and lower0 >= body0 * 2.0 and upper0 <= body0 * 0.5:
+        return {"name": "Hammer", "type": "bullish"}
+    # Shooting Star — small body at bottom, upper shadow ≥ 2× body
+    if body0 < rng0 * 0.35 and upper0 >= body0 * 2.0 and lower0 <= body0 * 0.5:
+        return {"name": "Shooting Star", "type": "bearish"}
+    # Bullish Engulfing
+    if bear1 and bull0 and c0 > o1 and o0 < c1:
+        return {"name": "Engulfing Alcista", "type": "bullish"}
+    # Bearish Engulfing
+    if bull1 and bear0 and c0 < o1 and o0 > c1:
+        return {"name": "Engulfing Bajista", "type": "bearish"}
+    # Morning Star — bearish + small middle + bullish closes above midpoint
+    if not bull2 and body1 < body2 * 0.35 and bull0 and c0 > (o2 + c2) / 2:
+        return {"name": "Morning Star", "type": "bullish"}
+    # Evening Star — bullish + small middle + bearish closes below midpoint
+    if bull2 and body1 < body2 * 0.35 and bear0 and c0 < (o2 + c2) / 2:
+        return {"name": "Evening Star", "type": "bearish"}
+    return None
+
+
+# ── Pivot points ─────────────────────────────────────────────────────────────
+
+def _compute_pivots(high: pd.Series, low: pd.Series, close: pd.Series) -> dict:
+    """Classic and Fibonacci daily pivot points from the most recent completed bar."""
+    if len(close) < 1:
+        return {}
+    H = float(high.iloc[-1])
+    L = float(low.iloc[-1])
+    C = float(close.iloc[-1])
+    P = (H + L + C) / 3
+    rng = H - L
+    r = lambda v: round(v, 2)
+    return {
+        "classic": {
+            "P":  r(P),
+            "R1": r(2*P - L),     "S1": r(2*P - H),
+            "R2": r(P + rng),     "S2": r(P - rng),
+            "R3": r(H + 2*(P-L)), "S3": r(L - 2*(H-P)),
+        },
+        "fibonacci": {
+            "P":  r(P),
+            "R1": r(P + 0.382*rng), "S1": r(P - 0.382*rng),
+            "R2": r(P + 0.618*rng), "S2": r(P - 0.618*rng),
+            "R3": r(P + 1.000*rng), "S3": r(P - 1.000*rng),
+        },
+    }
+
+
 # ── Signal mapping ────────────────────────────────────────────────────────────
 
 def prime_to_signal(direction: str, long_score: int, short_score: int) -> str:
@@ -435,33 +636,78 @@ def prime_to_signal(direction: str, long_score: int, short_score: int) -> str:
 
 # ── Screener ──────────────────────────────────────────────────────────────────
 
-def run_screener(tickers: list[str], on_result=None) -> list[dict]:
-    data = yf.download(
-        " ".join(tickers), period="1y", progress=False, auto_adjust=True
+def _yf_download(tickers: list[str], period: str = "1y", chunk_size: int = 100, workers: int = 4) -> pd.DataFrame:
+    """Download yfinance data in parallel chunks to avoid slow single-request downloads for large lists."""
+    chunks = [tickers[i:i + chunk_size] for i in range(0, len(tickers), chunk_size)]
+
+    def fetch(chunk):
+        df = yf.download(" ".join(chunk), period=period, progress=False, auto_adjust=True)
+        if df.empty:
+            return None
+        if not isinstance(df.columns, pd.MultiIndex):
+            df.columns = pd.MultiIndex.from_tuples([(col, chunk[0]) for col in df.columns])
+        return df
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=min(workers, len(chunks))) as ex:
+        parts = list(ex.map(fetch, chunks))
+
+    parts = [p for p in parts if p is not None]
+    return pd.concat(parts, axis=1) if parts else pd.DataFrame()
+
+
+def _unpack_yf(data: pd.DataFrame, tickers: list[str]):
+    if isinstance(data.columns, pd.MultiIndex):
+        return data["Open"], data["Close"], data["High"], data["Low"], data["Volume"]
+    t = tickers[0]
+    return (
+        data[["Open"]].rename(columns={"Open": t}),
+        data[["Close"]].rename(columns={"Close": t}),
+        data[["High"]].rename(columns={"High": t}),
+        data[["Low"]].rename(columns={"Low": t}),
+        data[["Volume"]].rename(columns={"Volume": t}),
     )
 
-    if isinstance(data.columns, pd.MultiIndex):
-        close_df  = data["Close"]
-        high_df   = data["High"]
-        low_df    = data["Low"]
-        volume_df = data["Volume"]
-    else:
-        close_df  = data[["Close"]].rename(columns={"Close": tickers[0]})
-        high_df   = data[["High"]].rename(columns={"High": tickers[0]})
-        low_df    = data[["Low"]].rename(columns={"Low": tickers[0]})
-        volume_df = data[["Volume"]].rename(columns={"Volume": tickers[0]})
+
+MTF_STOCK_LIMIT = 100  # fetch real YF MTF only for lists with ≤ this many stocks
+
+def run_screener(tickers: list[str], on_result=None) -> list[dict]:
+    stocks = [t for t in tickers if not t.endswith("-USD")]
+    crypto = [t for t in tickers if t.endswith("-USD")]
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=4) as ex:
+        yf_fut   = ex.submit(_yf_download, stocks) if stocks else None
+        bn_fut   = ex.submit(_fetch_all_binance_daily, crypto)
+        mtf_fut  = ex.submit(_fetch_all_binance_mtf, crypto)
+        ymtf_fut = ex.submit(_fetch_all_yf_mtf, stocks) if stocks and len(stocks) <= MTF_STOCK_LIMIT else None
+
+    yf_data     = yf_fut.result() if yf_fut else pd.DataFrame()
+    bn_daily    = bn_fut.result()
+    binance_mtf = mtf_fut.result()
+    stock_mtf   = ymtf_fut.result() if ymtf_fut else {}
+
+    open_df, close_df, high_df, low_df, volume_df = _unpack_yf(yf_data, stocks) if stocks and not yf_data.empty else (pd.DataFrame(), pd.DataFrame(), pd.DataFrame(), pd.DataFrame(), pd.DataFrame())
 
     results = []
     for i, ticker in enumerate(tickers):
         result = None
         try:
-            if ticker not in close_df.columns:
-                raise KeyError(ticker)
-
-            close  = close_df[ticker].dropna()
-            high   = high_df[ticker].dropna()
-            low    = low_df[ticker].dropna()
-            volume = volume_df[ticker].dropna()
+            if ticker.endswith("-USD"):
+                df = bn_daily.get(ticker)
+                if df is None or len(df) < 30:
+                    raise ValueError("no Binance data")
+                open_  = df["open"].reset_index(drop=True)
+                close  = df["close"].reset_index(drop=True)
+                high   = df["high"].reset_index(drop=True)
+                low    = df["low"].reset_index(drop=True)
+                volume = df["volume"].reset_index(drop=True)
+            else:
+                if ticker not in close_df.columns:
+                    raise KeyError(ticker)
+                open_  = open_df[ticker].dropna()
+                close  = close_df[ticker].dropna()
+                high   = high_df[ticker].dropna()
+                low    = low_df[ticker].dropna()
+                volume = volume_df[ticker].dropna()
 
             if len(close) < 30:
                 raise ValueError("insufficient data")
@@ -470,6 +716,9 @@ def run_screener(tickers: list[str], on_result=None) -> list[dict]:
             high_52w = float(high.max())
             low_52w  = float(low.min())
 
+            ma5   = float(close.rolling(5).mean().iloc[-1])   if len(close) >= 5   else None
+            ma10  = float(close.rolling(10).mean().iloc[-1])  if len(close) >= 10  else None
+            ma20  = float(close.rolling(20).mean().iloc[-1])  if len(close) >= 20  else None
             ma50  = float(close.rolling(50).mean().iloc[-1])  if len(close) >= 50  else None
             ma200 = float(close.rolling(200).mean().iloc[-1]) if len(close) >= 200 else None
 
@@ -481,13 +730,18 @@ def run_screener(tickers: list[str], on_result=None) -> list[dict]:
             vol_today = float(volume.iloc[-1])
             vol_ratio = round(vol_today / vol_avg, 2) if vol_avg and vol_avg > 0 else None
 
-            pct_from_high = round((price - high_52w) / high_52w * 100, 2)
-            pct_from_low  = round((price - low_52w)  / low_52w  * 100, 2)
-            pct_vs_ma200  = round((price - ma200) / ma200 * 100, 2) if ma200 else None
-            pct_vs_ma50   = round((price - ma50)  / ma50  * 100, 2) if ma50  else None
+            pct_from_high  = round((price - high_52w) / high_52w * 100, 2)
+            pct_from_low   = round((price - low_52w)  / low_52w  * 100, 2)
+            pct_vs_ma5     = round((price - ma5)   / ma5   * 100, 2) if ma5   else None
+            pct_vs_ma10    = round((price - ma10)  / ma10  * 100, 2) if ma10  else None
+            pct_vs_ma20    = round((price - ma20)  / ma20  * 100, 2) if ma20  else None
+            pct_vs_ma50    = round((price - ma50)  / ma50  * 100, 2) if ma50  else None
+            pct_vs_ma200   = round((price - ma200) / ma200 * 100, 2) if ma200 else None
 
-            prime  = helper_prime_score(close, high, low, volume)
+            prime  = helper_prime_score(close, high, low, volume, mtf_counts=stock_mtf.get(ticker) or binance_mtf.get(ticker))
             pulse  = helper_pulse_signals(close, high, low)
+            candle = detect_candle_pattern(open_, high, low, close)
+            pivots = _compute_pivots(high, low, close)
 
             signal = prime_to_signal(prime["direction"], prime["long_score"], prime["short_score"])
 
@@ -516,11 +770,17 @@ def run_screener(tickers: list[str], on_result=None) -> list[dict]:
                 "pct_from_high": pct_from_high,
                 "pct_from_low":  pct_from_low,
                 # Medias móviles
+                "ma5":           round(ma5, 2)   if ma5   else None,
+                "ma10":          round(ma10, 2)  if ma10  else None,
+                "ma20":          round(ma20, 2)  if ma20  else None,
                 "ma50":          round(ma50, 2)  if ma50  else None,
                 "ma200":         round(ma200, 2) if ma200 else None,
+                "pct_vs_ma5":    pct_vs_ma5,
+                "pct_vs_ma10":   pct_vs_ma10,
+                "pct_vs_ma20":   pct_vs_ma20,
                 "pct_vs_ma50":   pct_vs_ma50,
                 "pct_vs_ma200":  pct_vs_ma200,
-                # Momentum clásico (mantenidos para columnas existentes)
+                # Momentum clásico
                 "rsi":           rsi,
                 "macd_hist":     macd_hist,
                 # Volumen
@@ -529,6 +789,10 @@ def run_screener(tickers: list[str], on_result=None) -> list[dict]:
                 "bb_upper":      bb_upper,
                 "bb_lower":      bb_lower,
                 "pct_b":         pct_b,
+                # Patrón vela
+                "candle_pattern": candle,
+                # Pivot points
+                "pivots":        pivots,
             }
             results.append(result)
         except Exception:
@@ -549,49 +813,74 @@ def compute_all(tickers: list[str], on_result=None, on_error=None) -> list[dict]
         if on_result:
             on_result(row)
 
-    data = yf.download(
-        " ".join(tickers), period="1y", progress=False, auto_adjust=True
-    )
+    stocks = [t for t in tickers if not t.endswith("-USD")]
+    crypto = [t for t in tickers if t.endswith("-USD")]
 
-    if isinstance(data.columns, pd.MultiIndex):
-        close_df  = data["Close"]
-        high_df   = data["High"]
-        low_df    = data["Low"]
-        volume_df = data["Volume"]
-    else:
-        close_df  = data[["Close"]].rename(columns={"Close": tickers[0]})
-        high_df   = data[["High"]].rename(columns={"High": tickers[0]})
-        low_df    = data[["Low"]].rename(columns={"Low": tickers[0]})
-        volume_df = data[["Volume"]].rename(columns={"Volume": tickers[0]})
+    with concurrent.futures.ThreadPoolExecutor(max_workers=4) as ex:
+        yf_fut   = ex.submit(_yf_download, stocks) if stocks else None
+        bn_fut   = ex.submit(_fetch_all_binance_daily, crypto)
+        mtf_fut  = ex.submit(_fetch_all_binance_mtf, crypto)
+        ymtf_fut = ex.submit(_fetch_all_yf_mtf, stocks) if stocks and len(stocks) <= MTF_STOCK_LIMIT else None
 
-    for i, ticker in enumerate(tickers):
+    yf_data     = yf_fut.result() if yf_fut else pd.DataFrame()
+    bn_daily    = bn_fut.result()
+    binance_mtf = mtf_fut.result()
+    stock_mtf   = ymtf_fut.result() if ymtf_fut else {}
+
+    open_df, close_df, high_df, low_df, volume_df = _unpack_yf(yf_data, stocks) if stocks and not yf_data.empty else (pd.DataFrame(), pd.DataFrame(), pd.DataFrame(), pd.DataFrame(), pd.DataFrame())
+
+    for ticker in tickers:
         try:
-            if ticker not in close_df.columns:
-                raise KeyError(ticker)
-            close  = close_df[ticker].dropna()
-            high   = high_df[ticker].dropna()
-            low    = low_df[ticker].dropna()
-            volume = volume_df[ticker].dropna()
+            if ticker.endswith("-USD"):
+                df = bn_daily.get(ticker)
+                if df is None or len(df) < 30:
+                    raise ValueError("no Binance data")
+                open_  = df["open"].reset_index(drop=True)
+                close  = df["close"].reset_index(drop=True)
+                high   = df["high"].reset_index(drop=True)
+                low    = df["low"].reset_index(drop=True)
+                volume = df["volume"].reset_index(drop=True)
+            else:
+                if ticker not in close_df.columns:
+                    raise KeyError(ticker)
+                open_  = open_df[ticker].dropna()
+                close  = close_df[ticker].dropna()
+                high   = high_df[ticker].dropna()
+                low    = low_df[ticker].dropna()
+                volume = volume_df[ticker].dropna()
             if len(close) < 30:
                 raise ValueError("insufficient data")
 
             price    = float(close.iloc[-1])
             high_52w = float(high.max())
             low_52w  = float(low.min())
+
+            ma5   = float(close.rolling(5).mean().iloc[-1])   if len(close) >= 5   else None
+            ma10  = float(close.rolling(10).mean().iloc[-1])  if len(close) >= 10  else None
+            ma20  = float(close.rolling(20).mean().iloc[-1])  if len(close) >= 20  else None
             ma50  = float(close.rolling(50).mean().iloc[-1])  if len(close) >= 50  else None
             ma200 = float(close.rolling(200).mean().iloc[-1]) if len(close) >= 200 else None
+
             rsi                            = compute_rsi(close)
             macd_line, macd_sig, macd_hist = compute_macd(close)
             bb_upper, bb_lower, pct_b      = compute_bollinger(close)
+
             vol_avg   = float(volume.rolling(20).mean().iloc[-1]) if len(volume) >= 20 else None
             vol_today = float(volume.iloc[-1])
             vol_ratio = round(vol_today / vol_avg, 2) if vol_avg and vol_avg > 0 else None
+
             pct_from_high = round((price - high_52w) / high_52w * 100, 2)
             pct_from_low  = round((price - low_52w)  / low_52w  * 100, 2)
-            pct_vs_ma200  = round((price - ma200) / ma200 * 100, 2) if ma200 else None
+            pct_vs_ma5    = round((price - ma5)   / ma5   * 100, 2) if ma5   else None
+            pct_vs_ma10   = round((price - ma10)  / ma10  * 100, 2) if ma10  else None
+            pct_vs_ma20   = round((price - ma20)  / ma20  * 100, 2) if ma20  else None
             pct_vs_ma50   = round((price - ma50)  / ma50  * 100, 2) if ma50  else None
-            prime  = helper_prime_score(close, high, low, volume)
+            pct_vs_ma200  = round((price - ma200) / ma200 * 100, 2) if ma200 else None
+
+            prime  = helper_prime_score(close, high, low, volume, mtf_counts=stock_mtf.get(ticker) or binance_mtf.get(ticker))
             pulse  = helper_pulse_signals(close, high, low)
+            candle = detect_candle_pattern(open_, high, low, close)
+            pivots = _compute_pivots(high, low, close)
             signal = prime_to_signal(prime["direction"], prime["long_score"], prime["short_score"])
             row = {
                 "ticker": ticker, "price": round(price, 2),
@@ -603,11 +892,18 @@ def compute_all(tickers: list[str], on_result=None, on_error=None) -> list[dict]
                 "signal": signal,
                 "high_52w": round(high_52w, 2), "low_52w": round(low_52w, 2),
                 "pct_from_high": pct_from_high, "pct_from_low": pct_from_low,
-                "ma50": round(ma50, 2) if ma50 else None,
+                "ma5":  round(ma5, 2)   if ma5   else None,
+                "ma10": round(ma10, 2)  if ma10  else None,
+                "ma20": round(ma20, 2)  if ma20  else None,
+                "ma50": round(ma50, 2)  if ma50  else None,
                 "ma200": round(ma200, 2) if ma200 else None,
-                "pct_vs_ma50": pct_vs_ma50, "pct_vs_ma200": pct_vs_ma200,
+                "pct_vs_ma5": pct_vs_ma5, "pct_vs_ma10": pct_vs_ma10,
+                "pct_vs_ma20": pct_vs_ma20, "pct_vs_ma50": pct_vs_ma50,
+                "pct_vs_ma200": pct_vs_ma200,
                 "rsi": rsi, "macd_hist": macd_hist, "vol_ratio": vol_ratio,
                 "bb_upper": bb_upper, "bb_lower": bb_lower, "pct_b": pct_b,
+                "candle_pattern": candle,
+                "pivots": pivots,
             }
             results.append(row)
             if on_result:

@@ -11,6 +11,7 @@ import time
 from datetime import datetime, timezone
 
 import requests
+from concurrent.futures import ThreadPoolExecutor
 
 from screener import get_tickers, compute_all
 
@@ -54,6 +55,71 @@ def finish_run(token, account_id, db_id, run_id: int, processed: int):
         "UPDATE screener_runs SET status='done', processed=?, finished_at=? WHERE id=?",
         [processed, now, run_id],
     )
+
+
+HISTORY_WINDOWS = [
+    ("pct_5d",  3,  7),
+    ("pct_10d", 8, 12),
+    ("pct_20d", 17, 23),
+]
+
+
+def ensure_history_table(token, account_id, db_id):
+    d1_query(token, account_id, db_id, """
+        CREATE TABLE IF NOT EXISTS signal_history (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            list_id TEXT NOT NULL,
+            ticker TEXT NOT NULL,
+            signal TEXT NOT NULL,
+            direction TEXT NOT NULL,
+            score INTEGER NOT NULL,
+            price REAL NOT NULL,
+            recorded_at TEXT NOT NULL,
+            pct_5d REAL,
+            pct_10d REAL,
+            pct_20d REAL,
+            UNIQUE(list_id, ticker, recorded_at)
+        )
+    """)
+
+
+def insert_history(token, account_id, db_id, list_id, today, results):
+    for row in results:
+        try:
+            d1_query(token, account_id, db_id,
+                "INSERT OR IGNORE INTO signal_history "
+                "(list_id, ticker, signal, direction, score, price, recorded_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                [list_id, row["ticker"], row["signal"], row["direction"],
+                 row["score"], row["price"], today])
+        except Exception as e:
+            print(f"[history] Error {row['ticker']}: {e}", file=sys.stderr)
+
+
+def update_history_prices(token, account_id, db_id, list_id, today, results):
+    from datetime import timedelta
+    today_dt = datetime.fromisoformat(today)
+    price_map = {row["ticker"]: row["price"] for row in results}
+
+    def do_update(col, date_from, date_to, ticker, price):
+        try:
+            d1_query(token, account_id, db_id,
+                f"UPDATE signal_history SET {col} = ROUND((? - price) / price * 100, 2) "
+                f"WHERE list_id = ? AND ticker = ? AND recorded_at BETWEEN ? AND ? AND {col} IS NULL",
+                [price, list_id, ticker, date_from, date_to])
+        except Exception:
+            pass
+
+    tasks = []
+    for col, min_d, max_d in HISTORY_WINDOWS:
+        date_from = (today_dt - timedelta(days=max_d)).date().isoformat()
+        date_to   = (today_dt - timedelta(days=min_d)).date().isoformat()
+        for ticker, price in price_map.items():
+            tasks.append((col, date_from, date_to, ticker, price))
+
+    with ThreadPoolExecutor(max_workers=5) as ex:
+        for t in tasks:
+            ex.submit(do_update, *t)
 
 
 def upsert_result(token, account_id, db_id, run_id: int, list_id: str, row: dict):
@@ -120,6 +186,12 @@ def main():
 
     finish_run(token, account_id, db_id, run_id, len(results))
     print(f"[job] Done. Run {run_id} marcado como completado.")
+
+    today = datetime.now(timezone.utc).date().isoformat()
+    ensure_history_table(token, account_id, db_id)
+    insert_history(token, account_id, db_id, args.list_id, today, results)
+    update_history_prices(token, account_id, db_id, args.list_id, today, results)
+    print(f"[history] {len(results)} registros insertados/actualizados para {today}")
 
     if errors:
         print(f"[job] Tickers con error: {[t for t, _ in errors[:10]]}")

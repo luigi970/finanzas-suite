@@ -35,3 +35,11 @@ async def get_lists_meta(db) -> list[dict]:
         "SELECT list_id, COUNT(*) as count FROM screener_results GROUP BY list_id"
     ).all()
     return [row.to_py() for row in cursor.results]
+
+
+async def get_history(db, list_id: str, ticker: str, limit: int = 90) -> list[dict]:
+    cursor = await db.prepare(
+        "SELECT ticker, signal, direction, score, price, recorded_at, pct_5d, pct_10d, pct_20d "
+        "FROM signal_history WHERE list_id = ? AND ticker = ? ORDER BY recorded_at DESC LIMIT ?"
+    ).bind(list_id, ticker, limit).all()
+    return [row.to_py() for row in cursor.results]

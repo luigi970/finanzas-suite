@@ -2,8 +2,8 @@ name: Run Screener
 
 on:
   schedule:
-    # Corre a las 2am UTC (11pm ARG / 10pm EST) de lunes a viernes
-    - cron: "0 2 * * 1-5"
+    # Corre a las 2am UTC (11pm ARG / 10pm EST) todos los días
+    - cron: "0 2 * * *"
   repository_dispatch:
     types: [run-screener]
   workflow_dispatch:

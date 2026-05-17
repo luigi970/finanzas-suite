@@ -5,7 +5,7 @@ from workers import Response, fetch
 from providers.cf_ai import analyze as cf_analyze
 from providers.groq import analyze as groq_analyze
 from providers.gemini import analyze as gemini_analyze
-from storage.db import get_latest_run, get_results, get_lists_meta
+from storage.db import get_latest_run, get_results, get_lists_meta, get_history
 
 ALLOWED_ORIGINS = {
     "https://maximos.pages.dev",
@@ -107,6 +107,18 @@ async def on_fetch(request, env):
             return _j({"error": str(e)}, status=500)
         return _j({"status": "ready", "stocks": rows, "total": len(rows), "list_id": list_id})
 
+    # GET /api/history?list_id=sp500&ticker=AAPL
+    if method == "GET" and path == "/api/history":
+        list_id = qs.get("list_id", "sp500")
+        ticker  = qs.get("ticker", "").upper()
+        if not ticker:
+            return _j({"history": []})
+        try:
+            rows = await get_history(db, list_id, ticker)
+        except Exception as e:
+            return _j({"history": [], "error": str(e)})
+        return _j({"history": rows})
+
     # GET /api/lists
     if method == "GET" and path == "/api/lists":
         try:
@@ -191,5 +203,122 @@ async def on_fetch(request, env):
             return _j({"error": f"GitHub API {resp.status}: {err_text}"}, status=500)
         except Exception as e:
             return _j({"error": f"{type(e).__name__}: {e}"}, status=500)
+
+    # GET /api/info?ticker=AAPL — company fundamentals via Yahoo Finance
+    if method == "GET" and path == "/api/info":
+        ticker = qs.get("ticker", "").upper()
+        if not ticker:
+            return _j({"info": {}})
+        try:
+            modules = "assetProfile,summaryDetail,defaultKeyStatistics,financialData,quoteType,calendarEvents"
+            url = f"https://query1.finance.yahoo.com/v10/finance/quoteSummary/{ticker}?modules={modules}&lang=en-US&region=US"
+            resp = await fetch(url, headers={
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+                "Accept": "application/json",
+            })
+            data = json.loads(await resp.text())
+            results = (data.get("quoteSummary") or {}).get("result") or []
+            if not results:
+                return _j({"info": {}})
+            r = results[0]
+            def _raw(d, k):
+                v = d.get(k)
+                return v.get("raw") if isinstance(v, dict) else v
+            profile = r.get("assetProfile") or {}
+            stats   = r.get("defaultKeyStatistics") or {}
+            summary = r.get("summaryDetail") or {}
+            fin     = r.get("financialData") or {}
+            qt      = r.get("quoteType") or {}
+            cal     = r.get("calendarEvents") or {}
+
+            earnings_date = None
+            earnings_list = (cal.get("earnings") or {}).get("earningsDate") or []
+            if earnings_list:
+                first = earnings_list[0]
+                earnings_date = first.get("fmt") if isinstance(first, dict) else str(first)
+
+            return _j({"info": {
+                "name":              qt.get("longName") or qt.get("shortName") or ticker,
+                "sector":            profile.get("sector") or "",
+                "industry":          profile.get("industry") or "",
+                "market_cap":        _raw(summary, "marketCap"),
+                "trailing_pe":       _raw(summary, "trailingPE"),
+                "forward_pe":        _raw(stats,   "forwardPE"),
+                "beta":              _raw(summary, "beta"),
+                "dividend_yield":    _raw(summary, "dividendYield"),
+                "target_price":      _raw(fin,     "targetMeanPrice"),
+                "target_high":       _raw(fin,     "targetHighPrice"),
+                "target_low":        _raw(fin,     "targetLowPrice"),
+                "recommendation_key": fin.get("recommendationKey"),
+                "analyst_count":     _raw(fin,     "numberOfAnalystOpinions"),
+                "earnings_date":     earnings_date,
+            }})
+        except Exception as e:
+            return _j({"info": {}, "error": str(e)})
+
+    # GET /api/news?ticker=AAPL — Yahoo Finance news search
+    if method == "GET" and path == "/api/news":
+        ticker = qs.get("ticker", "").upper()
+        if not ticker:
+            return _j({"news": []})
+        try:
+            url = f"https://query2.finance.yahoo.com/v1/finance/search?q={ticker}&newsCount=15&quotesCount=0&lang=en-US&region=US"
+            resp = await fetch(url, headers={"User-Agent": "Mozilla/5.0"})
+            data = json.loads(await resp.text())
+            raw_news = data.get("news") or []
+            news = []
+            for item in raw_news[:15]:
+                title = item.get("title", "")
+                link  = item.get("link", "")
+                if not (title and link):
+                    continue
+                pub_time = item.get("providerPublishTime")
+                thumbnail = None
+                for res in (item.get("thumbnail") or {}).get("resolutions") or []:
+                    thumbnail = res.get("url"); break
+                news.append({
+                    "title":     title,
+                    "summary":   "",
+                    "publisher": item.get("publisher", ""),
+                    "time":      pub_time,
+                    "link":      link,
+                    "thumbnail": thumbnail,
+                })
+            return _j({"news": news})
+        except Exception as e:
+            return _j({"news": [], "error": str(e)})
+
+    # GET /api/quotes?tickers=AAPL,MSFT — real-time prices via Yahoo Finance
+    if method == "GET" and path == "/api/quotes":
+        tickers_str = qs.get("tickers", "")
+        if not tickers_str:
+            return _j({"quotes": {}})
+        try:
+            url = f"https://query1.finance.yahoo.com/v7/finance/quote?symbols={tickers_str}&lang=en-US&region=US"
+            resp = await fetch(url, headers={"User-Agent": "Mozilla/5.0"})
+            data = json.loads(await resp.text())
+            results = (data.get("quoteResponse") or {}).get("result") or []
+            quotes = {}
+            for r in results:
+                symbol = r.get("symbol")
+                price  = r.get("regularMarketPrice")
+                prev   = r.get("regularMarketPreviousClose")
+                if not (symbol and price is not None):
+                    continue
+                change     = r.get("regularMarketChange")
+                change_pct = r.get("regularMarketChangePercent")
+                quotes[symbol] = {
+                    "price":      round(price, 2),
+                    "change":     round(change, 2)     if change     is not None else None,
+                    "change_pct": round(change_pct, 2) if change_pct is not None else None,
+                    "open":       r.get("regularMarketOpen"),
+                    "high":       r.get("regularMarketDayHigh"),
+                    "low":        r.get("regularMarketDayLow"),
+                    "volume":     r.get("regularMarketVolume"),
+                    "prev_close": round(prev, 2) if prev is not None else None,
+                }
+            return _j({"quotes": quotes})
+        except Exception as e:
+            return _j({"quotes": {}, "error": str(e)})
 
     return _j({"error": "not found"}, status=404)
