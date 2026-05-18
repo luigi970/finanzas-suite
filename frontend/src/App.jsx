@@ -650,7 +650,7 @@ function TickerModal({ stock: s, listId, onClose }) {
         <div className="p-4 sm:p-5 space-y-4 sm:space-y-5">
 
           {/* Score */}
-          <div>
+          <div className="bg-white rounded-xl border border-gray-200 p-3 shadow-sm">
             <div className="flex items-center justify-between mb-2">
               <span className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Helper Prime Score</span>
               <span className="text-2xl font-bold text-gray-900">{s.score}<span className="text-sm text-gray-400">/100</span></span>
@@ -678,7 +678,7 @@ function TickerModal({ stock: s, listId, onClose }) {
           </div>
 
           {/* Métricas */}
-          <div>
+          <div className="bg-white rounded-xl border border-gray-200 p-3 shadow-sm">
             <div className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">Métricas</div>
             <div className="grid grid-cols-3 gap-2">
               {[
@@ -708,7 +708,7 @@ function TickerModal({ stock: s, listId, onClose }) {
 
               {/* Niveles SL / TP */}
               {(s.sl || s.tp1) && (
-                <div>
+                <div className="bg-white rounded-xl border border-gray-200 p-3 shadow-sm">
                   <div className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">Niveles de Riesgo</div>
                   <div className="space-y-1.5 text-sm">
                     <div className="flex justify-between items-center py-1 border-b border-gray-50">
@@ -749,7 +749,7 @@ function TickerModal({ stock: s, listId, onClose }) {
               )}
 
               {/* Helper Pulse */}
-              <div>
+              <div className="bg-white rounded-xl border border-gray-200 p-3 shadow-sm">
                 <div className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">Helper Pulse</div>
                 <div className="flex items-center gap-2">
                   <span className="text-sm text-gray-700">{s.pulse_state ?? "—"}</span>
@@ -785,7 +785,7 @@ function TickerModal({ stock: s, listId, onClose }) {
                   ? ((info.target_price - s.price) / s.price * 100).toFixed(1)
                   : null;
                 return (
-                  <div>
+                  <div className="bg-white rounded-xl border border-gray-200 p-3 shadow-sm">
                     <div className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">Analistas</div>
                     <div className="flex flex-wrap items-center gap-3">
                       {info.recommendation_key && (
@@ -821,7 +821,7 @@ function TickerModal({ stock: s, listId, onClose }) {
 
               {/* Medias Móviles */}
               {[s.ma5, s.ma10, s.ma20, s.ma50, s.ma200].some(v => v != null) && (
-                <div>
+                <div className="bg-white rounded-xl border border-gray-200 p-3 shadow-sm">
                   <div className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">Medias Móviles</div>
                   <div className="space-y-1.5">
                     {[
@@ -856,7 +856,7 @@ function TickerModal({ stock: s, listId, onClose }) {
 
               {/* Pivot Points */}
               {s.pivots && (s.pivots.classic || s.pivots.fibonacci) && (
-                <div>
+                <div className="bg-white rounded-xl border border-gray-200 p-3 shadow-sm">
                   <div className="flex items-center justify-between mb-2">
                     <span className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Pivots</span>
                     <div className="flex rounded-lg overflow-hidden border border-gray-200 text-[10px]">
