@@ -964,10 +964,13 @@ function HelpModal({ onClose }) {
             <h3 className="font-semibold text-gray-900 mb-1">2. Hacé clic en un ticker</h3>
             <p className="mb-1">Al tocar cualquier activo de la tabla abrís su panel de detalle, que incluye:</p>
             <ul className="list-disc list-inside space-y-0.5 text-xs text-gray-700">
-              <li><strong>Gráfico de precio</strong> (últimos 3 meses, via TradingView)</li>
-              <li><strong>Score y señal</strong> con dirección, zona estructural y niveles SL/TP</li>
-              <li><strong>Recomendación de IA</strong> generada automáticamente con los indicadores del activo</li>
-              <li><strong>Link a TradingView</strong> para ver el gráfico completo</li>
+              <li><strong>Gráfico de precio</strong> (últimos 3 meses via TradingView, click para ver fullscreen)</li>
+              <li><strong>Score y señal</strong> con dirección, zona estructural y niveles SL/TP1/TP2</li>
+              <li><strong>Helper Pulse</strong> — última señal de divergencia del oscilador</li>
+              <li><strong>Medias Móviles</strong> — grilla MA5→MA200 con distancia % al precio actual</li>
+              <li><strong>Pivot Points</strong> — niveles Classic y Fibonacci (R3→S3) con toggle</li>
+              <li><strong>Analistas</strong> — precio objetivo, PE ratio, beta y earnings date (vía Yahoo Finance)</li>
+              <li><strong>Recomendación de IA</strong> — análisis en español generado con todos los indicadores</li>
             </ul>
           </section>
 
@@ -1029,14 +1032,16 @@ function HelpModal({ onClose }) {
             <h3 className="font-semibold text-gray-900 mb-2">5. Columnas clave</h3>
             <div className="space-y-1.5 text-xs">
               {[
-                ["Zona",    "DISCOUNT = precio bajo la regresión lineal (zona de valor). FAIR = zona media. PREMIUM = zona extendida (cara)."],
-                ["Dir",     "LONG = setup alcista, SHORT = setup bajista. El Score mide la fuerza de esa dirección."],
-                ["SL / TP1","Stop Loss y Take Profit 1 calculados con ATR × 1.5 desde el precio actual."],
-                ["ADX",     "Fuerza de la tendencia. Sobre 20 es condición mínima. Sobre 30 es tendencia fuerte."],
-                ["Pulse",   "Última señal del oscilador de divergencias (Helper Pulse)."],
-                ["RSI",     "Sobreventa (<30) o sobrecompra (>70)."],
-                ["vs MA200","Qué tan lejos está del promedio de 200 días. Positivo = tendencia principal alcista."],
-                ["Vol ×",   "Volumen de hoy vs promedio 20 días. 1.5x+ confirma movimiento."],
+                ["Zona",     "DISCOUNT = precio bajo la regresión lineal (zona de valor). FAIR = zona media. PREMIUM = zona extendida (cara)."],
+                ["Dir",      "LONG = setup alcista, SHORT = setup bajista. El Score mide la fuerza de esa dirección."],
+                ["SL / TP1", "Stop Loss y Take Profit 1 calculados con ATR × 1.5. TP2 = ATR × 3.0."],
+                ["ADX",      "Fuerza de la tendencia. Sobre 20 es condición mínima. Sobre 25 es tendencia fuerte."],
+                ["Pulse",    "Última señal del oscilador de divergencias (Helper Pulse)."],
+                ["RSI",      "Sobreventa (<30) o sobrecompra (>70)."],
+                ["vs MA200", "Qué tan lejos está del promedio de 200 días. Positivo = tendencia principal alcista."],
+                ["Vol ×",    "Volumen de hoy vs promedio 20 días. 1.5x+ confirma movimiento."],
+                ["Medias Móviles", "En el detalle del ticker: MA5, MA10, MA20, MA50, MA200 con % de distancia al precio. Verde = precio arriba, rojo = abajo."],
+                ["Pivots",   "Niveles de soporte y resistencia calculados del día anterior. Classic (pivots estándar) o Fibonacci. R1-R3 = resistencias, S1-S3 = soportes, P = pivot central."],
               ].map(([col, desc]) => (
                 <div key={col} className="flex gap-2">
                   <span className="font-mono bg-gray-100 px-1.5 py-0.5 rounded text-gray-700 shrink-0 self-start">{col}</span>
@@ -1054,8 +1059,9 @@ function HelpModal({ onClose }) {
               <li>Verificá que <strong>Dir</strong> sea LONG y <strong>Zona</strong> sea DISCOUNT o FAIR.</li>
               <li>Confirmá <strong>ADX &gt; 25</strong> y <strong>vs MA200 positivo</strong>.</li>
               <li>Si el <strong>Pulse</strong> muestra GIRO UP o SIGUE UP → mayor confluencia.</li>
-              <li>Hacé clic en el ticker para ver el gráfico y la recomendación de IA.</li>
-              <li>Revisá el <strong>SL/TP1</strong> para dimensionar tu riesgo antes de entrar.</li>
+              <li>Hacé clic en el ticker para ver el gráfico, las medias móviles y la recomendación de IA.</li>
+              <li>Revisá los <strong>Pivots</strong> para identificar soporte/resistencia inmediata.</li>
+              <li>Dimensioná tu riesgo con <strong>SL/TP1/TP2</strong> antes de entrar.</li>
             </ol>
           </section>
 

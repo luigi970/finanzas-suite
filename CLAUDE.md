@@ -181,8 +181,11 @@ Parámetros: `pivot_len=3`, `min_bars_between=5`, `min_osc_delta=3.0`, `turn_lev
 `pulse_signal`, `pulse_state`,
 `rsi`, `macd_hist`, `vol_ratio`,
 `bb_upper`, `bb_lower`, `pct_b`,
-`ma50`, `ma200`, `pct_vs_ma50`, `pct_vs_ma200`,
-`high_52w`, `low_52w`, `pct_from_high`, `pct_from_low`
+`ma5`, `ma10`, `ma20`, `ma50`, `ma200`,
+`pct_vs_ma5`, `pct_vs_ma10`, `pct_vs_ma20`, `pct_vs_ma50`, `pct_vs_ma200`,
+`high_52w`, `low_52w`, `pct_from_high`, `pct_from_low`,
+`candle_pattern` (dict: `name`, `type` → bullish/bearish/neutral),
+`pivots` (dict: `classic` y `fibonacci`, cada uno con P, R1-R3, S1-S3)
 
 ## Listas de activos
 
@@ -201,6 +204,12 @@ En FastAPI (local): Groq → Gemini.
 
 El prompt está en `worker/src/providers/prompt.py` (`build_prompt()`). El backend local tiene el prompt inlineado en `main.py` (misma lógica).
 
+### Estructura del prompt
+- **Persona**: analista experto, español rioplatense, tono amigo exitoso, sin jerga ni markdown
+- **Datos incluidos**: señal, dirección, scores, zona, MA5-MA200 (con % distancia), RSI, MACD, Bollinger %B, ADX, vol_ratio, momentum/Pulse, patrón de velas, pivots S1/P/R1, SL/TP
+- **Output**: 4-5 oraciones corridas, empezando por la conclusión, 2-3 datos clave, señal de falla, perspectiva de riesgo
+- **Modelos**: `llama-3.3-70b-versatile` (Groq), `gemini-2.0-flash-lite` (Gemini), `@cf/meta/llama-3.3-70b-instruct-fp8-fast` (CF AI)
+
 ## Decisiones técnicas
 
 - **Descarga bulk**: `yf.download("AAPL MSFT ...", period="1y")` — un solo request HTTP para todos los tickers.
@@ -210,9 +219,29 @@ El prompt está en `worker/src/providers/prompt.py` (`build_prompt()`). El backe
 - **MTF aproximado**: temporalidades reales (15m/1h/4h) no disponibles con datos diarios. Se usan 4 señales de EMAs diarias.
 - **Pine Script originales**: en `c:\Users\Compu\Documents\Dev\Finanzas\suite indicators\`.
 
+## UI — diseño actual
+
+- **Acento**: ámbar/dorado (`amber-500`, `#f59e0b`)
+- **Header**: `bg-slate-900` con borde top `3px solid #f59e0b` — "máximos" en blanco, status dot
+- **Fondo principal**: `bg-gray-50`
+- **Modales (BottomSheet)**: `bg-slate-50`
+- **TickerModal header**: `bg-slate-900` con borde top amber, texto blanco
+- **SummaryCards**: borde izquierdo de color por señal, número en color, `border-l-4`
+- **TickerModal layout desktop**: 2 columnas — izquierda (Niveles de Riesgo + Pulse) / derecha (Analistas + Medias Móviles + Pivots)
+- **Medias Móviles**: grid MA5→MA200 con badge ↑/↓, barra proporcional, precio y % distancia
+- **Pivots**: toggle Classic / Fibonacci, niveles R3→S3 con color coding (rojo=resistencia, verde=soporte)
+- **Patrón de velas**: badge con nombre y tipo (alcista/bajista/indecisión) en TickerModal header
+
 ## Roadmap
 
+### Features completadas recientemente
+- [x] Gráfico de precio al hacer click en un ticker (TradingView mini + fullscreen)
+- [x] MA5/MA10/MA20 + grilla de medias móviles en el modal
+- [x] Pivot points Classic y Fibonacci con toggle
+- [x] Patrones de velas detectados (hammer, doji, engulfing, etc.)
+- [x] Rediseño UI: header oscuro, acento ámbar, cards con borde de color
+
 ### Features pendientes
-- [ ] Gráfico de precio al hacer click en un ticker
 - [ ] Alertas por email o Telegram cuando cambia la señal
 - [ ] MTF real con descarga intraday para 15m/1h/4h
+- [ ] Lista personalizada (custom tickers) en la UI

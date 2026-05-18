@@ -203,6 +203,18 @@ Body de `/api/refresh`:
 | AGOT. SUP | Agotamiento en zona alta — precaución en longs |
 | AGOT. INF | Agotamiento en zona baja — posible rebote |
 
+### Indicadores adicionales por ticker
+
+| Indicador | Descripción |
+|---|---|
+| MA5/10/20/50/200 | Medias móviles con % de distancia al precio actual |
+| Pivot Points | Soporte/resistencia Classic y Fibonacci (R1-R3, S1-S3, P) |
+| Bollinger %B | Posición del precio dentro de las bandas |
+| MACD histograma | Momentum alcista/bajista |
+| Vol Ratio | Volumen vs promedio 20 días |
+| Candle Pattern | Patrón de velas reciente (hammer, doji, engulfing, etc.) |
+| SL / TP1 / TP2 | Stop Loss y Take Profits automáticos via ATR × 1.5 / × 3.0 |
+
 ### IA — Recomendación automática
 
 Al abrir un ticker el modal llama a `/api/analyze`. La cadena de proveedores es:
@@ -210,6 +222,8 @@ Al abrir un ticker el modal llama a `/api/analyze`. La cadena de proveedores es:
 1. **Cloudflare Workers AI** — `llama-3.3-70b-instruct-fp8-fast` (edge, sin costo adicional)
 2. **Groq** — `llama-3.3-70b-versatile` (fallback)
 3. **Gemini** — `gemini-2.0-flash-lite` (segundo fallback)
+
+El prompt incluye todos los indicadores y genera 4-5 oraciones en español rioplatense, empezando por la conclusión, con el tono de un experto hablando con un amigo.
 
 ---
 
