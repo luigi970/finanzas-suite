@@ -1428,7 +1428,7 @@ export default function App() {
       {selectedTicker && <TickerModal stock={selectedTicker} listId={activeListId} onClose={() => setSelectedTicker(null)} />}
 
       {/* ── Header oscuro ── */}
-      <header className="bg-slate-900 shadow-lg" style={{ borderTop: "3px solid #f59e0b" }}>
+      <header className="bg-slate-900 shadow-lg sticky top-0 z-30" style={{ borderTop: "3px solid #f59e0b" }}>
         <div className="max-w-screen-2xl mx-auto px-3 sm:px-6 py-3 sm:py-4 flex items-center justify-between gap-4">
           {/* Brand */}
           <div className="flex items-center gap-3 min-w-0">
@@ -1595,23 +1595,24 @@ export default function App() {
           </div>
         )}
 
-        {/* Resumen por señal */}
-        {stocks.length > 0 && (
-          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-2 sm:gap-3 mb-4 sm:mb-6">
-            {Object.keys(SIGNAL_CONFIG).map((key) => (
-              <SummaryCard
-                key={key}
-                signal={key}
-                count={stocks.filter(s => s.signal === key).length}
-                active={signalFilter === key}
-                onClick={() => setSignalFilter(signalFilter === key ? "all" : key)}
-              />
-            ))}
-          </div>
-        )}
+        {/* Resumen por señal + Filtros — sticky bajo el header */}
+        <div className="sticky top-[67px] sm:top-[75px] z-20 bg-gray-50 -mx-3 sm:-mx-6 px-3 sm:px-6 pt-1 pb-3 shadow-[0_4px_8px_-2px_rgba(0,0,0,0.06)]">
+          {stocks.length > 0 && (
+            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-2 sm:gap-3 mb-3">
+              {Object.keys(SIGNAL_CONFIG).map((key) => (
+                <SummaryCard
+                  key={key}
+                  signal={key}
+                  count={stocks.filter(s => s.signal === key).length}
+                  active={signalFilter === key}
+                  onClick={() => setSignalFilter(signalFilter === key ? "all" : key)}
+                />
+              ))}
+            </div>
+          )}
 
-        {/* Filtros */}
-        <div className="flex flex-wrap items-center gap-2 sm:gap-3 mb-4">
+          {/* Filtros */}
+          <div className="flex flex-wrap items-center gap-2 sm:gap-3">
           <input
             type="text"
             placeholder="Buscar ticker…"
@@ -1642,7 +1643,8 @@ export default function App() {
               ✕ limpiar
             </button>
           )}
-        </div>
+          </div>{/* fin filtros */}
+        </div>{/* fin sticky */}
 
         {/* Tabla */}
         <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
