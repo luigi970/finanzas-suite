@@ -1397,7 +1397,7 @@ export default function App() {
 
   const th = (label, col, hide = "") => (
     <th
-      className={`px-3 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100 select-none whitespace-nowrap ${hide}`}
+      className={`px-3 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100 select-none whitespace-nowrap bg-gray-50 ${hide}`}
       onClick={() => handleSort(col)}
     >
       {label}<SortIcon col={col} />
@@ -1405,7 +1405,7 @@ export default function App() {
   );
 
   const thStatic = (label, hide = "") => (
-    <th className={`px-3 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider whitespace-nowrap ${hide}`}>
+    <th className={`px-3 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider whitespace-nowrap bg-gray-50 ${hide}`}>
       {label}
     </th>
   );
