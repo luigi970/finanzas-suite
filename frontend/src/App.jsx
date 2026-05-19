@@ -823,7 +823,7 @@ function TickerModal({ stock: s, listId, onClose }) {
               {[s.ma5, s.ma10, s.ma20, s.ma50, s.ma200].some(v => v != null) && (
                 <div className="bg-white rounded-xl border border-gray-200 p-3 shadow-sm">
                   <div className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">Medias Móviles</div>
-                  <div className="divide-y divide-gray-100">
+                  <div className="space-y-1.5">
                     {[
                       ["MA 5",   s.ma5,   s.pct_vs_ma5],
                       ["MA 10",  s.ma10,  s.pct_vs_ma10],
@@ -834,7 +834,7 @@ function TickerModal({ stock: s, listId, onClose }) {
                       const above = p >= 0;
                       return (
                         <Tooltip key={label} text={`Precio ${above ? "por encima" : "por debajo"} de la ${label} un ${Math.abs(p).toFixed(2)}%. Valor actual de la ${label}: $${val?.toFixed(2)}.`}>
-                          <div className="flex items-center gap-2 py-2">
+                          <div className="flex items-center gap-2 py-1">
                             <span className="w-12 text-xs text-gray-500 font-medium shrink-0">{label}</span>
                             <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold shrink-0 ${above ? "bg-green-100 text-green-700" : "bg-red-100 text-red-600"}`}>
                               {above ? "↑ Arriba" : "↓ Abajo"}
