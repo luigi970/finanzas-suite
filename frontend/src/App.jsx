@@ -1309,13 +1309,13 @@ export default function App() {
   const [quotesUpdated, setQuotesUpdated] = useState(null);
   const headerRef = useRef(null);
   const stickyBarRef = useRef(null);
-  const [tableMaxH, setTableMaxH] = useState("60vh");
+  const [aboveTableH, setAboveTableH] = useState(200);
 
   useEffect(() => {
     const measure = () => {
       const h1 = headerRef.current?.getBoundingClientRect().height ?? 71;
       const h2 = stickyBarRef.current?.getBoundingClientRect().height ?? 130;
-      setTableMaxH(`calc(100vh - ${Math.round(h1 + h2) + 24}px)`);
+      setAboveTableH(Math.round(h1 + h2) + 10);
     };
     measure();
     const ro = new ResizeObserver(measure);
@@ -1663,7 +1663,10 @@ export default function App() {
         </div>{/* fin sticky */}
 
         {/* Tabla */}
-        <div className="mt-2.5 bg-white rounded-xl shadow-sm border border-gray-200 overflow-auto" style={{ maxHeight: tableMaxH }}>
+        <div
+          className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-auto sticky"
+          style={{ top: `${aboveTableH}px`, height: `calc(100vh - ${aboveTableH + 16}px)` }}
+        >
           {filtered.length === 0 && !isBusy ? (
             <div className="p-12 text-center text-gray-400">
               {stocks.length === 0
