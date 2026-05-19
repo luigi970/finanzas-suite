@@ -1663,7 +1663,7 @@ export default function App() {
         </div>{/* fin sticky */}
 
         {/* Tabla */}
-        <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-auto" style={{ maxHeight: tableMaxH }}>
+        <div className="mt-2.5 bg-white rounded-xl shadow-sm border border-gray-200 overflow-auto" style={{ maxHeight: tableMaxH }}>
           {filtered.length === 0 && !isBusy ? (
             <div className="p-12 text-center text-gray-400">
               {stocks.length === 0
