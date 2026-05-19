@@ -1307,6 +1307,22 @@ export default function App() {
   });
   const [quotes, setQuotes] = useState({});
   const [quotesUpdated, setQuotesUpdated] = useState(null);
+  const headerRef = useRef(null);
+  const stickyBarRef = useRef(null);
+  const [theadTop, setTheadTop] = useState(200);
+
+  useEffect(() => {
+    const measure = () => {
+      const h1 = headerRef.current?.getBoundingClientRect().height ?? 0;
+      const h2 = stickyBarRef.current?.getBoundingClientRect().height ?? 0;
+      setTheadTop(Math.round(h1 + h2));
+    };
+    measure();
+    const ro = new ResizeObserver(measure);
+    if (headerRef.current) ro.observe(headerRef.current);
+    if (stickyBarRef.current) ro.observe(stickyBarRef.current);
+    return () => ro.disconnect();
+  }, []);
 
   const fetchStocks = useCallback(async () => {
     try {
@@ -1428,7 +1444,7 @@ export default function App() {
       {selectedTicker && <TickerModal stock={selectedTicker} listId={activeListId} onClose={() => setSelectedTicker(null)} />}
 
       {/* ── Header oscuro ── */}
-      <header className="bg-slate-900 shadow-lg sticky top-0 z-30" style={{ borderTop: "3px solid #f59e0b" }}>
+      <header ref={headerRef} className="bg-slate-900 shadow-lg sticky top-0 z-30" style={{ borderTop: "3px solid #f59e0b" }}>
         <div className="max-w-screen-2xl mx-auto px-3 sm:px-6 py-3 sm:py-4 flex items-center justify-between gap-4">
           {/* Brand */}
           <div className="flex items-center gap-3 min-w-0">
@@ -1596,7 +1612,7 @@ export default function App() {
         )}
 
         {/* Resumen por señal + Filtros — sticky bajo el header */}
-        <div className="sticky top-[67px] sm:top-[75px] z-20 bg-gray-50 -mx-3 sm:-mx-6 px-3 sm:px-6 pt-1 pb-3 shadow-[0_4px_8px_-2px_rgba(0,0,0,0.06)]">
+        <div ref={stickyBarRef} className="sticky top-[67px] sm:top-[75px] z-20 bg-gray-50 -mx-3 sm:-mx-6 px-3 sm:px-6 pt-1 pb-3 shadow-[0_4px_8px_-2px_rgba(0,0,0,0.06)]">
           {stocks.length > 0 && (
             <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-2 sm:gap-3 mb-3">
               {Object.keys(SIGNAL_CONFIG).map((key) => (
@@ -1647,7 +1663,7 @@ export default function App() {
         </div>{/* fin sticky */}
 
         {/* Tabla */}
-        <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
+        <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-x-auto">
           {filtered.length === 0 && !isBusy ? (
             <div className="p-12 text-center text-gray-400">
               {stocks.length === 0
@@ -1655,9 +1671,8 @@ export default function App() {
                 : "Sin resultados para este filtro."}
             </div>
           ) : (
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead className="bg-gray-50 border-b border-gray-200">
+            <table className="w-full text-sm">
+                <thead className="bg-gray-50 border-b border-gray-200 sticky z-10" style={{ top: theadTop }}>
                   <tr>
                     {th("Ticker",    "ticker")}
                     {th("Precio",    "price",         "hidden sm:table-cell")}
@@ -1782,7 +1797,6 @@ export default function App() {
                   ))}
                 </tbody>
               </table>
-            </div>
           )}
         </div>
         <p className="text-xs text-gray-400 mt-3 text-right">
