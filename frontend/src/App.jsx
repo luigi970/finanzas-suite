@@ -1664,7 +1664,7 @@ export default function App() {
 
         {/* Tabla */}
         <div
-          className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-auto sticky"
+          className="mt-2.5 bg-white rounded-xl shadow-sm border border-gray-200 overflow-auto sticky"
           style={{ top: `${aboveTableH}px`, height: `calc(100vh - ${aboveTableH + 16}px)` }}
         >
           {filtered.length === 0 && !isBusy ? (
