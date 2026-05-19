@@ -834,7 +834,7 @@ function TickerModal({ stock: s, listId, onClose }) {
                       const above = p >= 0;
                       return (
                         <Tooltip key={label} text={`Precio ${above ? "por encima" : "por debajo"} de la ${label} un ${Math.abs(p).toFixed(2)}%. Valor actual de la ${label}: $${val?.toFixed(2)}.`}>
-                          <div className="flex items-center gap-2 py-1">
+                          <div className="flex items-center gap-2">
                             <span className="w-12 text-xs text-gray-500 font-medium shrink-0">{label}</span>
                             <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold shrink-0 ${above ? "bg-green-100 text-green-700" : "bg-red-100 text-red-600"}`}>
                               {above ? "↑ Arriba" : "↓ Abajo"}
