@@ -1309,13 +1309,13 @@ export default function App() {
   const [quotesUpdated, setQuotesUpdated] = useState(null);
   const headerRef = useRef(null);
   const stickyBarRef = useRef(null);
-  const [theadTop, setTheadTop] = useState(200);
+  const [tableMaxH, setTableMaxH] = useState("60vh");
 
   useEffect(() => {
     const measure = () => {
-      const h1 = headerRef.current?.getBoundingClientRect().height ?? 0;
-      const h2 = stickyBarRef.current?.getBoundingClientRect().height ?? 0;
-      setTheadTop(Math.round(h1 + h2));
+      const h1 = headerRef.current?.getBoundingClientRect().height ?? 71;
+      const h2 = stickyBarRef.current?.getBoundingClientRect().height ?? 130;
+      setTableMaxH(`calc(100vh - ${Math.round(h1 + h2) + 24}px)`);
     };
     measure();
     const ro = new ResizeObserver(measure);
@@ -1663,7 +1663,7 @@ export default function App() {
         </div>{/* fin sticky */}
 
         {/* Tabla */}
-        <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-x-auto">
+        <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-auto" style={{ maxHeight: tableMaxH }}>
           {filtered.length === 0 && !isBusy ? (
             <div className="p-12 text-center text-gray-400">
               {stocks.length === 0
@@ -1672,7 +1672,7 @@ export default function App() {
             </div>
           ) : (
             <table className="w-full text-sm">
-                <thead className="bg-gray-50 border-b border-gray-200 sticky z-10" style={{ top: theadTop }}>
+                <thead className="bg-gray-50 border-b border-gray-200 sticky top-0 z-10">
                   <tr>
                     {th("Ticker",    "ticker")}
                     {th("Precio",    "price",         "hidden sm:table-cell")}
