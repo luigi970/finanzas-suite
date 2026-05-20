@@ -330,10 +330,10 @@ def get_quotes(tickers: str = ""):
                 "price":      round(price, 2)      if price      else None,
                 "change":     change,
                 "change_pct": change_pct,
-                "open":       round(fi.open, 2)      if fi.open      else None,
-                "high":       round(fi.day_high, 2)  if fi.day_high  else None,
-                "low":        round(fi.day_low, 2)   if fi.day_low   else None,
-                "volume":     fi.volume,
+                "open":       round(fi.open, 2)      if getattr(fi, 'open', None)      else None,
+                "high":       round(fi.day_high, 2)  if getattr(fi, 'day_high', None)  else None,
+                "low":        round(fi.day_low, 2)   if getattr(fi, 'day_low', None)   else None,
+                "volume":     getattr(fi, 'volume', None),
                 "prev_close": round(prev_close, 2)   if prev_close   else None,
             }
         except Exception:
@@ -343,6 +343,16 @@ def get_quotes(tickers: str = ""):
         results = dict(ex.map(fetch_one, symbols))
 
     return {"quotes": {k: v for k, v in results.items() if v is not None}}
+
+
+@app.get("/api/dollar")
+async def get_dollar():
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            resp = await client.get("https://dolarapi.com/v1/dolares", headers={"User-Agent": "maximos/1.0"})
+            return {"dollar": resp.json()}
+    except Exception as e:
+        return {"dollar": [], "error": str(e)}
 
 
 @app.get("/api/stocks")

@@ -834,7 +834,7 @@ function TickerModal({ stock: s, listId, onClose }) {
                       const above = p >= 0;
                       return (
                         <Tooltip key={label} text={`Precio ${above ? "por encima" : "por debajo"} de la ${label} un ${Math.abs(p).toFixed(2)}%. Valor actual de la ${label}: $${val?.toFixed(2)}.`}>
-                          <div className="flex items-center gap-2">
+                          <div className="flex flex-row gap-2 pr-4">
                             <span className="w-12 text-xs text-gray-500 font-medium shrink-0">{label}</span>
                             <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold shrink-0 ${above ? "bg-green-100 text-green-700" : "bg-red-100 text-red-600"}`}>
                               {above ? "↑ Arriba" : "↓ Abajo"}
@@ -1098,6 +1098,7 @@ const LIST_CONFIG = [
   { id: "etfs",      label: "ETFs" },
   { id: "adrs_arg",  label: "ADRs Argentina" },
   { id: "crypto",    label: "Crypto" },
+  { id: "dolar",     label: "Dólar" },
 ];
 
 const PULSE_CONFIG = {
@@ -1283,6 +1284,123 @@ function SummaryCard({ signal, count, active, onClick }) {
       <div className={`text-2xl font-extrabold ${cfg.count}`}>{count}</div>
       <div className={`text-xs font-semibold mt-0.5 ${cfg.color.split(" ")[1]}`}>{cfg.label}</div>
     </button>
+  );
+}
+
+function DolarTab() {
+  const [dollar, setDollar] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+  const [updated, setUpdated] = useState(null);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const res = await fetch(`${API_BASE}/api/dollar`);
+      const data = await res.json();
+      if (data.error) throw new Error(data.error);
+      setDollar(data.dollar || []);
+      setUpdated(new Date());
+    } catch (e) {
+      setError(e.message || "Error al cargar cotizaciones");
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => { load(); }, [load]);
+
+  const fmt = (v) => v != null ? `$${Number(v).toLocaleString("es-AR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : "—";
+
+  if (loading) return (
+    <div className="flex items-center justify-center py-20 text-gray-400 text-sm">
+      <svg className="animate-spin h-5 w-5 mr-2 text-amber-500" viewBox="0 0 24 24" fill="none">
+        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z" />
+      </svg>
+      Cargando cotizaciones…
+    </div>
+  );
+
+  if (error) return (
+    <div className="flex flex-col items-center justify-center py-20 gap-2">
+      <p className="text-red-500 text-sm">{error}</p>
+      <button onClick={load} className="text-xs text-amber-600 underline">Reintentar</button>
+    </div>
+  );
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center justify-between mb-2">
+        <h2 className="text-base font-semibold text-gray-700">Cotizaciones del dólar</h2>
+        <div className="flex items-center gap-3">
+          {updated && (
+            <span className="text-xs text-gray-400">
+              Actualizado {updated.toLocaleTimeString("es-AR", { hour: "2-digit", minute: "2-digit" })}
+            </span>
+          )}
+          <button
+            onClick={load}
+            className="text-xs text-amber-600 hover:text-amber-700 border border-amber-300 hover:border-amber-500 px-2.5 py-1 rounded-lg transition"
+          >
+            Actualizar
+          </button>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+        {dollar.map((d) => {
+          const isBlue = d.nombre?.toLowerCase() === "blue";
+          const spread = (d.compra != null && d.venta != null)
+            ? ((d.venta - d.compra) / d.compra * 100).toFixed(1)
+            : null;
+          const hora = d.fechaActualizacion
+            ? new Date(d.fechaActualizacion).toLocaleTimeString("es-AR", { hour: "2-digit", minute: "2-digit" })
+            : null;
+          return (
+            <div
+              key={d.nombre}
+              className={`bg-white rounded-xl border shadow-sm p-4 transition hover:shadow-md ${
+                isBlue
+                  ? "border-amber-400 ring-1 ring-amber-300"
+                  : "border-gray-200"
+              }`}
+            >
+              <div className="flex items-center justify-between mb-3">
+                <span className={`text-sm font-bold ${isBlue ? "text-amber-600" : "text-gray-800"}`}>
+                  {d.nombre}
+                  {isBlue && <span className="ml-1.5 text-[10px] font-semibold bg-amber-100 text-amber-700 px-1.5 py-0.5 rounded-full">BLUE</span>}
+                </span>
+                {hora && <span className="text-[10px] text-gray-400">{hora}</span>}
+              </div>
+              <div className="flex items-end justify-between">
+                <div className="space-y-1">
+                  <div className="flex items-center gap-2">
+                    <span className="text-[11px] text-gray-400 w-12">Compra</span>
+                    <span className="text-sm font-semibold tabular-nums text-gray-900">{fmt(d.compra)}</span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span className="text-[11px] text-gray-400 w-12">Venta</span>
+                    <span className={`text-sm font-bold tabular-nums ${isBlue ? "text-amber-600" : "text-gray-900"}`}>
+                      {fmt(d.venta)}
+                    </span>
+                  </div>
+                </div>
+                {spread != null && (
+                  <div className="text-right">
+                    <div className="text-[10px] text-gray-400">Spread</div>
+                    <div className="text-sm font-semibold text-gray-500">{spread}%</div>
+                  </div>
+                )}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+
+      <p className="text-xs text-gray-400 text-right mt-2">Fuente: dolarapi.com</p>
+    </div>
   );
 }
 
@@ -1507,13 +1625,15 @@ export default function App() {
                 {l.label}
               </button>
             ))}
-            <button
-              onClick={handleRefresh}
-              disabled={loading || isBusy}
-              className="w-full sm:w-auto sm:ml-auto mt-1 sm:mt-0 px-5 py-2 bg-amber-500 text-white text-sm font-medium rounded-lg hover:bg-amber-600 disabled:opacity-50 disabled:cursor-not-allowed transition"
-            >
-              {isBusy ? "Analizando…" : `Analizar ${LIST_CONFIG.find(l => l.id === selectedList)?.label ?? ""}`}
-            </button>
+            {selectedList !== "dolar" && (
+              <button
+                onClick={handleRefresh}
+                disabled={loading || isBusy}
+                className="w-full sm:w-auto sm:ml-auto mt-1 sm:mt-0 px-5 py-2 bg-amber-500 text-white text-sm font-medium rounded-lg hover:bg-amber-600 disabled:opacity-50 disabled:cursor-not-allowed transition"
+              >
+                {isBusy ? "Analizando…" : `Analizar ${LIST_CONFIG.find(l => l.id === selectedList)?.label ?? ""}`}
+              </button>
+            )}
           </div>
           {selectedList === "crypto" && (
             <div className="mt-3 flex items-center gap-4">
@@ -1532,8 +1652,11 @@ export default function App() {
           )}
         </div>
 
+        {/* Dólar tab */}
+        {selectedList === "dolar" && <DolarTab />}
+
         {/* Loading banner */}
-        {isBusy && (
+        {selectedList !== "dolar" && isBusy && (
           <div className="mb-4 p-4 bg-amber-50 border border-amber-200 rounded-lg text-sm text-amber-800">
             <div className="flex items-center gap-2 mb-2">
               <svg className="animate-spin h-4 w-4 shrink-0" viewBox="0 0 24 24" fill="none">
@@ -1563,7 +1686,7 @@ export default function App() {
         )}
 
         {/* Watchlist */}
-        {watchlist.length > 0 && (
+        {selectedList !== "dolar" && watchlist.length > 0 && (
           <div className="mb-6 bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
             <div className="flex items-center justify-between px-4 py-2.5 border-b border-gray-100 bg-gray-50">
               <span className="text-sm font-semibold text-gray-700">Watchlist</span>
@@ -1612,7 +1735,7 @@ export default function App() {
         )}
 
         {/* Resumen por señal + Filtros — sticky bajo el header */}
-        <div ref={stickyBarRef} className="sticky top-[67px] sm:top-[75px] z-20 bg-gray-50 -mx-3 sm:-mx-6 px-3 sm:px-6 pt-1 pb-3 shadow-[0_4px_8px_-2px_rgba(0,0,0,0.06)]">
+        {selectedList !== "dolar" && <><div ref={stickyBarRef} className="sticky top-[67px] sm:top-[75px] z-20 bg-gray-50 -mx-3 sm:-mx-6 px-3 sm:px-6 pt-1 pb-3 shadow-[0_4px_8px_-2px_rgba(0,0,0,0.06)]">
           {stocks.length > 0 && (
             <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-2 sm:gap-3 mb-3">
               {Object.keys(SIGNAL_CONFIG).map((key) => (
@@ -1805,6 +1928,7 @@ export default function App() {
         <p className="text-xs text-gray-400 mt-3 text-right">
           {filtered.length} activos · Score = Helper Prime (EMA + ADX + Momentum + MTF + Zona) · Pulse = Helper Pulse (divergencias RSI)
         </p>
+        </>}
 
       </div>
     </div>

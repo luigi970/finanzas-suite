@@ -321,4 +321,13 @@ async def on_fetch(request, env):
         except Exception as e:
             return _j({"quotes": {}, "error": str(e)})
 
+    # GET /api/dollar — cotizaciones del dólar (dolarapi.com)
+    if method == "GET" and path == "/api/dollar":
+        try:
+            resp = await fetch("https://dolarapi.com/v1/dolares", headers={"User-Agent": "maximos/1.0"})
+            data = json.loads(await resp.text())
+            return _j({"dollar": data})
+        except Exception as e:
+            return _j({"dollar": [], "error": str(e)})
+
     return _j({"error": "not found"}, status=404)
