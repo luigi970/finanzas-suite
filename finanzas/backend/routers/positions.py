@@ -10,6 +10,7 @@ class PositionIn(BaseModel):
     asset: str          # ARS, USD, BTC, AAPL, USDT, etc.
     asset_type: str     # fiat | crypto | stablecoin | stock | cedear | fixed_term | fund
     quantity: float
+    avg_price: Optional[float] = None
     start_date: Optional[str] = None
     end_date: Optional[str] = None
     rate: Optional[float] = None
@@ -20,6 +21,7 @@ class PositionUpdate(BaseModel):
     asset: Optional[str] = None
     asset_type: Optional[str] = None
     quantity: Optional[float] = None
+    avg_price: Optional[float] = None
     start_date: Optional[str] = None
     end_date: Optional[str] = None
     rate: Optional[float] = None
@@ -45,9 +47,9 @@ def list_positions(account_id: Optional[int] = None):
 def create_position(data: PositionIn):
     conn = get_db()
     cur = conn.execute(
-        """INSERT INTO positions (account_id, asset, asset_type, quantity, start_date, end_date, rate, auto_renew, notes)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-        (data.account_id, data.asset.upper(), data.asset_type, data.quantity,
+        """INSERT INTO positions (account_id, asset, asset_type, quantity, avg_price, start_date, end_date, rate, auto_renew, notes)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+        (data.account_id, data.asset.upper(), data.asset_type, data.quantity, data.avg_price,
          data.start_date, data.end_date, data.rate, data.auto_renew, data.notes)
     )
     conn.commit()

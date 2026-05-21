@@ -208,6 +208,7 @@ function PositionForm({ accounts, initial, onSave, onClose }) {
     asset: initial?.asset ?? '',
     asset_type: initial?.asset_type ?? 'fiat',
     quantity: initial?.quantity ?? '',
+    avg_price: initial?.avg_price ?? '',
     start_date: initial?.start_date ?? '',
     end_date: initial?.end_date ?? '',
     rate: initial?.rate ?? '',
@@ -223,6 +224,7 @@ function PositionForm({ accounts, initial, onSave, onClose }) {
       ...form,
       account_id: Number(form.account_id),
       quantity: Number(form.quantity),
+      avg_price: form.avg_price ? Number(form.avg_price) : null,
       rate: form.rate ? Number(form.rate) : null,
     })
     onClose()
@@ -256,6 +258,16 @@ function PositionForm({ accounts, initial, onSave, onClose }) {
           {ASSET_TYPES.map(t => <option key={t.value} value={t.value}>{t.label}</option>)}
         </select>
       </div>
+      {!['fiat', 'fixed_term'].includes(form.asset_type) && (
+        <div>
+          <label className="text-xs font-medium text-gray-500 uppercase tracking-wide">
+            Precio promedio de compra <span className="text-gray-400 font-normal normal-case">(USD, opcional)</span>
+          </label>
+          <input type="number" step="any" min="0" value={form.avg_price} onChange={set('avg_price')}
+            placeholder="ej: 95000 para BTC comprado a USD 95k"
+            className="mt-1 w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-amber-400" />
+        </div>
+      )}
       {hasTerm && (
         <div className="grid grid-cols-2 gap-3">
           <div>
@@ -523,11 +535,16 @@ function PatrimonioTab({ positions, transactions = [] }) {
   const enriched = positions.map(p => {
     const priceUSD = getPriceUSD(p)
     const valueUSD = priceUSD != null ? p.quantity * priceUSD : null
-    return { ...p, priceUSD, valueUSD }
+    const costUSD  = p.avg_price != null ? p.avg_price * p.quantity : null
+    const pnlUSD   = (valueUSD != null && costUSD != null) ? valueUSD - costUSD : null
+    const pnlPct   = (priceUSD != null && p.avg_price != null) ? (priceUSD - p.avg_price) / p.avg_price * 100 : null
+    return { ...p, priceUSD, valueUSD, costUSD, pnlUSD, pnlPct }
   })
 
-  const totalUSD = enriched.reduce((s, p) => s + (p.valueUSD ?? 0), 0)
-  const totalARS = blueRate ? totalUSD * blueRate : null
+  const totalUSD  = enriched.reduce((s, p) => s + (p.valueUSD ?? 0), 0)
+  const totalARS  = blueRate ? totalUSD * blueRate : null
+  const totalPnl  = enriched.reduce((s, p) => s + (p.pnlUSD ?? 0), 0)
+  const hasPnl    = enriched.some(p => p.pnlUSD != null)
 
   // Agrupar por tipo
   const byType = {}
@@ -596,6 +613,11 @@ function PatrimonioTab({ positions, transactions = [] }) {
             ≈ ARS {totalARS.toLocaleString('es-AR', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
           </div>
         )}
+        {hasPnl && (
+          <div className={`text-sm font-semibold mt-2 tabular-nums ${totalPnl >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+            {totalPnl >= 0 ? '▲' : '▼'} {totalPnl >= 0 ? '+' : ''}USD {totalPnl.toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} resultado no realizado
+          </div>
+        )}
         {blueRate && (
           <div className="text-xs text-gray-500 mt-2">Dólar blue: ${blueRate} · Precios vía maximos</div>
         )}
@@ -639,6 +661,12 @@ function PatrimonioTab({ positions, transactions = [] }) {
                           USD {(p.valueUSD).toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                         </div>
                         <div className="text-xs text-gray-400 tabular-nums">@ USD {fmtAmount(p.priceUSD)}</div>
+                        {p.pnlUSD != null && (
+                          <div className={`text-xs font-semibold tabular-nums ${p.pnlUSD >= 0 ? 'text-green-600' : 'text-red-500'}`}>
+                            {p.pnlUSD >= 0 ? '+' : ''}USD {p.pnlUSD.toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                            {' '}({p.pnlPct >= 0 ? '+' : ''}{p.pnlPct.toFixed(2)}%)
+                          </div>
+                        )}
                       </>
                     ) : (
                       <span className="text-xs text-gray-400">sin precio</span>

@@ -58,4 +58,13 @@ def init_db():
         );
     """)
     conn.commit()
+    # Migrations: add columns to existing tables without breaking existing data
+    for sql in [
+        "ALTER TABLE positions ADD COLUMN avg_price REAL",
+    ]:
+        try:
+            conn.execute(sql)
+            conn.commit()
+        except Exception:
+            pass  # column already exists
     conn.close()
