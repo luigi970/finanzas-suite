@@ -88,13 +88,23 @@ async def on_fetch(request, env):
             return _j({"status": "idle", "list_id": list_id, "processed": 0, "total_tickers": 0})
         status_map = {"done": "ready", "running": "loading"}
         api_status = status_map.get(run.get("status", "idle"), "idle")
+        finished_at = run.get("finished_at")
+        last_updated = None
+        if finished_at:
+            try:
+                from datetime import datetime, timezone
+                dt = datetime.fromisoformat(finished_at.replace("Z", "+00:00"))
+                last_updated = int(dt.timestamp())
+            except Exception:
+                pass
         return _j({
             "status": api_status,
             "list_id": list_id,
             "processed": run.get("processed", 0),
             "total_tickers": run.get("total", 0),
-            "started_at": run.get("started_at"),
-            "finished_at": run.get("finished_at"),
+            "started_at": finished_at,
+            "finished_at": finished_at,
+            "last_updated": last_updated,
         })
 
     # GET /api/stocks?list_id=sp500&signal=all
