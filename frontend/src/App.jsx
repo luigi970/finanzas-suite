@@ -516,9 +516,60 @@ function ChartModal({ ticker, onClose }) {
   );
 }
 
+function AIModal({ stock: s, onClose }) {
+  const [rec, setRec]       = useState(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    setRec(null);
+    setLoading(true);
+    fetch(`${API_BASE}/api/analyze`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(s),
+    })
+      .then(r => r.json())
+      .then(d => setRec(d.recommendation ?? d.error ?? "Sin respuesta"))
+      .catch(() => setRec("Error al conectar con la IA"))
+      .finally(() => setLoading(false));
+  }, [s]);
+
+  return (
+    <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4" onClick={onClose}>
+      <div
+        className="w-full max-w-lg bg-white rounded-2xl shadow-2xl overflow-hidden"
+        style={{ animation: "slideUp 0.2s ease-out both" }}
+        onClick={e => e.stopPropagation()}
+      >
+        <div className="bg-slate-900 px-5 py-4 flex items-center justify-between" style={{ borderTop: "3px solid #f59e0b" }}>
+          <div className="flex items-center gap-2.5">
+            <span className="text-amber-400 text-lg">✦</span>
+            <div>
+              <div className="text-white font-bold text-base leading-tight">{s.ticker}</div>
+              <div className="text-slate-400 text-xs">Análisis IA</div>
+            </div>
+          </div>
+          <button onClick={onClose} className="text-slate-400 hover:text-white text-xl leading-none">✕</button>
+        </div>
+        <div className="p-5 min-h-[120px] flex items-start">
+          {loading ? (
+            <div className="flex items-center gap-2 text-amber-500 text-sm">
+              <svg className="animate-spin h-4 w-4 shrink-0" viewBox="0 0 24 24" fill="none">
+                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
+                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z"/>
+              </svg>
+              Generando análisis…
+            </div>
+          ) : (
+            <p className="text-sm text-gray-800 leading-relaxed">{rec}</p>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function TickerModal({ stock: s, listId, onClose }) {
-  const [aiRec, setAiRec] = useState(null);
-  const [aiLoading, setAiLoading] = useState(false);
   const [info, setInfo] = useState(null);
   const [showChart, setShowChart] = useState(false);
   const [showAnalysis, setShowAnalysis] = useState(false);
@@ -526,19 +577,7 @@ function TickerModal({ stock: s, listId, onClose }) {
 
   useEffect(() => {
     if (!s) return;
-    setAiRec(null);
-    setAiLoading(true);
     setInfo(null);
-    fetch(`${API_BASE}/api/analyze`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(s),
-    })
-      .then(r => r.json())
-      .then(d => setAiRec(d.recommendation ?? d.error ?? "Sin respuesta"))
-      .catch(() => setAiRec("Error al conectar con la IA"))
-      .finally(() => setAiLoading(false));
-
     fetch(`${API_BASE}/api/info?ticker=${s.ticker}`)
       .then(r => r.json())
       .then(d => { if (Object.keys(d.info || {}).length) setInfo(d.info); })
@@ -917,23 +956,6 @@ function TickerModal({ stock: s, listId, onClose }) {
             </div>{/* fin col derecha */}
 
           </div>{/* fin grid 2 cols */}
-
-          {/* Recomendación IA */}
-          <div className="bg-amber-50 border border-amber-100 rounded-xl p-4">
-            <div className="flex items-center gap-2 mb-2">
-              <span className="text-xs font-semibold text-amber-600 uppercase tracking-wider">Recomendación IA</span>
-              {aiLoading && (
-                <svg className="animate-spin h-3 w-3 text-amber-500" viewBox="0 0 24 24" fill="none">
-                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z" />
-                </svg>
-              )}
-            </div>
-            {aiLoading
-              ? <p className="text-sm text-amber-500 italic">Generando análisis…</p>
-              : <p className="text-sm text-gray-800 leading-snug">{aiRec ?? "Sin datos"}</p>
-            }
-          </div>
 
         </div>
         </div>{/* overflow-y-auto */}
@@ -1419,6 +1441,7 @@ export default function App() {
   const [cryptoLimit, setCryptoLimit] = useState(20);
   const [activeListId, setActiveListId] = useState("sp500");
   const [selectedTicker, setSelectedTicker] = useState(null);
+  const [aiModalStock, setAiModalStock] = useState(null);
   const [showHelp, setShowHelp] = useState(false);
   const [watchlist, setWatchlist] = useState(() => {
     try { return JSON.parse(localStorage.getItem("watchlist") || "[]"); } catch { return []; }
@@ -1569,6 +1592,7 @@ export default function App() {
   return (
     <div className="min-h-screen bg-gray-50">
       {showHelp && <HelpModal onClose={() => setShowHelp(false)} />}
+      {aiModalStock && <AIModal stock={aiModalStock} onClose={() => setAiModalStock(null)} />}
       {selectedTicker && <TickerModal stock={selectedTicker} listId={activeListId} onClose={() => setSelectedTicker(null)} />}
 
       {/* ── Header oscuro ── */}
@@ -1840,6 +1864,7 @@ export default function App() {
                     {thStatic("Patrón",              "hidden md:table-cell")}
                     {thStatic("SL / TP1",             "hidden md:table-cell")}
                     {thStatic("Señal")}
+                    {thStatic("IA")}
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-100">
@@ -1944,6 +1969,13 @@ export default function App() {
                         <SlTpCell sl={s.sl} tp1={s.tp1} direction={s.direction} />
                       </td>
                       <td className="px-3 py-3"><SignalBadge signal={s.signal} /></td>
+                      <td className="px-3 py-3">
+                        <button
+                          onClick={e => { e.stopPropagation(); setAiModalStock(s); }}
+                          className="text-amber-400 hover:text-amber-600 text-base leading-none transition-colors"
+                          title="Análisis IA"
+                        >✦</button>
+                      </td>
                     </tr>
                   ))}
                 </tbody>
