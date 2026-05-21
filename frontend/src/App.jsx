@@ -1460,6 +1460,7 @@ export default function App() {
       // "idle" means the GH Actions job hasn't created the DB record yet —
       // don't cancel the loading state while waiting for it to start
       if (data.status !== "idle") setStatus(data.status);
+      if (data.last_updated) setLastUpdated(data.last_updated);
       if (data.status === "ready") fetchStocks();
     } catch { }
   }, [fetchStocks, activeListId]);
@@ -1507,6 +1508,15 @@ export default function App() {
     });
 
   const isBusy = status === "loading" || status === "downloading";
+
+  const dataAgeHours = lastUpdated ? (Date.now() / 1000 - lastUpdated) / 3600 : null;
+  const isFresh = dataAgeHours !== null && dataAgeHours < 8;
+
+  function fmtAge(hours) {
+    if (hours < 1) return `hace ${Math.round(hours * 60)} min`;
+    if (hours < 24) return `hace ${Math.round(hours)} h`;
+    return `hace ${Math.round(hours / 24)} d`;
+  }
 
   const SortIcon = ({ col }) => {
     if (sortKey !== col) return <span className="text-gray-300 ml-1">↕</span>;
@@ -1577,9 +1587,7 @@ export default function App() {
                 <span className="hidden sm:block text-slate-500 text-xs font-normal">— stock screener</span>
               </div>
               <p className="text-[11px] text-slate-400 truncate mt-0.5">
-                {lastUpdated
-                  ? `${activeListLabel} · ${new Date(lastUpdated * 1000).toLocaleString("es-AR", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })}`
-                  : "Helper Prime + Pulse · IA integrada"}
+                Helper Prime + Pulse · IA integrada
               </p>
             </div>
           </div>
@@ -1626,13 +1634,30 @@ export default function App() {
               </button>
             ))}
             {selectedList !== "dolar" && (
-              <button
-                onClick={handleRefresh}
-                disabled={loading || isBusy}
-                className="w-full sm:w-auto sm:ml-auto mt-1 sm:mt-0 px-5 py-2 bg-amber-500 text-white text-sm font-medium rounded-lg hover:bg-amber-600 disabled:opacity-50 disabled:cursor-not-allowed transition"
-              >
-                {isBusy ? "Analizando…" : `Analizar ${LIST_CONFIG.find(l => l.id === selectedList)?.label ?? ""}`}
-              </button>
+              <div className="w-full sm:w-auto sm:ml-auto mt-1 sm:mt-0 flex flex-col sm:items-end gap-1">
+                <button
+                  onClick={handleRefresh}
+                  disabled={loading || isBusy}
+                  className={`w-full sm:w-auto px-5 py-2 text-sm font-medium rounded-lg transition disabled:opacity-50 disabled:cursor-not-allowed ${
+                    isBusy
+                      ? "bg-amber-500 text-white cursor-not-allowed"
+                      : isFresh
+                        ? "bg-white text-gray-500 border border-gray-300 hover:border-amber-400 hover:text-amber-600"
+                        : "bg-amber-500 text-white hover:bg-amber-600"
+                  }`}
+                >
+                  {isBusy
+                    ? "Analizando…"
+                    : isFresh
+                      ? `Actualizar ${LIST_CONFIG.find(l => l.id === selectedList)?.label ?? ""}`
+                      : `Analizar ${LIST_CONFIG.find(l => l.id === selectedList)?.label ?? ""}`}
+                </button>
+                {isFresh && !isBusy && (
+                  <span className="text-[11px] text-gray-400 text-right">
+                    Datos {fmtAge(dataAgeHours)} · {new Date(lastUpdated * 1000).toLocaleString("es-AR", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })}
+                  </span>
+                )}
+              </div>
             )}
           </div>
           {selectedList === "crypto" && (
