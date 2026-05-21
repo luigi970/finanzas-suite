@@ -1642,7 +1642,7 @@ export default function App() {
                     isBusy
                       ? "bg-amber-500 text-white cursor-not-allowed"
                       : isFresh
-                        ? "bg-white text-gray-500 border border-gray-300 hover:border-amber-400 hover:text-amber-600"
+                        ? "bg-amber-50 text-amber-700 border border-amber-300 hover:bg-amber-100 hover:border-amber-500"
                         : "bg-amber-500 text-white hover:bg-amber-600"
                   }`}
                 >
