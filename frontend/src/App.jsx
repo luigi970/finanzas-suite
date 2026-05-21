@@ -1623,7 +1623,7 @@ export default function App() {
             {LIST_CONFIG.map((l) => (
               <button
                 key={l.id}
-                onClick={() => setSelectedList(l.id)}
+                onClick={() => { setSelectedList(l.id); setActiveListId(l.id); setStocks([]); setStatus("idle"); setLastUpdated(null); }}
                 className={`px-3 sm:px-4 py-1.5 sm:py-2 rounded-lg text-sm font-medium transition ${
                   selectedList === l.id
                     ? "bg-amber-500 text-white"
