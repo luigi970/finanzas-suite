@@ -1101,20 +1101,20 @@ function HelpModal({ onClose }) {
 }
 
 const SIGNAL_CONFIG = {
-  compra_fuerte: { label: "Compra Fuerte", color: "bg-emerald-100 text-emerald-800", bar: "bg-emerald-500", border: "border-l-emerald-500",  count: "text-emerald-700" },
-  compra:        { label: "Compra",        color: "bg-green-100 text-green-700",     bar: "bg-green-400",   border: "border-l-green-400",    count: "text-green-700" },
-  neutral:       { label: "Neutral",       color: "bg-gray-100 text-gray-600",       bar: "bg-gray-300",    border: "border-l-gray-400",     count: "text-gray-600" },
-  venta:         { label: "Venta",         color: "bg-orange-100 text-orange-700",   bar: "bg-orange-400",  border: "border-l-orange-400",   count: "text-orange-600" },
-  venta_fuerte:  { label: "Venta Fuerte",  color: "bg-red-100 text-red-700",         bar: "bg-red-500",     border: "border-l-red-500",      count: "text-red-600" },
+  compra_fuerte: { label: "▲▲ Compra Fuerte", color: "bg-emerald-100 text-emerald-800", badge: "bg-emerald-600 text-white",     bar: "bg-emerald-500", border: "border-l-emerald-500", count: "text-emerald-700" },
+  compra:        { label: "▲ Compra",         color: "bg-green-100 text-green-700",     badge: "bg-green-500 text-white",       bar: "bg-green-400",   border: "border-l-green-400",   count: "text-green-700" },
+  neutral:       { label: "· Esperar",        color: "bg-gray-100 text-gray-600",       badge: "bg-gray-200 text-gray-600",     bar: "bg-gray-300",    border: "border-l-gray-400",    count: "text-gray-600" },
+  venta:         { label: "▼ Venta",          color: "bg-orange-100 text-orange-700",   badge: "bg-orange-500 text-white",      bar: "bg-orange-400",  border: "border-l-orange-400",  count: "text-orange-600" },
+  venta_fuerte:  { label: "▼▼ Venta Fuerte",  color: "bg-red-100 text-red-700",         badge: "bg-red-600 text-white",         bar: "bg-red-500",     border: "border-l-red-500",     count: "text-red-600" },
 };
 
 const FILTER_OPTIONS = [
   { key: "all",          label: "Todas" },
-  { key: "compra_fuerte",label: "Compra Fuerte" },
-  { key: "compra",       label: "Compra" },
-  { key: "neutral",      label: "Neutral" },
-  { key: "venta",        label: "Venta" },
-  { key: "venta_fuerte", label: "Venta Fuerte" },
+  { key: "compra_fuerte",label: "▲▲ Compra Fuerte" },
+  { key: "compra",       label: "▲ Compra" },
+  { key: "neutral",      label: "· Esperar" },
+  { key: "venta",        label: "▼ Venta" },
+  { key: "venta_fuerte", label: "▼▼ Venta Fuerte" },
 ];
 
 const LIST_CONFIG = [
@@ -1136,18 +1136,18 @@ const PULSE_CONFIG = {
 };
 
 const SIGNAL_TOOLTIPS = {
-  compra_fuerte: "Score ≥75 alcista. Todos los filtros alineados: tendencia, momentum, zona y volatilidad. Setup de máxima calidad con alta probabilidad de continuación.",
-  compra:        "Score 60-74 alcista. La mayoría de los indicadores son positivos. Setup válido — operar con gestión de riesgo.",
-  neutral:       "Score menor a 60 en ambas direcciones. El mercado no muestra ventaja clara. Mejor esperar una señal más definida.",
-  venta:         "Score 60-74 bajista. Sesgo vendedor moderado. Evitar compras y esperar que el precio recupere antes de evaluar entrada.",
-  venta_fuerte:  "Score ≥75 bajista. Confluencia bajista total. No operar en largo — la presión vendedora domina todos los indicadores.",
+  compra_fuerte: "Momento de compra fuerte — el algoritmo detectó que la tendencia, el momentum y la zona estructural están todos a favor. La señal más sólida del sistema.",
+  compra:        "Momento de compra — la mayoría de los indicadores son positivos. Setup válido, pero con menos confluencia que Compra Fuerte. Operá con tu stop loss definido.",
+  neutral:       "Mejor esperar — no hay una ventaja clara ni alcista ni bajista. El mercado está indeciso. Quedarse al margen reduce el riesgo innecesario.",
+  venta:         "Señal de precaución — el sesgo es bajista moderado. Si ya tenés posición, es momento de revisar. Si no tenés, no es momento de entrar.",
+  venta_fuerte:  "Momento de venta fuerte — todos los indicadores apuntan a la baja. Evitá compras. El sistema detectó la señal bajista más clara.",
 };
 
 function SignalBadge({ signal }) {
   const cfg = SIGNAL_CONFIG[signal] ?? SIGNAL_CONFIG.neutral;
   return (
     <Tooltip text={SIGNAL_TOOLTIPS[signal] ?? ""}>
-      <span className={`px-2 py-0.5 rounded-full text-xs font-semibold whitespace-nowrap ${cfg.color}`}>
+      <span className={`px-2.5 py-0.5 rounded-full text-xs font-semibold whitespace-nowrap ${cfg.badge}`}>
         {cfg.label}
       </span>
     </Tooltip>
@@ -1843,11 +1843,27 @@ export default function App() {
           style={{ top: `${aboveTableH}px`, height: `calc(100vh - ${aboveTableH + 16}px)` }}
         >
           {filtered.length === 0 && !isBusy ? (
-            <div className="p-12 text-center text-gray-400">
-              {stocks.length === 0
-                ? "Seleccioná una lista y presioná Analizar."
-                : "Sin resultados para este filtro."}
-            </div>
+            stocks.length === 0 ? (
+              <div className="flex flex-col items-center justify-center py-20 px-8 text-center">
+                <div className="w-14 h-14 rounded-2xl bg-amber-50 flex items-center justify-center mb-4">
+                  <svg className="w-7 h-7 text-amber-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="1.8">
+                    <polyline points="22 12 18 12 15 21 9 3 6 12 2 12" />
+                  </svg>
+                </div>
+                <p className="text-gray-800 font-semibold text-base mb-1">
+                  Presioná <span className="text-amber-600">Analizar</span> para ver los activos
+                </p>
+                <p className="text-gray-400 text-sm max-w-xs">
+                  Vas a ver el ranking completo con Score, señal de compra/venta y análisis de IA para cada uno
+                </p>
+              </div>
+            ) : (
+              <div className="flex flex-col items-center justify-center py-16 text-center px-8">
+                <div className="text-3xl mb-2">🔍</div>
+                <p className="text-gray-500 text-sm">Sin activos para este filtro.</p>
+                <button onClick={() => setSignalFilter("all")} className="mt-2 text-xs text-amber-600 hover:underline">Ver todas las señales</button>
+              </div>
+            )
           ) : (
             <table className="w-full text-sm">
                 <thead className="bg-gray-50 border-b border-gray-200 sticky top-0 z-10">
