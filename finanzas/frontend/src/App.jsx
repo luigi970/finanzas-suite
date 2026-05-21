@@ -464,11 +464,18 @@ const TYPE_COLORS = {
   fund: 'bg-teal-100 text-teal-700',
 }
 
-function PatrimonioTab({ positions }) {
+function PatrimonioTab({ positions, transactions = [] }) {
   const [prices,   setPrices]   = useState({})
   const [blueRate, setBlueRate] = useState(null)
   const [loading,  setLoading]  = useState(true)
   const [error,    setError]    = useState(null)
+
+  // Resumen de movimientos del mes actual
+  const thisMonth = new Date().toISOString().slice(0, 7)
+  const monthTx = transactions.filter(t => t.date?.startsWith(thisMonth))
+  const monthIncome  = monthTx.filter(t => t.type === 'income').reduce((s, t) => s + t.amount, 0)
+  const monthExpense = monthTx.filter(t => t.type === 'expense').reduce((s, t) => s + t.amount, 0)
+  const currencies = [...new Set(monthTx.map(t => t.currency))].slice(0, 2).join(' / ') || '—'
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -551,6 +558,33 @@ function PatrimonioTab({ positions }) {
         </div>
       )}
 
+      {/* Mini resumen del mes */}
+      {monthTx.length > 0 && (
+        <div className="grid grid-cols-3 gap-3">
+          <div className="bg-white rounded-xl border border-gray-200 p-3 shadow-sm text-center">
+            <div className="text-[10px] text-gray-400 uppercase tracking-wide mb-1">Ingresos este mes</div>
+            <div className="text-sm font-bold text-green-600 tabular-nums">
+              {monthIncome.toLocaleString('es-AR', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
+            </div>
+            <div className="text-[10px] text-gray-400">{currencies}</div>
+          </div>
+          <div className="bg-white rounded-xl border border-gray-200 p-3 shadow-sm text-center">
+            <div className="text-[10px] text-gray-400 uppercase tracking-wide mb-1">Gastos este mes</div>
+            <div className="text-sm font-bold text-red-500 tabular-nums">
+              {monthExpense.toLocaleString('es-AR', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
+            </div>
+            <div className="text-[10px] text-gray-400">{currencies}</div>
+          </div>
+          <div className="bg-white rounded-xl border border-gray-200 p-3 shadow-sm text-center">
+            <div className="text-[10px] text-gray-400 uppercase tracking-wide mb-1">Balance del mes</div>
+            <div className={`text-sm font-bold tabular-nums ${monthIncome - monthExpense >= 0 ? 'text-green-600' : 'text-red-500'}`}>
+              {(monthIncome - monthExpense >= 0 ? '+' : '')}{(monthIncome - monthExpense).toLocaleString('es-AR', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
+            </div>
+            <div className="text-[10px] text-gray-400">{currencies}</div>
+          </div>
+        </div>
+      )}
+
       {/* Total patrimonio */}
       <div className="bg-slate-900 rounded-2xl p-6 text-white" style={{ borderTop: '3px solid #f59e0b' }}>
         <div className="text-xs text-gray-400 uppercase tracking-wider mb-1">Patrimonio total estimado</div>
@@ -621,6 +655,86 @@ function PatrimonioTab({ positions }) {
         Actualizar precios
       </button>
     </div>
+  )
+}
+
+// ── TransactionForm ───────────────────────────────────────────────────────────
+function TransactionForm({ initial, accounts, onSave, onClose }) {
+  const [form, setForm] = useState({
+    account_id: initial?.account_id ?? (accounts[0]?.id ?? ''),
+    date:        initial?.date ?? new Date().toISOString().slice(0, 10),
+    description: initial?.description ?? '',
+    amount:      initial?.amount ?? '',
+    currency:    initial?.currency ?? 'ARS',
+    type:        initial?.type ?? 'expense',
+    category:    initial?.category ?? '',
+  })
+  const set = k => e => setForm(f => ({ ...f, [k]: e.target.value }))
+
+  async function submit(e) {
+    e.preventDefault()
+    await onSave({ ...form, amount: parseFloat(form.amount), account_id: parseInt(form.account_id) })
+    onClose()
+  }
+
+  const inputCls = "mt-1 w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-amber-400"
+
+  return (
+    <form onSubmit={submit} className="space-y-3">
+      <div className="grid grid-cols-2 gap-3">
+        <div>
+          <label className="text-xs font-medium text-gray-500 uppercase tracking-wide">Fecha</label>
+          <input type="date" value={form.date} onChange={set('date')} required className={inputCls} />
+        </div>
+        <div>
+          <label className="text-xs font-medium text-gray-500 uppercase tracking-wide">Tipo</label>
+          <select value={form.type} onChange={set('type')} className={inputCls}>
+            <option value="income">Ingreso</option>
+            <option value="expense">Gasto</option>
+            <option value="transfer">Transferencia</option>
+          </select>
+        </div>
+      </div>
+      <div>
+        <label className="text-xs font-medium text-gray-500 uppercase tracking-wide">Cuenta</label>
+        <select value={form.account_id} onChange={set('account_id')} required className={inputCls}>
+          {accounts.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
+        </select>
+      </div>
+      <div>
+        <label className="text-xs font-medium text-gray-500 uppercase tracking-wide">Descripción</label>
+        <input value={form.description} onChange={set('description')}
+          className={inputCls} placeholder="Ej: Supermercado, Netflix..." />
+      </div>
+      <div className="grid grid-cols-2 gap-3">
+        <div>
+          <label className="text-xs font-medium text-gray-500 uppercase tracking-wide">Monto</label>
+          <input type="number" step="any" min="0" value={form.amount} onChange={set('amount')} required className={inputCls} />
+        </div>
+        <div>
+          <label className="text-xs font-medium text-gray-500 uppercase tracking-wide">Moneda</label>
+          <input value={form.currency} onChange={set('currency')} required
+            className={inputCls} placeholder="ARS, USD, BTC..." />
+        </div>
+      </div>
+      <div>
+        <label className="text-xs font-medium text-gray-500 uppercase tracking-wide">Categoría</label>
+        <select value={form.category} onChange={set('category')} className={inputCls}>
+          <option value="">Sin categoría</option>
+          {CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
+        </select>
+      </div>
+      <div className="flex gap-2 pt-1">
+        <button type="button" onClick={onClose}
+          className="flex-1 py-2 rounded-lg border border-gray-200 text-sm text-gray-600 hover:bg-gray-50">
+          Cancelar
+        </button>
+        <button type="submit"
+          className="flex-1 py-2 rounded-lg bg-amber-500 hover:bg-amber-600 text-white text-sm font-medium">
+          Guardar
+        </button>
+      </div>
+    </form>
   )
 }
 
@@ -776,7 +890,7 @@ function Chat() {
 
 // ── App ───────────────────────────────────────────────────────────────────────
 export default function App() {
-  const [tab, setTab] = useState('portfolio')
+  const [tab, setTab] = useState('patrimonio')
   const [accounts, setAccounts] = useState([])
   const [positions, setPositions] = useState([])
   const [transactions, setTransactions] = useState([])
@@ -837,6 +951,14 @@ export default function App() {
     await load()
   }
 
+  async function saveTransaction(data) {
+    if (editTarget?.type === 'transaction') {
+      await api(`/api/transactions/${editTarget.id}`, { method: 'PATCH', body: JSON.stringify(data) })
+    }
+    await load()
+    setEditTarget(null)
+  }
+
   const TABS = [
     { id: 'patrimonio', label: 'Patrimonio' },
     { id: 'portfolio',  label: 'Portfolio' },
@@ -887,7 +1009,7 @@ export default function App() {
 
         {/* PATRIMONIO */}
         {tab === 'patrimonio' && (
-          <PatrimonioTab positions={positions} />
+          <PatrimonioTab positions={positions} transactions={transactions} />
         )}
 
         {/* PORTFOLIO */}
@@ -927,6 +1049,10 @@ export default function App() {
                       <div className={`font-semibold text-sm tabular-nums shrink-0 ${t.type === 'income' ? 'text-green-600' : 'text-red-600'}`}>
                         {t.type === 'income' ? '+' : '-'}{fmtAmount(t.amount)} {t.currency}
                       </div>
+                      <button onClick={() => { setEditTarget({ ...t, type: 'transaction' }); setModal('edit-transaction') }}
+                        className="text-gray-300 hover:text-amber-500 px-1 text-xs shrink-0">
+                        ✏️
+                      </button>
                       <button onClick={() => deleteTransaction(t.id)}
                         className="text-gray-300 hover:text-red-500 px-1 text-xs shrink-0">
                         🗑
@@ -1005,6 +1131,17 @@ export default function App() {
       {modal === 'ingest' && (
         <Modal title="Cargar movimientos" onClose={() => setModal(null)}>
           <IngestPanel accounts={accounts.filter(a => a.active)} onDone={() => { setModal(null); load() }} />
+        </Modal>
+      )}
+
+      {modal === 'edit-transaction' && editTarget && (
+        <Modal title="Editar movimiento" onClose={() => { setModal(null); setEditTarget(null) }}>
+          <TransactionForm
+            initial={editTarget}
+            accounts={accounts}
+            onSave={saveTransaction}
+            onClose={() => { setModal(null); setEditTarget(null) }}
+          />
         </Modal>
       )}
 

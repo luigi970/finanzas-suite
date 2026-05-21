@@ -77,6 +77,32 @@ def delete_transaction(transaction_id: int):
     conn.commit()
     conn.close()
 
+class TransactionUpdate(BaseModel):
+    date: Optional[str] = None
+    description: Optional[str] = None
+    amount: Optional[float] = None
+    currency: Optional[str] = None
+    type: Optional[str] = None
+    category: Optional[str] = None
+
+@router.patch("/{transaction_id}")
+def update_transaction(transaction_id: int, data: TransactionUpdate):
+    conn = get_db()
+    fields = {k: v for k, v in data.model_dump().items() if v is not None}
+    if not fields:
+        raise HTTPException(400, "No fields to update")
+    if "currency" in fields:
+        fields["currency"] = fields["currency"].upper()
+    sets = ", ".join(f"{k} = ?" for k in fields)
+    values = list(fields.values())
+    conn.execute(f"UPDATE transactions SET {sets} WHERE id = ?", (*values, transaction_id))
+    conn.commit()
+    row = conn.execute("SELECT * FROM transactions WHERE id = ?", (transaction_id,)).fetchone()
+    conn.close()
+    if not row:
+        raise HTTPException(404, "Transaction not found")
+    return dict(row)
+
 @router.get("/summary")
 def summary(account_id: Optional[int] = None):
     conn = get_db()
