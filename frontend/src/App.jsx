@@ -721,20 +721,23 @@ function TickerModal({ stock: s, listId, onClose }) {
             <div className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">Métricas</div>
             <div className="grid grid-cols-3 gap-2">
               {[
-                ["RSI",       s.rsi?.toFixed(1),     s.rsi < 30 ? "text-blue-600" : s.rsi > 70 ? "text-red-600" : "text-gray-700"],
-                ["vs MA200",  s.pct_vs_ma200 != null ? (s.pct_vs_ma200 >= 0 ? "+" : "") + s.pct_vs_ma200?.toFixed(2) + "%" : "—", s.pct_vs_ma200 >= 0 ? "text-green-600" : "text-red-600"],
-                ["Vol ×",     s.vol_ratio != null ? s.vol_ratio?.toFixed(2) + "x" : "—", s.vol_ratio >= 1.5 ? "text-amber-600 font-semibold" : "text-gray-700"],
-                ["% Máx 52s", s.pct_from_high != null ? s.pct_from_high?.toFixed(2) + "%" : "—", s.pct_from_high >= 0 ? "text-green-600" : "text-red-600"],
-                ["% Mín 52s", s.pct_from_low  != null ? "+" + s.pct_from_low?.toFixed(2) + "%" : "—", "text-green-700"],
-                ["MACD",      s.macd_hist != null ? (s.macd_hist > 0 ? "▲" : "▼") + " " + Math.abs(s.macd_hist)?.toFixed(3) : "—", s.macd_hist > 0 ? "text-green-600" : "text-red-600"],
-                ["Bollinger %B", s.pct_b != null ? (s.pct_b * 100).toFixed(0) + "%" : "—", s.pct_b < 0.2 ? "text-blue-600" : s.pct_b > 0.8 ? "text-red-600" : "text-gray-700"],
-                ["Momentum",  s.mom != null ? (s.mom > 0 ? "+" : "") + s.mom : "—", s.mom > 0 ? "text-green-600" : s.mom < 0 ? "text-red-600" : "text-gray-400"],
-                ["POC",       s.poc != null ? "$" + s.poc?.toFixed(2) : "—", "text-gray-700"],
-              ].map(([label, val, cls]) => (
-                <div key={label} className="bg-gray-50 rounded-lg p-2 text-center">
-                  <div className="text-[10px] text-gray-400 mb-0.5">{label}</div>
-                  <div className={`text-sm font-semibold tabular-nums ${cls}`}>{val ?? "—"}</div>
-                </div>
+                { label: "RSI",          val: s.rsi?.toFixed(1),     cls: s.rsi < 30 ? "text-blue-600" : s.rsi > 70 ? "text-red-600" : "text-gray-700",                                   tip: "RSI: <30 zona de sobreventa (posible rebote). >70 sobrecompra (posible corrección). 30-70 zona neutra. El Score usa RSI-50 como referencia de momentum." },
+                { label: "vs MA200",     val: s.pct_vs_ma200 != null ? (s.pct_vs_ma200 >= 0 ? "+" : "") + s.pct_vs_ma200?.toFixed(2) + "%" : "—", cls: s.pct_vs_ma200 >= 0 ? "text-green-600" : "text-red-600", tip: "Distancia al promedio de 200 días. Positivo = precio sobre la MA200 (tendencia alcista principal). El Score suma 15 pts si el precio está por encima." },
+                { label: "Vol ×",        val: s.vol_ratio != null ? s.vol_ratio?.toFixed(2) + "x" : "—",                               cls: s.vol_ratio >= 1.5 ? "text-amber-600 font-semibold" : "text-gray-700",                                                                        tip: "Volumen actual vs promedio de 20 días. >1.5x = movimiento confirmado. >2x = fuerte participación. <1x = movimiento sin respaldo — mayor riesgo de fakeout." },
+                { label: "% Máx 52s",   val: s.pct_from_high != null ? s.pct_from_high?.toFixed(2) + "%" : "—",                        cls: s.pct_from_high >= 0 ? "text-green-600" : "text-red-600",                                                                                   tip: "Distancia al máximo de las 52 semanas. Cerca de 0% = en zona de máximos, momentum fuerte pero poco recorrido. Muy negativo = amplio potencial si recupera tendencia." },
+                { label: "% Mín 52s",   val: s.pct_from_low  != null ? "+" + s.pct_from_low?.toFixed(2) + "%" : "—",                  cls: "text-green-700",                                                                                                                             tip: "Distancia al mínimo de las 52 semanas. Bajo = precio cerca del soporte anual. Alto = fuerte recuperación desde mínimos." },
+                { label: "MACD",         val: s.macd_hist != null ? (s.macd_hist > 0 ? "▲" : "▼") + " " + Math.abs(s.macd_hist)?.toFixed(3) : "—", cls: s.macd_hist > 0 ? "text-green-600" : "text-red-600",                                                                           tip: "Histograma MACD. ▲ positivo = momentum alcista activo. ▼ negativo = momentum bajista. Cuanto mayor el valor absoluto, más fuerte el impulso." },
+                { label: "Bollinger %B", val: s.pct_b != null ? (s.pct_b * 100).toFixed(0) + "%" : "—",                               cls: s.pct_b < 0.2 ? "text-blue-600" : s.pct_b > 0.8 ? "text-red-600" : "text-gray-700",                                                         tip: "Posición dentro de las Bandas de Bollinger. <20% = cerca de la banda inferior (sobreventa). >80% = cerca de la banda superior (sobrecompra). 50% = centro." },
+                { label: "Momentum",     val: s.mom != null ? (s.mom > 0 ? "+" : "") + s.mom : "—",                                    cls: s.mom > 0 ? "text-green-600" : s.mom < 0 ? "text-red-600" : "text-gray-400",                                                                  tip: "Oscilador de momentum (EMA del RSI-50). Positivo = momentum alcista. Negativo = bajista. Usado por el Helper Pulse para detectar divergencias." },
+                { label: "ADX",          val: s.adx?.toFixed(1),                                                                        cls: s.adx >= 25 ? "text-amber-700 font-semibold" : "text-gray-700",                                                                               tip: "ADX: mide la fuerza de la tendencia sin importar dirección. <20 = lateral o tendencia débil. 20-25 = tendencia moderada. >25 = tendencia fuerte. >30 = muy fuerte." },
+                { label: "POC",          val: s.poc != null ? "$" + s.poc?.toFixed(2) : "—",                                           cls: "text-gray-700",                                                                                                                              tip: "Point of Control: precio con mayor volumen acumulado (últimas 70 velas, 15 buckets). El precio tiende a gravitar hacia el POC. Útil como nivel de soporte/resistencia y objetivo." },
+              ].map(({ label, val, cls, tip }) => (
+                <Tooltip key={label} text={tip}>
+                  <div className="bg-gray-50 rounded-lg p-2 text-center cursor-help">
+                    <div className="text-[10px] text-gray-400 mb-0.5">{label}</div>
+                    <div className={`text-sm font-semibold tabular-nums ${cls}`}>{val ?? "—"}</div>
+                  </div>
+                </Tooltip>
               ))}
             </div>
           </div>
@@ -1850,19 +1853,10 @@ export default function App() {
                 <thead className="bg-gray-50 border-b border-gray-200 sticky top-0 z-10">
                   <tr>
                     {th("Ticker",    "ticker")}
-                    {th("Precio",    "price",         "hidden sm:table-cell")}
+                    {th("Precio",    "price")}
                     {th("Score",     "score")}
-                    {thStatic("Zona",                 "hidden sm:table-cell")}
-                    {th("RSI",       "rsi",           "hidden md:table-cell")}
-                    {th("ADX",       "adx",           "hidden md:table-cell")}
-                    {th("vs MA200",  "pct_vs_ma200",  "hidden lg:table-cell")}
-                    {th("Vol ×",     "vol_ratio",     "hidden lg:table-cell")}
-                    {th("% Máx 52s", "pct_from_high", "hidden lg:table-cell")}
-                    {th("% Mín 52s", "pct_from_low",  "hidden lg:table-cell")}
-                    {th("MACD",      "macd_hist",     "hidden lg:table-cell")}
-                    {thStatic("Pulse",                "hidden md:table-cell")}
-                    {thStatic("Patrón",              "hidden md:table-cell")}
-                    {thStatic("SL / TP1",             "hidden md:table-cell")}
+                    {thStatic("Zona")}
+                    {thStatic("Pulse")}
                     {thStatic("Señal")}
                     {thStatic("IA")}
                   </tr>
@@ -1883,91 +1877,12 @@ export default function App() {
                           <span className="font-semibold text-gray-900 underline decoration-dotted underline-offset-2">{displayTicker(s.ticker)}</span>
                         </div>
                       </td>
-                      <td className="px-3 py-3 tabular-nums hidden sm:table-cell">${s.price.toFixed(2)}</td>
+                      <td className="px-3 py-3 tabular-nums">${s.price.toFixed(2)}</td>
                       <td className="px-3 py-3">
                         <ScoreBar value={s.score} direction={s.direction} signal={s.signal} />
                       </td>
-                      <td className="px-3 py-3 hidden sm:table-cell"><ZoneBadge zone={s.zone} /></td>
-                      <td className="px-3 py-3 hidden md:table-cell"><RsiBar value={s.rsi} /></td>
-                      <td className="px-3 py-3 tabular-nums text-xs hidden md:table-cell">
-                        {s.adx != null
-                          ? <Tooltip text={
-                              s.adx >= 30 ? `ADX ${s.adx.toFixed(1)}: tendencia muy fuerte. Alta probabilidad de continuación en la dirección actual.`
-                            : s.adx >= 25 ? `ADX ${s.adx.toFixed(1)}: tendencia moderada-fuerte. Señales más confiables.`
-                            : s.adx >= 20 ? `ADX ${s.adx.toFixed(1)}: tendencia activa pero no muy fuerte. Condición mínima para operar.`
-                            : `ADX ${s.adx.toFixed(1)}: tendencia débil o mercado lateral. Mayor riesgo de señales falsas — esperar que supere 20.`
-                            }>
-                              <span className={s.adx >= 25 ? "font-semibold text-amber-700" : "text-gray-600"}>
-                                {s.adx.toFixed(1)}
-                              </span>
-                            </Tooltip>
-                          : <span className="text-gray-400">—</span>}
-                      </td>
-                      <td className="px-3 py-3 hidden lg:table-cell">
-                        {s.pct_vs_ma200 != null
-                          ? <Tooltip text={
-                              s.pct_vs_ma200 >= 0
-                                ? `+${s.pct_vs_ma200.toFixed(2)}% sobre la MA200. El precio está por encima de su promedio de 200 días — tendencia principal alcista.`
-                                : `${s.pct_vs_ma200.toFixed(2)}% bajo la MA200. El precio está por debajo de su promedio de 200 días — tendencia principal bajista.`
-                            }>
-                              <PctCell value={s.pct_vs_ma200} />
-                            </Tooltip>
-                          : <span className="text-gray-400">—</span>}
-                      </td>
-                      <td className="px-3 py-3 tabular-nums hidden lg:table-cell">
-                        {s.vol_ratio != null
-                          ? <Tooltip text={
-                              s.vol_ratio >= 2.0 ? `Volumen ${s.vol_ratio.toFixed(2)}x el promedio de 20 días. Movimiento fuertemente confirmado — alta participación del mercado.`
-                            : s.vol_ratio >= 1.5 ? `Volumen ${s.vol_ratio.toFixed(2)}x el promedio. Buena confirmación del movimiento.`
-                            : s.vol_ratio >= 1.0 ? `Volumen ${s.vol_ratio.toFixed(2)}x el promedio. Actividad normal.`
-                            : `Volumen ${s.vol_ratio.toFixed(2)}x el promedio. Movimiento sin confirmación de volumen — mayor riesgo de fakeout.`
-                            }>
-                              <span className={s.vol_ratio >= 1.5 ? "font-semibold text-amber-600" : "text-gray-700"}>
-                                {s.vol_ratio.toFixed(2)}x
-                              </span>
-                            </Tooltip>
-                          : <span className="text-gray-400">—</span>}
-                      </td>
-                      <td className="px-3 py-3 hidden lg:table-cell">
-                        {s.pct_from_high != null
-                          ? <Tooltip text={
-                              s.pct_from_high > -5 ? `${s.pct_from_high.toFixed(2)}% del máximo anual. En zona de máximos — momentum muy fuerte pero poco recorrido adicional al alza.`
-                            : s.pct_from_high > -20 ? `${s.pct_from_high.toFixed(2)}% del máximo anual. Relativamente cerca del techo — analizar si puede superarlo.`
-                            : `${s.pct_from_high.toFixed(2)}% del máximo anual. Lejos del techo — amplio recorrido potencial si recupera la tendencia.`
-                            }>
-                              <PctCell value={s.pct_from_high} />
-                            </Tooltip>
-                          : <span className="text-gray-400">—</span>}
-                      </td>
-                      <td className="px-3 py-3 hidden lg:table-cell">
-                        {s.pct_from_low != null
-                          ? <Tooltip text={
-                              s.pct_from_low < 15 ? `+${s.pct_from_low.toFixed(2)}% sobre el mínimo anual. Precio muy cerca del piso — zona de soporte, vigilar que no lo rompa.`
-                            : s.pct_from_low < 50 ? `+${s.pct_from_low.toFixed(2)}% sobre el mínimo anual. Recuperación moderada desde los mínimos.`
-                            : `+${s.pct_from_low.toFixed(2)}% sobre el mínimo anual. Lejos del piso — fuerte recuperación desde mínimos.`
-                            }>
-                              <PctCell value={s.pct_from_low} />
-                            </Tooltip>
-                          : <span className="text-gray-400">—</span>}
-                      </td>
-                      <td className="px-3 py-3 tabular-nums hidden lg:table-cell">
-                        {s.macd_hist != null
-                          ? <Tooltip text={
-                              s.macd_hist > 0
-                                ? `MACD histograma positivo (${s.macd_hist.toFixed(3)}). La línea MACD está por encima de su señal — momentum alcista activo.`
-                                : `MACD histograma negativo (${s.macd_hist.toFixed(3)}). La línea MACD está por debajo de su señal — momentum bajista activo.`
-                            }>
-                              <span className={s.macd_hist > 0 ? "text-green-600 font-medium" : "text-red-600 font-medium"}>
-                                {s.macd_hist > 0 ? "▲" : "▼"} {Math.abs(s.macd_hist).toFixed(3)}
-                              </span>
-                            </Tooltip>
-                          : <span className="text-gray-400">—</span>}
-                      </td>
-                      <td className="px-3 py-3 hidden md:table-cell"><PulseBadge signal={s.pulse_signal} /></td>
-                      <td className="px-3 py-3 hidden md:table-cell"><CandlePatternBadge pattern={s.candle_pattern} /></td>
-                      <td className="px-3 py-3 hidden md:table-cell">
-                        <SlTpCell sl={s.sl} tp1={s.tp1} direction={s.direction} />
-                      </td>
+                      <td className="px-3 py-3"><ZoneBadge zone={s.zone} /></td>
+                      <td className="px-3 py-3"><PulseBadge signal={s.pulse_signal} /></td>
                       <td className="px-3 py-3"><SignalBadge signal={s.signal} /></td>
                       <td className="px-3 py-3">
                         <button
