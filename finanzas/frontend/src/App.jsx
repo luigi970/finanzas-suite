@@ -588,30 +588,58 @@ function PatrimonioTab({ positions, transactions = [] }) {
   const load = useCallback(async () => {
     setLoading(true)
     setError(null)
+    const newPrices = {}
     try {
       // 1. Tipo de cambio blue desde maximos
-      const dollarRes = await fetch(`${MAXIMOS_API}/api/dollar`)
-      if (dollarRes.ok) {
-        const dollarData = await dollarRes.json()
-        const blue = (dollarData.dollar || []).find(d => d.nombre?.toLowerCase().includes('blue'))
-        if (blue) setBlueRate(blue.venta)
+      try {
+        const dollarRes = await fetch(`${MAXIMOS_API}/api/dollar`)
+        if (dollarRes.ok) {
+          const dollarData = await dollarRes.json()
+          const blue = (dollarData.dollar || []).find(d => d.nombre?.toLowerCase().includes('blue'))
+          if (blue) setBlueRate(blue.venta)
+        }
+      } catch (_) {}
+
+      // 2. Precios crypto desde Binance (tiempo real, sin depender de maximos)
+      const cryptoPos = positions.filter(p =>
+        p.asset_type === 'crypto' && !STABLECOINS.has(p.asset)
+      )
+      if (cryptoPos.length > 0) {
+        const symbols = [...new Set(cryptoPos.map(p => `"${p.asset.toUpperCase()}USDT"`))]
+        try {
+          const binanceRes = await fetch(
+            `https://api.binance.com/api/v3/ticker/price?symbols=[${symbols.join(',')}]`,
+            { cache: 'no-store' }
+          )
+          if (binanceRes.ok) {
+            const binanceData = await binanceRes.json()
+            for (const item of Array.isArray(binanceData) ? binanceData : []) {
+              const asset = item.symbol.replace('USDT', '')
+              newPrices[`${asset}-USD`] = { price: parseFloat(item.price) }
+            }
+          }
+        } catch (_) {}
       }
 
-      // 2. Precios de activos desde maximos
-      const needsPrice = positions.filter(p =>
+      // 3. Precios stocks/CEDEARs desde maximos (Yahoo Finance)
+      const stockPos = positions.filter(p =>
         !FIAT_ARS.has(p.asset) && !FIAT_USD.has(p.asset) && !STABLECOINS.has(p.asset) &&
-        p.asset_type !== 'fixed_term' && p.asset_type !== 'fund'
+        p.asset_type !== 'fixed_term' && p.asset_type !== 'fund' && p.asset_type !== 'crypto'
       )
-      if (needsPrice.length > 0) {
-        const tickers = [...new Set(needsPrice.map(p => toYahooTicker(p.asset, p.asset_type)))].join(',')
-        const quotesRes = await fetch(`${MAXIMOS_API}/api/quotes?tickers=${tickers}`)
-        if (quotesRes.ok) {
-          const quotesData = await quotesRes.json()
-          setPrices(quotesData.quotes || {})
-        }
+      if (stockPos.length > 0) {
+        try {
+          const tickers = [...new Set(stockPos.map(p => toYahooTicker(p.asset, p.asset_type)))].join(',')
+          const quotesRes = await fetch(`${MAXIMOS_API}/api/quotes?tickers=${tickers}`, { cache: 'no-store' })
+          if (quotesRes.ok) {
+            const quotesData = await quotesRes.json()
+            Object.assign(newPrices, quotesData.quotes || {})
+          }
+        } catch (_) {}
       }
+
+      setPrices(newPrices)
     } catch (e) {
-      setError('No se pudo conectar con maximos. Asegurate de que esté corriendo en localhost:8000.')
+      setError('No se pudieron actualizar los precios.')
     } finally {
       setLoading(false)
     }
