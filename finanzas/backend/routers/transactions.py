@@ -5,6 +5,8 @@ from database import get_db
 
 router = APIRouter(prefix="/api/transactions", tags=["transactions"])
 
+FIAT_CURRENCIES = {'ARS', 'USD', 'EUR', 'BRL', 'UYU'}
+
 class TransactionIn(BaseModel):
     account_id: int
     date: str
@@ -14,6 +16,7 @@ class TransactionIn(BaseModel):
     type: str           # income | expense | transfer
     category: Optional[str] = None
     source: Optional[str] = "manual"
+    unit_price: Optional[float] = None
 
 class TransactionItem(BaseModel):
     date: str
@@ -27,6 +30,48 @@ class TransactionItem(BaseModel):
 class TransactionBatch(BaseModel):
     account_id: int
     transactions: list[TransactionItem]
+
+class TransactionUpdate(BaseModel):
+    date: Optional[str] = None
+    description: Optional[str] = None
+    amount: Optional[float] = None
+    currency: Optional[str] = None
+    type: Optional[str] = None
+    category: Optional[str] = None
+    unit_price: Optional[float] = None
+
+
+def _apply_unit_price(conn, account_id: int, currency: str, tx_type: str, amount: float, unit_price: float):
+    """Update avg_price on income; calculate and return realized_pnl on expense."""
+    asset = currency.upper()
+    if asset in FIAT_CURRENCIES or unit_price <= 0:
+        return None
+
+    pos = conn.execute(
+        "SELECT id, quantity, avg_price FROM positions WHERE account_id = ? AND asset = ? AND end_date IS NULL",
+        (account_id, asset)
+    ).fetchone()
+
+    realized_pnl = None
+
+    if tx_type == 'income':
+        if pos:
+            old_qty = pos['quantity'] or 0
+            old_avg = pos['avg_price'] or unit_price
+            new_total_qty = old_qty + amount
+            new_avg = (old_qty * old_avg + amount * unit_price) / new_total_qty if new_total_qty > 0 else unit_price
+            conn.execute(
+                "UPDATE positions SET avg_price = ?, updated_at = datetime('now') WHERE id = ?",
+                (round(new_avg, 8), pos['id'])
+            )
+        # If no position yet, it will be created manually or via sync — avg_price will be set then
+
+    elif tx_type == 'expense':
+        if pos and pos['avg_price'] is not None:
+            realized_pnl = round((unit_price - pos['avg_price']) * amount, 2)
+
+    return realized_pnl
+
 
 @router.get("")
 def list_transactions(account_id: Optional[int] = None, limit: int = 200):
@@ -47,9 +92,12 @@ def list_transactions(account_id: Optional[int] = None, limit: int = 200):
 @router.post("", status_code=201)
 def create_transaction(data: TransactionIn):
     conn = get_db()
+    realized_pnl = None
+    if data.unit_price and data.type in ('income', 'expense'):
+        realized_pnl = _apply_unit_price(conn, data.account_id, data.currency, data.type, data.amount, data.unit_price)
     cur = conn.execute(
-        "INSERT INTO transactions (account_id, date, description, amount, currency, type, category, source) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-        (data.account_id, data.date, data.description, data.amount, data.currency.upper(), data.type, data.category, data.source)
+        "INSERT INTO transactions (account_id, date, description, amount, currency, type, category, source, unit_price, realized_pnl) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        (data.account_id, data.date, data.description, data.amount, data.currency.upper(), data.type, data.category, data.source, data.unit_price, realized_pnl)
     )
     conn.commit()
     row = conn.execute("SELECT * FROM transactions WHERE id = ?", (cur.lastrowid,)).fetchone()
@@ -76,14 +124,6 @@ def delete_transaction(transaction_id: int):
     conn.execute("DELETE FROM transactions WHERE id = ?", (transaction_id,))
     conn.commit()
     conn.close()
-
-class TransactionUpdate(BaseModel):
-    date: Optional[str] = None
-    description: Optional[str] = None
-    amount: Optional[float] = None
-    currency: Optional[str] = None
-    type: Optional[str] = None
-    category: Optional[str] = None
 
 @router.patch("/{transaction_id}")
 def update_transaction(transaction_id: int, data: TransactionUpdate):
@@ -131,8 +171,16 @@ def summary(account_id: Optional[int] = None):
         ORDER BY total DESC
     """, params).fetchall()
 
+    realized = conn.execute(f"""
+        SELECT currency,
+               SUM(realized_pnl) as total_realized
+        FROM transactions {base} AND realized_pnl IS NOT NULL
+        GROUP BY currency
+    """, params).fetchall()
+
     conn.close()
     return {
         "by_month": [dict(r) for r in by_month],
         "by_category": [dict(r) for r in by_category],
+        "realized_pnl": [dict(r) for r in realized],
     }

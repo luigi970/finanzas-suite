@@ -476,11 +476,104 @@ const TYPE_COLORS = {
   fund: 'bg-teal-100 text-teal-700',
 }
 
+function LayoutToggle({ value, onChange }) {
+  return (
+    <div className="flex items-center gap-1 bg-gray-100 rounded-lg p-0.5">
+      <button
+        onClick={() => onChange('grid')}
+        title="Grid"
+        className={`p-1.5 rounded-md transition-colors ${value === 'grid' ? 'bg-white shadow-sm text-gray-700' : 'text-gray-400 hover:text-gray-600'}`}
+      >
+        <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
+          <rect x="0" y="0" width="6" height="6" rx="1" fill="currentColor"/>
+          <rect x="8" y="0" width="6" height="6" rx="1" fill="currentColor"/>
+          <rect x="0" y="8" width="6" height="6" rx="1" fill="currentColor"/>
+          <rect x="8" y="8" width="6" height="6" rx="1" fill="currentColor"/>
+        </svg>
+      </button>
+      <button
+        onClick={() => onChange('masonry')}
+        title="Masonry"
+        className={`p-1.5 rounded-md transition-colors ${value === 'masonry' ? 'bg-white shadow-sm text-gray-700' : 'text-gray-400 hover:text-gray-600'}`}
+      >
+        <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
+          <rect x="0" y="0" width="6" height="8" rx="1" fill="currentColor"/>
+          <rect x="8" y="0" width="6" height="5" rx="1" fill="currentColor"/>
+          <rect x="0" y="10" width="6" height="4" rx="1" fill="currentColor"/>
+          <rect x="8" y="7" width="6" height="7" rx="1" fill="currentColor"/>
+        </svg>
+      </button>
+    </div>
+  )
+}
+
+function PatrimonioTypeCard({ type, group, pct }) {
+  const [open, setOpen] = useState(true)
+  const groupTotal = group.reduce((s, p) => s + (p.valueUSD ?? 0), 0)
+  return (
+    <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
+      <button onClick={() => setOpen(o => !o)}
+        className="flex items-center justify-between w-full px-4 py-3 hover:bg-gray-50 transition-colors text-left">
+        <div className="flex items-center gap-2">
+          <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${TYPE_COLORS[type]}`}>
+            {TYPE_LABELS[type]}
+          </span>
+          <div className="h-1.5 w-16 bg-gray-100 rounded-full overflow-hidden">
+            <div className="h-1.5 bg-amber-400 rounded-full" style={{ width: `${Math.min(pct, 100)}%` }} />
+          </div>
+          <span className="text-xs text-gray-400">{pct.toFixed(1)}%</span>
+        </div>
+        <div className="flex items-center gap-2 shrink-0">
+          <span className="font-semibold text-sm text-gray-700 tabular-nums">
+            {groupTotal > 0 ? `USD ${groupTotal.toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : '—'}
+          </span>
+          <span className={`text-gray-400 text-[10px] transition-transform duration-200 ${open ? 'rotate-180' : ''}`}>▼</span>
+        </div>
+      </button>
+      {open && (
+        <div className="divide-y divide-gray-50 border-t border-gray-100">
+          {group.map(p => (
+            <div key={p.id} className="flex items-center gap-3 px-4 py-2.5">
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center gap-2">
+                  <span className="font-semibold text-sm text-gray-800">{p.asset}</span>
+                  {p.end_date && <span className="text-[10px] bg-amber-100 text-amber-700 rounded px-1.5 py-0.5">vence {p.end_date}</span>}
+                </div>
+                <div className="text-xs text-gray-400">{p.account_name} · {fmtAmount(p.quantity)} {p.asset}</div>
+              </div>
+              <div className="text-right shrink-0">
+                {p.priceUSD != null ? (
+                  <>
+                    <div className="font-semibold text-sm text-gray-800 tabular-nums">
+                      USD {(p.valueUSD).toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                    </div>
+                    <div className="text-xs text-gray-400 tabular-nums">@ USD {fmtAmount(p.priceUSD)}</div>
+                    {p.pnlUSD != null && (
+                      <div className={`text-xs font-semibold tabular-nums ${p.pnlUSD >= 0 ? 'text-green-600' : 'text-red-500'}`}>
+                        {p.pnlUSD >= 0 ? '+' : ''}USD {p.pnlUSD.toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                        {' '}({p.pnlPct >= 0 ? '+' : ''}{p.pnlPct.toFixed(2)}%)
+                      </div>
+                    )}
+                  </>
+                ) : (
+                  <span className="text-xs text-gray-400">sin precio</span>
+                )}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
 function PatrimonioTab({ positions, transactions = [] }) {
   const [prices,   setPrices]   = useState({})
   const [blueRate, setBlueRate] = useState(null)
   const [loading,  setLoading]  = useState(true)
   const [error,    setError]    = useState(null)
+  const [layout,   setLayout]   = useState(() => localStorage.getItem('patrimonio_layout') || 'grid')
+  const onLayout = v => { setLayout(v); localStorage.setItem('patrimonio_layout', v) }
 
   // Resumen de movimientos del mes actual
   const thisMonth = new Date().toISOString().slice(0, 7)
@@ -541,10 +634,12 @@ function PatrimonioTab({ positions, transactions = [] }) {
     return { ...p, priceUSD, valueUSD, costUSD, pnlUSD, pnlPct }
   })
 
-  const totalUSD  = enriched.reduce((s, p) => s + (p.valueUSD ?? 0), 0)
-  const totalARS  = blueRate ? totalUSD * blueRate : null
-  const totalPnl  = enriched.reduce((s, p) => s + (p.pnlUSD ?? 0), 0)
-  const hasPnl    = enriched.some(p => p.pnlUSD != null)
+  const totalUSD      = enriched.reduce((s, p) => s + (p.valueUSD ?? 0), 0)
+  const totalARS      = blueRate ? totalUSD * blueRate : null
+  const totalPnl      = enriched.reduce((s, p) => s + (p.pnlUSD ?? 0), 0)
+  const hasPnl        = enriched.some(p => p.pnlUSD != null)
+  const totalRealized = transactions.reduce((s, t) => s + (t.realized_pnl ?? 0), 0)
+  const hasRealized   = transactions.some(t => t.realized_pnl != null)
 
   // Agrupar por tipo
   const byType = {}
@@ -567,7 +662,7 @@ function PatrimonioTab({ positions, transactions = [] }) {
   )
 
   return (
-    <div className="max-w-4xl mx-auto space-y-6">
+    <div className="max-w-6xl mx-auto space-y-6">
       {error && (
         <div className="bg-amber-50 border border-amber-200 rounded-xl px-4 py-3 text-sm text-amber-700 flex items-center justify-between">
           <span>{error}</span>
@@ -615,7 +710,12 @@ function PatrimonioTab({ positions, transactions = [] }) {
         )}
         {hasPnl && (
           <div className={`text-sm font-semibold mt-2 tabular-nums ${totalPnl >= 0 ? 'text-green-400' : 'text-red-400'}`}>
-            {totalPnl >= 0 ? '▲' : '▼'} {totalPnl >= 0 ? '+' : ''}USD {totalPnl.toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} resultado no realizado
+            {totalPnl >= 0 ? '▲' : '▼'} {totalPnl >= 0 ? '+' : ''}USD {totalPnl.toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} no realizado
+          </div>
+        )}
+        {hasRealized && (
+          <div className={`text-sm font-semibold tabular-nums ${totalRealized >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+            {totalRealized >= 0 ? '▲' : '▼'} {totalRealized >= 0 ? '+' : ''}USD {totalRealized.toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} realizado
           </div>
         )}
         {blueRate && (
@@ -624,60 +724,20 @@ function PatrimonioTab({ positions, transactions = [] }) {
       </div>
 
       {/* Desglose por tipo */}
-      {TYPE_ORDER.filter(t => byType[t]).map(type => {
-        const group = byType[type]
-        const groupTotal = group.reduce((s, p) => s + (p.valueUSD ?? 0), 0)
-        const pct = totalUSD > 0 ? (groupTotal / totalUSD) * 100 : 0
-        return (
-          <div key={type} className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
-            <div className="flex items-center justify-between px-4 py-3 border-b border-gray-100">
-              <div className="flex items-center gap-2">
-                <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${TYPE_COLORS[type]}`}>
-                  {TYPE_LABELS[type]}
-                </span>
-                <div className="h-1.5 w-24 bg-gray-100 rounded-full overflow-hidden">
-                  <div className="h-1.5 bg-amber-400 rounded-full" style={{ width: `${Math.min(pct, 100)}%` }} />
-                </div>
-                <span className="text-xs text-gray-400">{pct.toFixed(1)}%</span>
-              </div>
-              <span className="font-semibold text-sm text-gray-700 tabular-nums">
-                {groupTotal > 0 ? `USD ${groupTotal.toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : '—'}
-              </span>
+      <div>
+        <div className="flex items-center justify-end mb-3">
+          <LayoutToggle value={layout} onChange={onLayout} />
+        </div>
+        <div className={layout === 'masonry'
+          ? 'columns-1 sm:columns-2 lg:columns-3 gap-4'
+          : 'grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 items-start'}>
+          {TYPE_ORDER.filter(t => byType[t]).map(type => (
+            <div key={type} className={layout === 'masonry' ? 'break-inside-avoid mb-4' : ''}>
+              <PatrimonioTypeCard type={type} group={byType[type]} pct={totalUSD > 0 ? (byType[type].reduce((s, p) => s + (p.valueUSD ?? 0), 0) / totalUSD) * 100 : 0} />
             </div>
-            <div className="divide-y divide-gray-50">
-              {group.map(p => (
-                <div key={p.id} className="flex items-center gap-3 px-4 py-2.5">
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2">
-                      <span className="font-semibold text-sm text-gray-800">{p.asset}</span>
-                      {p.end_date && <span className="text-[10px] bg-amber-100 text-amber-700 rounded px-1.5 py-0.5">vence {p.end_date}</span>}
-                    </div>
-                    <div className="text-xs text-gray-400">{p.account_name} · {fmtAmount(p.quantity)} {p.asset}</div>
-                  </div>
-                  <div className="text-right shrink-0">
-                    {p.priceUSD != null ? (
-                      <>
-                        <div className="font-semibold text-sm text-gray-800 tabular-nums">
-                          USD {(p.valueUSD).toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                        </div>
-                        <div className="text-xs text-gray-400 tabular-nums">@ USD {fmtAmount(p.priceUSD)}</div>
-                        {p.pnlUSD != null && (
-                          <div className={`text-xs font-semibold tabular-nums ${p.pnlUSD >= 0 ? 'text-green-600' : 'text-red-500'}`}>
-                            {p.pnlUSD >= 0 ? '+' : ''}USD {p.pnlUSD.toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                            {' '}({p.pnlPct >= 0 ? '+' : ''}{p.pnlPct.toFixed(2)}%)
-                          </div>
-                        )}
-                      </>
-                    ) : (
-                      <span className="text-xs text-gray-400">sin precio</span>
-                    )}
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-        )
-      })}
+          ))}
+        </div>
+      </div>
 
       <button onClick={load} className="text-xs text-amber-600 hover:underline w-full text-center py-2">
         Actualizar precios
@@ -687,6 +747,8 @@ function PatrimonioTab({ positions, transactions = [] }) {
 }
 
 // ── TransactionForm ───────────────────────────────────────────────────────────
+const FIAT_CURRENCIES = new Set(['ARS','USD','EUR','BRL','UYU'])
+
 function TransactionForm({ initial, accounts, onSave, onClose }) {
   const [form, setForm] = useState({
     account_id: initial?.account_id ?? (accounts[0]?.id ?? ''),
@@ -696,12 +758,18 @@ function TransactionForm({ initial, accounts, onSave, onClose }) {
     currency:    initial?.currency ?? 'ARS',
     type:        initial?.type ?? 'expense',
     category:    initial?.category ?? '',
+    unit_price:  initial?.unit_price ?? '',
   })
   const set = k => e => setForm(f => ({ ...f, [k]: e.target.value }))
 
+  const showUnitPrice = ['income','expense'].includes(form.type) && !FIAT_CURRENCIES.has(form.currency.toUpperCase())
+
   async function submit(e) {
     e.preventDefault()
-    await onSave({ ...form, amount: parseFloat(form.amount), account_id: parseInt(form.account_id) })
+    const payload = { ...form, amount: parseFloat(form.amount), account_id: parseInt(form.account_id) }
+    if (form.unit_price !== '' && showUnitPrice) payload.unit_price = parseFloat(form.unit_price)
+    else delete payload.unit_price
+    await onSave(payload)
     onClose()
   }
 
@@ -752,6 +820,15 @@ function TransactionForm({ initial, accounts, onSave, onClose }) {
           {CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
         </select>
       </div>
+      {showUnitPrice && (
+        <div>
+          <label className="text-xs font-medium text-gray-500 uppercase tracking-wide">
+            Precio por unidad (USD) <span className="text-gray-400 normal-case font-normal">— {form.type === 'income' ? 'actualiza tu costo promedio' : 'calcula ganancia realizada'}</span>
+          </label>
+          <input type="number" step="any" min="0" value={form.unit_price} onChange={set('unit_price')}
+            className={inputCls} placeholder="ej: 97500 para ETH a USD 97.500" />
+        </div>
+      )}
       <div className="flex gap-2 pt-1">
         <button type="button" onClick={onClose}
           className="flex-1 py-2 rounded-lg border border-gray-200 text-sm text-gray-600 hover:bg-gray-50">
@@ -813,12 +890,17 @@ function AccountCard({ acc, positions, onEdit, onDelete }) {
 function PortfolioTab({ accounts, positions, onAddPosition, onEditPosition, onDeletePosition }) {
   const activeAccounts = accounts.filter(a => a.active)
   const hasPositions = positions.length > 0
+  const [layout, setLayout] = useState(() => localStorage.getItem('portfolio_layout') || 'grid')
+  const onLayout = v => { setLayout(v); localStorage.setItem('portfolio_layout', v) }
 
   return (
     <div className="max-w-6xl mx-auto">
       <div className="flex items-center justify-between mb-4">
         <h2 className="text-sm font-semibold text-gray-700 uppercase tracking-wide">Posiciones</h2>
-        <button onClick={onAddPosition} className="text-xs text-amber-600 hover:underline">+ Agregar</button>
+        <div className="flex items-center gap-3">
+          <LayoutToggle value={layout} onChange={onLayout} />
+          <button onClick={onAddPosition} className="text-xs text-amber-600 hover:underline">+ Agregar</button>
+        </div>
       </div>
 
       {!hasPositions ? (
@@ -828,18 +910,21 @@ function PortfolioTab({ accounts, positions, onAddPosition, onEditPosition, onDe
           <button onClick={onAddPosition} className="mt-3 text-amber-600 text-xs hover:underline">Agregar posición</button>
         </div>
       ) : (
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 items-start">
+        <div className={layout === 'masonry'
+          ? 'columns-1 sm:columns-2 lg:columns-3 gap-3'
+          : 'grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 items-start'}>
           {activeAccounts.map(acc => {
             const acPos = positions.filter(p => p.account_id === acc.id)
             if (!acPos.length) return null
             return (
-              <AccountCard
-                key={acc.id}
-                acc={acc}
-                positions={acPos}
-                onEdit={onEditPosition}
-                onDelete={onDeletePosition}
-              />
+              <div key={acc.id} className={layout === 'masonry' ? 'break-inside-avoid mb-3' : ''}>
+                <AccountCard
+                  acc={acc}
+                  positions={acPos}
+                  onEdit={onEditPosition}
+                  onDelete={onDeletePosition}
+                />
+              </div>
             )
           })}
         </div>
@@ -1074,8 +1159,15 @@ export default function App() {
                         <div className="text-sm text-gray-700 truncate">{t.description || '—'}</div>
                         <div className="text-xs text-gray-400">{t.account_name} · {t.date} {t.category && `· ${t.category}`}</div>
                       </div>
-                      <div className={`font-semibold text-sm tabular-nums shrink-0 ${t.type === 'income' ? 'text-green-600' : 'text-red-600'}`}>
-                        {t.type === 'income' ? '+' : '-'}{fmtAmount(t.amount)} {t.currency}
+                      <div className="text-right shrink-0">
+                        <div className={`font-semibold text-sm tabular-nums ${t.type === 'income' ? 'text-green-600' : 'text-red-600'}`}>
+                          {t.type === 'income' ? '+' : '-'}{fmtAmount(t.amount)} {t.currency}
+                        </div>
+                        {t.realized_pnl != null && (
+                          <div className={`text-xs font-semibold tabular-nums ${t.realized_pnl >= 0 ? 'text-green-500' : 'text-red-500'}`}>
+                            {t.realized_pnl >= 0 ? '+' : ''}USD {t.realized_pnl.toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} realizado
+                          </div>
+                        )}
                       </div>
                       <button onClick={() => { setEditTarget({ ...t, type: 'transaction' }); setModal('edit-transaction') }}
                         className="text-gray-300 hover:text-amber-500 px-1 text-xs shrink-0">

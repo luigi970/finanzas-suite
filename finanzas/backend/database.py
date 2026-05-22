@@ -61,6 +61,8 @@ def init_db():
     # Migrations: add columns to existing tables without breaking existing data
     for sql in [
         "ALTER TABLE positions ADD COLUMN avg_price REAL",
+        "ALTER TABLE transactions ADD COLUMN unit_price REAL",
+        "ALTER TABLE transactions ADD COLUMN realized_pnl REAL",
     ]:
         try:
             conn.execute(sql)
