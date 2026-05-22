@@ -214,7 +214,7 @@ function TradingViewEmbed({ ticker, widgetSrc, config }) {
 
 const TV_BASE = "https://s3.tradingview.com/external-embedding";
 
-function Tooltip({ text, children }) {
+function Tooltip({ text, content, children }) {
   const [pos, setPos] = useState(null);
   const ref = useRef(null);
 
@@ -225,6 +225,8 @@ function Tooltip({ text, children }) {
     setPos({ x, y: r.top + window.scrollY });
   };
 
+  const body = content ?? text;
+
   return (
     <>
       <span ref={ref} onMouseEnter={show} onMouseLeave={() => setPos(null)} className="inline-block">
@@ -233,8 +235,8 @@ function Tooltip({ text, children }) {
       {pos && createPortal(
         <div className="absolute z-[9999] pointer-events-none"
           style={{ left: pos.x, top: pos.y - 10, transform: "translate(-50%, -100%)" }}>
-          <div className="bg-gray-900 text-white text-[11px] rounded-xl px-3 py-2.5 leading-relaxed shadow-2xl max-w-[240px] whitespace-normal text-left">
-            {text}
+          <div className="bg-gray-900 text-white text-[11px] rounded-xl px-3 py-2.5 leading-relaxed shadow-2xl max-w-[260px] whitespace-normal text-left">
+            {body}
           </div>
           <div className="absolute top-full left-1/2 -translate-x-1/2 border-[5px] border-transparent border-t-gray-900" />
         </div>,
@@ -1143,6 +1145,61 @@ const SIGNAL_TOOLTIPS = {
   venta_fuerte:  "Momento de venta fuerte — todos los indicadores apuntan a la baja. Evitá compras. El sistema detectó la señal bajista más clara.",
 };
 
+const CRYPTO_NAMES = {
+  BTC: "Bitcoin", ETH: "Ethereum", BNB: "BNB", SOL: "Solana",
+  XRP: "XRP", ADA: "Cardano", AVAX: "Avalanche", DOGE: "Dogecoin",
+  TRX: "TRON", DOT: "Polkadot", LINK: "Chainlink", MATIC: "Polygon",
+  LTC: "Litecoin", BCH: "Bitcoin Cash", NEAR: "NEAR Protocol",
+  UNI: "Uniswap", ATOM: "Cosmos", XLM: "Stellar", ALGO: "Algorand",
+  FIL: "Filecoin", VET: "VeChain", ICP: "Internet Computer",
+  ETC: "Ethereum Classic", HBAR: "Hedera", APT: "Aptos",
+  ARB: "Arbitrum", OP: "Optimism", SUI: "Sui", INJ: "Injective",
+  RENDER: "Render", FET: "Fetch.ai", GRT: "The Graph",
+  SAND: "The Sandbox", MANA: "Decentraland", AXS: "Axie Infinity",
+  AAVE: "Aave", MKR: "Maker", CRV: "Curve", COMP: "Compound",
+  LDO: "Lido DAO", SHIB: "Shiba Inu", PEPE: "Pepe",
+  TON: "Toncoin", TAO: "Bittensor", SEI: "Sei", JUP: "Jupiter",
+  WIF: "dogwifhat", BONK: "Bonk", FLOKI: "Floki",
+};
+
+function TickerTooltip({ s, children }) {
+  const base = displayTicker(s.ticker);
+  const cryptoName = CRYPTO_NAMES[base];
+  const sigCfg = SIGNAL_CONFIG[s.signal] ?? SIGNAL_CONFIG.neutral;
+  const zoneLabel = { discount: "DISCOUNT", fair: "FAIR", premium: "PREMIUM" }[s.zone] ?? (s.zone ?? "—");
+  const dir = s.direction === "long" ? "LARGO" : s.direction === "short" ? "CORTO" : null;
+
+  const content = (
+    <div className="space-y-1.5">
+      <div>
+        {cryptoName
+          ? <><span className="font-bold text-white">{cryptoName}</span>{" "}<span className="text-gray-400">{base}</span></>
+          : <span className="font-bold text-white">{base}</span>
+        }
+      </div>
+      <div className="border-t border-gray-700 pt-1.5 space-y-1">
+        <div className="flex items-center gap-1.5 flex-wrap">
+          <span className="text-amber-400 font-bold">Score {s.score ?? "—"}/100</span>
+          {dir && <span className="text-gray-400">· {dir}</span>}
+        </div>
+        <div>
+          <span className={`px-1.5 py-0.5 rounded text-[10px] font-semibold ${sigCfg.badge}`}>{sigCfg.label}</span>
+        </div>
+        <div className="text-gray-300 flex flex-wrap gap-x-3">
+          <span>Zona <span className="text-white font-semibold">{zoneLabel}</span></span>
+          {s.rsi != null && <span>RSI <span className="text-white font-semibold">{s.rsi}</span></span>}
+          {s.adx != null && <span>ADX <span className="text-white font-semibold">{s.adx}</span></span>}
+        </div>
+        {s.pulse_signal && s.pulse_signal !== "—" && (
+          <div className="text-gray-300">Pulse <span className="text-cyan-400 font-semibold">{s.pulse_signal}</span></div>
+        )}
+      </div>
+    </div>
+  );
+
+  return <Tooltip content={content}>{children}</Tooltip>;
+}
+
 function SignalBadge({ signal }) {
   const cfg = SIGNAL_CONFIG[signal] ?? SIGNAL_CONFIG.neutral;
   return (
@@ -1786,7 +1843,10 @@ export default function App() {
                   >
                     <div className="flex-1">
                       <div className="flex items-center gap-2">
-                        <span className="font-semibold text-sm text-gray-900">{displayTicker(ticker)}</span>
+                        {cached
+                          ? <TickerTooltip s={cached}><span className="font-semibold text-sm text-gray-900 underline decoration-dotted underline-offset-2">{displayTicker(ticker)}</span></TickerTooltip>
+                          : <span className="font-semibold text-sm text-gray-900">{displayTicker(ticker)}</span>
+                        }
                         {isCrypto && <span className="text-xs text-gray-400">Binance</span>}
                       </div>
                       <div className="flex items-center gap-2 mt-0.5">
@@ -1912,7 +1972,9 @@ export default function App() {
                             onClick={(e) => toggleWatch(s.ticker, e)}
                             className={`text-base leading-none transition-colors ${watchlist.includes(s.ticker) ? "text-amber-400" : "text-gray-400 hover:text-amber-400"}`}
                           >{watchlist.includes(s.ticker) ? "★" : "☆"}</button>
-                          <span className="font-semibold text-gray-900 underline decoration-dotted underline-offset-2">{displayTicker(s.ticker)}</span>
+                          <TickerTooltip s={s}>
+                            <span className="font-semibold text-gray-900 underline decoration-dotted underline-offset-2">{displayTicker(s.ticker)}</span>
+                          </TickerTooltip>
                         </div>
                       </td>
                       <td className="px-3 py-3 tabular-nums">${s.price.toFixed(2)}</td>
