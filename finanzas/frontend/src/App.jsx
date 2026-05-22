@@ -266,6 +266,9 @@ function PositionForm({ accounts, initial, onSave, onClose }) {
           <input type="number" step="any" min="0" value={form.avg_price} onChange={set('avg_price')}
             placeholder="ej: 95000 para BTC comprado a USD 95k"
             className="mt-1 w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-amber-400" />
+          <p className="mt-1 text-[11px] text-gray-400 leading-snug">
+            Cargalo una sola vez. Las compras futuras que registres con precio lo actualizarán automáticamente.
+          </p>
         </div>
       )}
       {hasTerm && (
@@ -751,25 +754,34 @@ const FIAT_CURRENCIES = new Set(['ARS','USD','EUR','BRL','UYU'])
 
 function TransactionForm({ initial, accounts, onSave, onClose }) {
   const [form, setForm] = useState({
-    account_id: initial?.account_id ?? (accounts[0]?.id ?? ''),
-    date:        initial?.date ?? new Date().toISOString().slice(0, 10),
-    description: initial?.description ?? '',
-    amount:      initial?.amount ?? '',
-    currency:    initial?.currency ?? 'ARS',
-    type:        initial?.type ?? 'expense',
-    category:    initial?.category ?? '',
-    unit_price:  initial?.unit_price ?? '',
+    account_id:    initial?.account_id ?? (accounts[0]?.id ?? ''),
+    to_account_id: '',
+    date:          initial?.date ?? new Date().toISOString().slice(0, 10),
+    description:   initial?.description ?? '',
+    amount:        initial?.amount ?? '',
+    currency:      initial?.currency ?? 'ARS',
+    type:          initial?.type ?? 'expense',
+    category:      initial?.category ?? '',
+    unit_price:    initial?.unit_price ?? '',
   })
   const set = k => e => setForm(f => ({ ...f, [k]: e.target.value }))
 
+  const isTransfer  = form.type === 'transfer'
   const showUnitPrice = ['income','expense'].includes(form.type) && !FIAT_CURRENCIES.has(form.currency.toUpperCase())
 
   async function submit(e) {
     e.preventDefault()
-    const payload = { ...form, amount: parseFloat(form.amount), account_id: parseInt(form.account_id) }
-    if (form.unit_price !== '' && showUnitPrice) payload.unit_price = parseFloat(form.unit_price)
-    else delete payload.unit_price
-    await onSave(payload)
+    const base = { ...form, amount: parseFloat(form.amount), account_id: parseInt(form.account_id) }
+    if (form.unit_price !== '' && showUnitPrice) base.unit_price = parseFloat(form.unit_price)
+    else delete base.unit_price
+
+    if (isTransfer && form.to_account_id) {
+      // Crear egreso en cuenta origen e ingreso en cuenta destino
+      await onSave({ ...base, type: 'expense', description: base.description || 'Transferencia' })
+      await onSave({ ...base, type: 'income',  account_id: parseInt(form.to_account_id), description: base.description || 'Transferencia' })
+    } else {
+      await onSave(base)
+    }
     onClose()
   }
 
@@ -792,11 +804,25 @@ function TransactionForm({ initial, accounts, onSave, onClose }) {
         </div>
       </div>
       <div>
-        <label className="text-xs font-medium text-gray-500 uppercase tracking-wide">Cuenta</label>
+        <label className="text-xs font-medium text-gray-500 uppercase tracking-wide">
+          {isTransfer ? 'Cuenta origen' : 'Cuenta'}
+        </label>
         <select value={form.account_id} onChange={set('account_id')} required className={inputCls}>
           {accounts.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
         </select>
       </div>
+      {isTransfer && (
+        <div>
+          <label className="text-xs font-medium text-gray-500 uppercase tracking-wide">Cuenta destino</label>
+          <select value={form.to_account_id} onChange={set('to_account_id')} required={isTransfer} className={inputCls}>
+            <option value="">— Elegí una cuenta —</option>
+            {accounts.filter(a => a.id !== parseInt(form.account_id)).map(a => (
+              <option key={a.id} value={a.id}>{a.name}</option>
+            ))}
+          </select>
+          <p className="mt-1 text-[11px] text-gray-400">Se registra un egreso en origen y un ingreso en destino automáticamente.</p>
+        </div>
+      )}
       <div>
         <label className="text-xs font-medium text-gray-500 uppercase tracking-wide">Descripción</label>
         <input value={form.description} onChange={set('description')}
@@ -813,20 +839,27 @@ function TransactionForm({ initial, accounts, onSave, onClose }) {
             className={inputCls} placeholder="ARS, USD, BTC..." />
         </div>
       </div>
-      <div>
-        <label className="text-xs font-medium text-gray-500 uppercase tracking-wide">Categoría</label>
-        <select value={form.category} onChange={set('category')} className={inputCls}>
-          <option value="">Sin categoría</option>
-          {CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
-        </select>
-      </div>
-      {showUnitPrice && (
+      {!isTransfer && (
+        <div>
+          <label className="text-xs font-medium text-gray-500 uppercase tracking-wide">Categoría</label>
+          <select value={form.category} onChange={set('category')} className={inputCls}>
+            <option value="">Sin categoría</option>
+            {CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
+          </select>
+        </div>
+      )}
+      {showUnitPrice && !isTransfer && (
         <div>
           <label className="text-xs font-medium text-gray-500 uppercase tracking-wide">
-            Precio por unidad (USD) <span className="text-gray-400 normal-case font-normal">— {form.type === 'income' ? 'actualiza tu costo promedio' : 'calcula ganancia realizada'}</span>
+            Precio por unidad (USD) <span className="text-gray-400 normal-case font-normal">(opcional)</span>
           </label>
           <input type="number" step="any" min="0" value={form.unit_price} onChange={set('unit_price')}
             className={inputCls} placeholder="ej: 97500 para ETH a USD 97.500" />
+          <p className="mt-1 text-[11px] text-gray-400 leading-snug">
+            {form.type === 'income'
+              ? 'Si lo completás, el costo promedio de tu posición se actualiza automáticamente.'
+              : 'Si lo completás, se calcula y guarda la ganancia o pérdida realizada de esta venta.'}
+          </p>
         </div>
       )}
       <div className="flex gap-2 pt-1">
@@ -1067,6 +1100,8 @@ export default function App() {
   async function saveTransaction(data) {
     if (editTarget?.type === 'transaction') {
       await api(`/api/transactions/${editTarget.id}`, { method: 'PATCH', body: JSON.stringify(data) })
+    } else {
+      await api('/api/transactions', { method: 'POST', body: JSON.stringify(data) })
     }
     await load()
     setEditTarget(null)
@@ -1141,8 +1176,12 @@ export default function App() {
           <div className="max-w-3xl mx-auto space-y-4">
             <div className="flex items-center justify-between">
               <h2 className="text-sm font-semibold text-gray-700 uppercase tracking-wide">Movimientos recientes</h2>
-              <button onClick={() => { setModal('ingest'); setEditTarget(null) }}
-                className="text-xs text-amber-600 hover:underline">+ Cargar</button>
+              <div className="flex items-center gap-3">
+                <button onClick={() => { setModal('new-transaction'); setEditTarget(null) }}
+                  className="text-xs text-gray-500 hover:text-amber-600">+ Manual</button>
+                <button onClick={() => { setModal('ingest'); setEditTarget(null) }}
+                  className="text-xs text-amber-600 hover:underline">+ Importar</button>
+              </div>
             </div>
             {transactions.length === 0 ? (
               <div className="text-center py-16 text-gray-400 text-sm">
@@ -1251,6 +1290,17 @@ export default function App() {
       {modal === 'ingest' && (
         <Modal title="Cargar movimientos" onClose={() => setModal(null)}>
           <IngestPanel accounts={accounts.filter(a => a.active)} onDone={() => { setModal(null); load() }} />
+        </Modal>
+      )}
+
+      {modal === 'new-transaction' && (
+        <Modal title="Nueva transacción" onClose={() => setModal(null)}>
+          <TransactionForm
+            initial={null}
+            accounts={accounts}
+            onSave={saveTransaction}
+            onClose={() => { setModal(null); load() }}
+          />
         </Modal>
       )}
 
