@@ -1474,22 +1474,24 @@ export default function App() {
       const data = await res.json();
       let stocks = data.stocks ?? [];
 
-      // Para la lista crypto, actualizar precios desde Binance en tiempo real
+      // Para crypto: precios en tiempo real desde Binance (proxeado por el Worker)
       if (activeListId === "crypto" && stocks.length > 0) {
-        const results = await Promise.all(stocks.map(async s => {
-          try {
-            const r = await fetch(
-              `https://api.binance.com/api/v3/ticker/price?symbol=${s.ticker}USDT`,
-              { cache: "no-store" }
-            );
-            if (r.ok) {
-              const d = await r.json();
-              if (d.price) return { ...s, price: parseFloat(d.price) };
-            }
-          } catch (_) {}
-          return s;
-        }));
-        stocks = results;
+        try {
+          // s.ticker viene en formato Yahoo (BTC-USD) → extraer base (BTC)
+          const baseSymbols = stocks.map(s => s.ticker.replace(/-USD$/, ""));
+          const r = await fetch(
+            `${API_BASE}/api/crypto-quotes?symbols=${baseSymbols.join(",")}`,
+            { cache: "no-store" }
+          );
+          if (r.ok) {
+            const d = await r.json();
+            const quotes = d.quotes || {};
+            stocks = stocks.map(s => {
+              const base = s.ticker.replace(/-USD$/, "");
+              return quotes[base] != null ? { ...s, price: quotes[base] } : s;
+            });
+          }
+        } catch (_) {}
       }
 
       setStocks(stocks);

@@ -331,6 +331,25 @@ async def on_fetch(request, env):
         except Exception as e:
             return _j({"quotes": {}, "error": str(e)})
 
+    # GET /api/crypto-quotes?symbols=BTC,ETH — precios en tiempo real desde Binance
+    if method == "GET" and path == "/api/crypto-quotes":
+        symbols_str = qs.get("symbols", "")
+        if not symbols_str:
+            return _j({"quotes": {}})
+        symbols = [s.strip().upper() for s in symbols_str.split(",") if s.strip()]
+        quotes = {}
+        for base in symbols:
+            try:
+                url = f"https://api.binance.com/api/v3/ticker/price?symbol={base}USDT"
+                resp = await fetch(url, headers={"User-Agent": "maximos/1.0"})
+                if resp.status == 200:
+                    data = json.loads(await resp.text())
+                    if "price" in data:
+                        quotes[base] = float(data["price"])
+            except Exception:
+                pass
+        return _j({"quotes": quotes})
+
     # GET /api/dollar — cotizaciones del dólar (dolarapi.com)
     if method == "GET" and path == "/api/dollar":
         try:
