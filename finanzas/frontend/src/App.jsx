@@ -605,20 +605,27 @@ function PatrimonioTab({ positions, transactions = [] }) {
         p.asset_type === 'crypto' && !STABLECOINS.has(p.asset)
       )
       if (cryptoPos.length > 0) {
-        const symbols = [...new Set(cryptoPos.map(p => `"${p.asset.toUpperCase()}USDT"`))]
+        const symbolsArr = [...new Set(cryptoPos.map(p => `${p.asset.toUpperCase()}USDT`))]
         try {
-          const binanceRes = await fetch(
-            `https://api.binance.com/api/v3/ticker/price?symbols=[${symbols.join(',')}]`,
-            { cache: 'no-store' }
-          )
+          const url = symbolsArr.length === 1
+            ? `https://api.binance.com/api/v3/ticker/price?symbol=${symbolsArr[0]}`
+            : `https://api.binance.com/api/v3/ticker/price?symbols=${encodeURIComponent(JSON.stringify(symbolsArr))}`
+          const binanceRes = await fetch(url, { cache: 'no-store' })
           if (binanceRes.ok) {
             const binanceData = await binanceRes.json()
-            for (const item of Array.isArray(binanceData) ? binanceData : []) {
-              const asset = item.symbol.replace('USDT', '')
-              newPrices[`${asset}-USD`] = { price: parseFloat(item.price) }
+            const items = Array.isArray(binanceData) ? binanceData : [binanceData]
+            for (const item of items) {
+              if (item.symbol && item.price) {
+                const asset = item.symbol.replace('USDT', '')
+                newPrices[`${asset}-USD`] = { price: parseFloat(item.price) }
+              }
             }
+          } else {
+            console.warn('Binance error:', binanceRes.status, await binanceRes.text())
           }
-        } catch (_) {}
+        } catch (e) {
+          console.warn('Binance fetch failed:', e)
+        }
       }
 
       // 3. Precios stocks/CEDEARs desde maximos (Yahoo Finance)
@@ -637,7 +644,7 @@ function PatrimonioTab({ positions, transactions = [] }) {
         } catch (_) {}
       }
 
-      setPrices(newPrices)
+      if (Object.keys(newPrices).length > 0) setPrices(newPrices)
     } catch (e) {
       setError('No se pudieron actualizar los precios.')
     } finally {
