@@ -693,7 +693,9 @@ function TickerModal({ stock: s, listId, onClose }) {
           {/* Score */}
           <div className="bg-white rounded-xl border border-gray-200 p-3 shadow-sm">
             <div className="flex items-center justify-between mb-2">
-              <span className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Score</span>
+              <Tooltip text="Puntuación 0-100 que combina 7 componentes técnicos. Long Score mide la fuerza alcista, Short Score la bajista. El Score final es el mayor de los dos. ≥75 = señal fuerte, ≥60 = señal moderada, <60 = esperar.">
+                <span className="text-xs font-semibold text-gray-500 uppercase tracking-wider underline decoration-dotted underline-offset-2 cursor-help">Score</span>
+              </Tooltip>
               <span className="text-2xl font-bold text-gray-900">{s.score}<span className="text-sm text-gray-400">/100</span></span>
             </div>
             <div className="space-y-1.5">
@@ -885,13 +887,21 @@ function TickerModal({ stock: s, listId, onClose }) {
               {s.pivots && (s.pivots.classic || s.pivots.fibonacci) && (
                 <div className="bg-white rounded-xl border border-gray-200 p-3 shadow-sm">
                   <div className="flex items-center justify-between mb-2">
-                    <span className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Pivots</span>
+                    <Tooltip text="Niveles de precio calculados a partir del máximo, mínimo y cierre del período anterior. Funcionan como zonas de soporte (S) y resistencia (R) donde el precio tiende a reaccionar. P es el pivot central, R1-R3 son resistencias arriba, S1-S3 son soportes abajo.">
+                      <span className="text-xs font-semibold text-gray-500 uppercase tracking-wider underline decoration-dotted underline-offset-2 cursor-help">Pivots</span>
+                    </Tooltip>
                     <div className="flex rounded-lg overflow-hidden border border-gray-200 text-[10px]">
                       {["classic", "fibonacci"].map(t => (
-                        <button key={t} onClick={() => setPivotType(t)}
-                          className={`px-2.5 py-1 font-medium transition ${pivotType === t ? "bg-amber-500 text-white" : "bg-white text-gray-500 hover:bg-gray-50"}`}>
-                          {t === "classic" ? "Clásico" : "Fibonacci"}
-                        </button>
+                        <Tooltip key={t} text={
+                          t === "classic"
+                            ? "Método estándar: P = (Máx + Mín + Cierre) / 3. Los niveles R/S se calculan aritméticamente a partir del rango del período. Es el más usado en acciones."
+                            : "Mismo pivot central P, pero los niveles R/S usan los ratios de Fibonacci (23.6%, 38.2%, 61.8%). Más populares en forex y crypto. Tienden a coincidir con zonas de reversión en tendencias fuertes."
+                        }>
+                          <button onClick={() => setPivotType(t)}
+                            className={`px-2.5 py-1 font-medium transition ${pivotType === t ? "bg-amber-500 text-white" : "bg-white text-gray-500 hover:bg-gray-50"}`}>
+                            {t === "classic" ? "Clásico" : "Fibonacci"}
+                          </button>
+                        </Tooltip>
                       ))}
                     </div>
                   </div>
@@ -1611,18 +1621,25 @@ export default function App() {
     return <span className="ml-1">{sortDir === "asc" ? "↑" : "↓"}</span>;
   };
 
-  const th = (label, col, hide = "") => (
+  const th = (label, col, tip = "", hide = "") => (
     <th
       className={`px-3 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100 select-none whitespace-nowrap bg-gray-50 ${hide}`}
       onClick={() => handleSort(col)}
     >
-      {label}<SortIcon col={col} />
+      {tip
+        ? <Tooltip text={tip}><span className="underline decoration-dotted underline-offset-2 cursor-help">{label}</span></Tooltip>
+        : label
+      }
+      <SortIcon col={col} />
     </th>
   );
 
-  const thStatic = (label, hide = "") => (
+  const thStatic = (label, tip = "", hide = "") => (
     <th className={`px-3 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider whitespace-nowrap bg-gray-50 ${hide}`}>
-      {label}
+      {tip
+        ? <Tooltip text={tip}><span className="underline decoration-dotted underline-offset-2 cursor-help">{label}</span></Tooltip>
+        : label
+      }
     </th>
   );
 
@@ -1932,13 +1949,13 @@ export default function App() {
             <table className="w-full text-sm">
                 <thead className="bg-gray-50 border-b border-gray-200 sticky top-0 z-10">
                   <tr>
-                    {th("Ticker",    "ticker")}
-                    {th("Precio",    "price")}
-                    {th("Score",     "score")}
-                    {thStatic("Zona")}
-                    {thStatic("Div. RSI")}
-                    {thStatic("Señal")}
-                    {thStatic("IA")}
+                    {th("Ticker",   "ticker",  "Símbolo del activo. Hacé clic para ver el gráfico, medias móviles, pivots y análisis IA.")}
+                    {th("Precio",   "price",   "Precio de cierre del último día de mercado. Para crypto, precio en tiempo real desde Binance.")}
+                    {th("Score",    "score",   "Puntuación 0-100 que combina 7 indicadores técnicos: tendencia EMA, ADX, momentum RSI, zona estructural, volumen y multi-timeframe. Cuanto más alto, más señales alineadas a favor.")}
+                    {thStatic("Zona",    "Posición del precio en la regresión lineal de 100 períodos. DISCOUNT = precio bajo respecto a su historial reciente, mejor punto de entrada. FAIR = zona media. PREMIUM = precio extendido, mayor riesgo de comprar caro.")}
+                    {thStatic("Div. RSI","Divergencias entre el precio y el oscilador de momentum (EMA del RSI-50). GIRO = posible reversión de tendencia. SIGUE = continuación. AGOT. = agotamiento del movimiento actual.")}
+                    {thStatic("Señal",   "Recomendación del algoritmo según el Score. Compra Fuerte (≥75), Compra (≥60), Esperar (<60 en ambas direcciones), Venta (≥60 bajista), Venta Fuerte (≥75 bajista).")}
+                    {thStatic("IA",      "Análisis generado por inteligencia artificial con todos los indicadores del activo: señal, zona, momentum, volumen, medias móviles y patrones de velas.")}
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-100">
