@@ -1046,7 +1046,7 @@ function HelpModal({ onClose }) {
                 ["Dir",      "LONG = setup alcista, SHORT = setup bajista. El Score mide la fuerza de esa dirección."],
                 ["SL / TP1", "Stop Loss y Take Profit 1 calculados con ATR × 1.5. TP2 = ATR × 3.0."],
                 ["ADX",      "Fuerza de la tendencia. Sobre 20 es condición mínima. Sobre 25 es tendencia fuerte."],
-                ["Pulse",    "Última señal del oscilador de divergencias de momentum."],
+                ["Div. RSI", "Última señal del oscilador de divergencias de momentum."],
                 ["RSI",      "Sobreventa (<30) o sobrecompra (>70)."],
                 ["vs MA200", "Qué tan lejos está del promedio de 200 días. Positivo = tendencia principal alcista."],
                 ["Vol ×",    "Volumen de hoy vs promedio 20 días. 1.5x+ confirma movimiento."],
@@ -1068,7 +1068,7 @@ function HelpModal({ onClose }) {
               <li>Filtrá por <strong>Compra Fuerte</strong> en el selector de señal.</li>
               <li>Verificá que <strong>Dir</strong> sea LONG y <strong>Zona</strong> sea DISCOUNT o FAIR.</li>
               <li>Confirmá <strong>ADX &gt; 25</strong> y <strong>vs MA200 positivo</strong>.</li>
-              <li>Si el <strong>Pulse</strong> muestra GIRO UP o SIGUE UP → mayor confluencia.</li>
+              <li>Si <strong>Div. RSI</strong> muestra GIRO UP o SIGUE UP → mayor confluencia.</li>
               <li>Hacé clic en el ticker para ver el gráfico, las medias móviles y la recomendación de IA.</li>
               <li>Revisá los <strong>Pivots</strong> para identificar soporte/resistencia inmediata.</li>
               <li>Dimensioná tu riesgo con <strong>SL/TP1/TP2</strong> antes de entrar.</li>
@@ -1174,7 +1174,7 @@ function TickerTooltip({ s, children }) {
           {s.adx != null && <span>ADX <span className="text-white font-semibold">{s.adx}</span></span>}
         </div>
         {s.pulse_signal && s.pulse_signal !== "—" && (
-          <div className="text-gray-300">Pulse <span className="text-cyan-400 font-semibold">{s.pulse_signal}</span></div>
+          <div className="text-gray-300">Div. RSI <span className="text-cyan-400 font-semibold">{s.pulse_signal}</span></div>
         )}
       </div>
     </div>
@@ -1673,10 +1673,9 @@ export default function App() {
             <div className="min-w-0">
               <div className="flex items-center gap-2">
                 <h1 className="text-lg sm:text-xl font-bold text-white tracking-tight">máximos</h1>
-                <span className="hidden sm:block text-slate-500 text-xs font-normal">— stock screener</span>
               </div>
               <p className="text-[11px] text-slate-400 truncate mt-0.5">
-                Algoritmo propio · IA integrada
+                IA integrada
               </p>
             </div>
           </div>
@@ -1937,7 +1936,7 @@ export default function App() {
                     {th("Precio",    "price")}
                     {th("Score",     "score")}
                     {thStatic("Zona")}
-                    {thStatic("Pulse")}
+                    {thStatic("Div. RSI")}
                     {thStatic("Señal")}
                     {thStatic("IA")}
                   </tr>
@@ -1981,7 +1980,7 @@ export default function App() {
           )}
         </div>
         <p className="text-xs text-gray-400 mt-3 text-right">
-          {filtered.length} activos · Score = algoritmo propio (EMA + ADX + Momentum + MTF + Zona) · Pulse = divergencias RSI
+          {filtered.length} activos · Score: EMA + ADX + Momentum + MTF + Zona · Div. RSI: divergencias de momentum
         </p>
         </>}
 
