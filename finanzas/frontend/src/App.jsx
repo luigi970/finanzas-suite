@@ -600,32 +600,24 @@ function PatrimonioTab({ positions, transactions = [] }) {
         }
       } catch (_) {}
 
-      // 2. Precios crypto desde Binance (tiempo real, sin depender de maximos)
+      // 2. Precios crypto desde Binance — uno por uno para tolerar símbolos inválidos
       const cryptoPos = positions.filter(p =>
         p.asset_type === 'crypto' && !STABLECOINS.has(p.asset)
       )
       if (cryptoPos.length > 0) {
-        const symbolsArr = [...new Set(cryptoPos.map(p => `${p.asset.toUpperCase()}USDT`))]
-        try {
-          const url = symbolsArr.length === 1
-            ? `https://api.binance.com/api/v3/ticker/price?symbol=${symbolsArr[0]}`
-            : `https://api.binance.com/api/v3/ticker/price?symbols=${encodeURIComponent(JSON.stringify(symbolsArr))}`
-          const binanceRes = await fetch(url, { cache: 'no-store' })
-          if (binanceRes.ok) {
-            const binanceData = await binanceRes.json()
-            const items = Array.isArray(binanceData) ? binanceData : [binanceData]
-            for (const item of items) {
-              if (item.symbol && item.price) {
-                const asset = item.symbol.replace('USDT', '')
-                newPrices[`${asset}-USD`] = { price: parseFloat(item.price) }
-              }
+        const assets = [...new Set(cryptoPos.map(p => p.asset.toUpperCase()))]
+        await Promise.all(assets.map(async asset => {
+          try {
+            const res = await fetch(
+              `https://api.binance.com/api/v3/ticker/price?symbol=${asset}USDT`,
+              { cache: 'no-store' }
+            )
+            if (res.ok) {
+              const data = await res.json()
+              if (data.price) newPrices[`${asset}-USD`] = { price: parseFloat(data.price) }
             }
-          } else {
-            console.warn('Binance error:', binanceRes.status, await binanceRes.text())
-          }
-        } catch (e) {
-          console.warn('Binance fetch failed:', e)
-        }
+          } catch (_) {}
+        }))
       }
 
       // 3. Precios stocks/CEDEARs desde maximos (Yahoo Finance)
