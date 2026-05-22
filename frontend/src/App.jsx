@@ -693,7 +693,7 @@ function TickerModal({ stock: s, listId, onClose }) {
           {/* Score */}
           <div className="bg-white rounded-xl border border-gray-200 p-3 shadow-sm">
             <div className="flex items-center justify-between mb-2">
-              <span className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Helper Prime Score</span>
+              <span className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Score</span>
               <span className="text-2xl font-bold text-gray-900">{s.score}<span className="text-sm text-gray-400">/100</span></span>
             </div>
             <div className="space-y-1.5">
@@ -730,7 +730,7 @@ function TickerModal({ stock: s, listId, onClose }) {
                 { label: "% Mín 52s",   val: s.pct_from_low  != null ? "+" + s.pct_from_low?.toFixed(2) + "%" : "—",                  cls: "text-green-700",                                                                                                                             tip: "Distancia al mínimo de las 52 semanas. Bajo = precio cerca del soporte anual. Alto = fuerte recuperación desde mínimos." },
                 { label: "MACD",         val: s.macd_hist != null ? (s.macd_hist > 0 ? "▲" : "▼") + " " + Math.abs(s.macd_hist)?.toFixed(3) : "—", cls: s.macd_hist > 0 ? "text-green-600" : "text-red-600",                                                                           tip: "Histograma MACD. ▲ positivo = momentum alcista activo. ▼ negativo = momentum bajista. Cuanto mayor el valor absoluto, más fuerte el impulso." },
                 { label: "Bollinger %B", val: s.pct_b != null ? (s.pct_b * 100).toFixed(0) + "%" : "—",                               cls: s.pct_b < 0.2 ? "text-blue-600" : s.pct_b > 0.8 ? "text-red-600" : "text-gray-700",                                                         tip: "Posición dentro de las Bandas de Bollinger. <20% = cerca de la banda inferior (sobreventa). >80% = cerca de la banda superior (sobrecompra). 50% = centro." },
-                { label: "Momentum",     val: s.mom != null ? (s.mom > 0 ? "+" : "") + s.mom : "—",                                    cls: s.mom > 0 ? "text-green-600" : s.mom < 0 ? "text-red-600" : "text-gray-400",                                                                  tip: "Oscilador de momentum (EMA del RSI-50). Positivo = momentum alcista. Negativo = bajista. Usado por el Helper Pulse para detectar divergencias." },
+                { label: "Momentum",     val: s.mom != null ? (s.mom > 0 ? "+" : "") + s.mom : "—",                                    cls: s.mom > 0 ? "text-green-600" : s.mom < 0 ? "text-red-600" : "text-gray-400",                                                                  tip: "Oscilador de momentum (EMA del RSI-50). Positivo = momentum alcista. Negativo = bajista. Usado para detectar divergencias." },
                 { label: "ADX",          val: s.adx?.toFixed(1),                                                                        cls: s.adx >= 25 ? "text-amber-700 font-semibold" : "text-gray-700",                                                                               tip: "ADX: mide la fuerza de la tendencia sin importar dirección. <20 = lateral o tendencia débil. 20-25 = tendencia moderada. >25 = tendencia fuerte. >30 = muy fuerte." },
                 { label: "POC",          val: s.poc != null ? "$" + s.poc?.toFixed(2) : "—",                                           cls: "text-gray-700",                                                                                                                              tip: "Point of Control: precio con mayor volumen acumulado (últimas 70 velas, 15 buckets). El precio tiende a gravitar hacia el POC. Útil como nivel de soporte/resistencia y objetivo." },
               ].map(({ label, val, cls, tip }) => (
@@ -792,23 +792,6 @@ function TickerModal({ stock: s, listId, onClose }) {
                 </div>
               )}
 
-              {/* Helper Pulse */}
-              <div className="bg-white rounded-xl border border-gray-200 p-3 shadow-sm">
-                <div className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">Helper Pulse</div>
-                <div className="flex items-center gap-2">
-                  <span className="text-sm text-gray-700">{s.pulse_state ?? "—"}</span>
-                  {s.pulse_signal && (
-                    <span className={`px-2 py-0.5 rounded text-xs font-bold ${pulseCfg}`}>
-                      {s.pulse_signal}
-                    </span>
-                  )}
-                  {s.mom != null && (
-                    <span className={`text-xs ml-auto tabular-nums ${s.mom > 0 ? "text-green-600" : s.mom < 0 ? "text-red-600" : "text-gray-400"}`}>
-                      mom {s.mom > 0 ? "+" : ""}{s.mom}
-                    </span>
-                  )}
-                </div>
-              </div>
 
             </div>{/* fin col izquierda */}
 
@@ -993,7 +976,7 @@ function HelpModal({ onClose }) {
             <ul className="list-disc list-inside space-y-0.5 text-xs text-gray-700">
               <li><strong>Gráfico de precio</strong> (últimos 3 meses via TradingView, click para ver fullscreen)</li>
               <li><strong>Score y señal</strong> con dirección, zona estructural y niveles SL/TP1/TP2</li>
-              <li><strong>Helper Pulse</strong> — última señal de divergencia del oscilador</li>
+              <li><strong>Divergencia</strong> — última señal de divergencia del oscilador de momentum</li>
               <li><strong>Medias Móviles</strong> — grilla MA5→MA200 con distancia % al precio actual</li>
               <li><strong>Pivot Points</strong> — niveles Classic y Fibonacci (R3→S3) con toggle</li>
               <li><strong>Analistas</strong> — precio objetivo, PE ratio, beta y earnings date (vía Yahoo Finance)</li>
@@ -1002,8 +985,8 @@ function HelpModal({ onClose }) {
           </section>
 
           <section>
-            <h3 className="font-semibold text-gray-900 mb-2">3. Sistema de Score — Helper Prime</h3>
-            <p className="mb-2">El Score (0-100) combina 7 componentes del sistema Helper Prime:</p>
+            <h3 className="font-semibold text-gray-900 mb-2">3. Sistema de Score</h3>
+            <p className="mb-2">El Score (0-100) combina 7 componentes:</p>
             <div className="space-y-1 text-xs">
               {[
                 ["EMA 200",    "15 pts", "Precio sobre EMA 200 = tendencia alcista principal"],
@@ -1037,7 +1020,7 @@ function HelpModal({ onClose }) {
           </section>
 
           <section>
-            <h3 className="font-semibold text-gray-900 mb-2">4. Helper Pulse — señales de divergencia</h3>
+            <h3 className="font-semibold text-gray-900 mb-2">4. Divergencias de Momentum</h3>
             <div className="space-y-1 text-xs">
               {[
                 ["GIRO UP",    "text-cyan-700 bg-cyan-50",   "Divergencia alcista regular: precio baja, momentum sube (en zona de sobreventa). Señal de reversión."],
@@ -1063,7 +1046,7 @@ function HelpModal({ onClose }) {
                 ["Dir",      "LONG = setup alcista, SHORT = setup bajista. El Score mide la fuerza de esa dirección."],
                 ["SL / TP1", "Stop Loss y Take Profit 1 calculados con ATR × 1.5. TP2 = ATR × 3.0."],
                 ["ADX",      "Fuerza de la tendencia. Sobre 20 es condición mínima. Sobre 25 es tendencia fuerte."],
-                ["Pulse",    "Última señal del oscilador de divergencias (Helper Pulse)."],
+                ["Pulse",    "Última señal del oscilador de divergencias de momentum."],
                 ["RSI",      "Sobreventa (<30) o sobrecompra (>70)."],
                 ["vs MA200", "Qué tan lejos está del promedio de 200 días. Positivo = tendencia principal alcista."],
                 ["Vol ×",    "Volumen de hoy vs promedio 20 días. 1.5x+ confirma movimiento."],
@@ -1693,7 +1676,7 @@ export default function App() {
                 <span className="hidden sm:block text-slate-500 text-xs font-normal">— stock screener</span>
               </div>
               <p className="text-[11px] text-slate-400 truncate mt-0.5">
-                Helper Prime + Pulse · IA integrada
+                Algoritmo propio · IA integrada
               </p>
             </div>
           </div>
@@ -1998,7 +1981,7 @@ export default function App() {
           )}
         </div>
         <p className="text-xs text-gray-400 mt-3 text-right">
-          {filtered.length} activos · Score = Helper Prime (EMA + ADX + Momentum + MTF + Zona) · Pulse = Helper Pulse (divergencias RSI)
+          {filtered.length} activos · Score = algoritmo propio (EMA + ADX + Momentum + MTF + Zona) · Pulse = divergencias RSI
         </p>
         </>}
 
