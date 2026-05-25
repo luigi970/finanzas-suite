@@ -345,6 +345,28 @@ def get_quotes(tickers: str = ""):
     return {"quotes": {k: v for k, v in results.items() if v is not None}}
 
 
+@app.get("/api/crypto-quotes")
+async def get_crypto_quotes(symbols: str = ""):
+    bases = [s.strip().upper() for s in symbols.split(",") if s.strip()]
+    if not bases:
+        return {"quotes": {}}
+    quotes = {}
+    async with httpx.AsyncClient(timeout=10) as client:
+        for base in bases:
+            try:
+                r = await client.get(
+                    f"https://api.binance.com/api/v3/ticker/price?symbol={base}USDT",
+                    headers={"User-Agent": "maximos/1.0"},
+                )
+                if r.is_success:
+                    data = r.json()
+                    if "price" in data:
+                        quotes[base] = float(data["price"])
+            except Exception:
+                pass
+    return {"quotes": quotes}
+
+
 @app.get("/api/dollar")
 async def get_dollar():
     try:

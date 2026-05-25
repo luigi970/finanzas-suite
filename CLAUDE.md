@@ -52,6 +52,13 @@ maximos/
 
 ## Cómo arrancar (desarrollo local)
 
+### Todo junto (maximos + finanzas)
+```powershell
+.\start-all.ps1   # arranca los 4 procesos sin ventanas de terminal; logs en logs/
+.\stop-all.ps1    # detiene todo por puerto (8000, 8001, 5173, 5174)
+```
+
+### Solo maximos
 ```powershell
 # Backend FastAPI (puerto 8000)
 cd backend
@@ -83,6 +90,9 @@ Todos expuestos tanto en el Worker (producción) como en FastAPI (local):
 | GET | `/api/lists` | Listas disponibles con conteo |
 | POST | `/api/refresh` | Dispara screener (GH Actions en prod, background en local) |
 | POST | `/api/analyze` | Recomendación IA para un ticker |
+| GET | `/api/quotes?symbols=AAPL,GGAL` | Precios de acciones/CEDEARs — Worker: desde D1; local: Yahoo Finance |
+| GET | `/api/crypto-quotes?symbols=BTC,ETH` | Precios de cripto — Binance API (Worker y local) |
+| GET | `/api/dollar` | Dólar blue (Bluelytics) |
 
 Body de `/api/refresh`:
 ```json
@@ -116,6 +126,8 @@ Status del Worker: `"idle"` → `"loading"` → `"ready"` (mapeado desde D1: `ru
 - **`.all()` con LIMIT 1** en vez de `.first()` — `.first()` devuelve un JsProxy no iterable.
 - **CORS antes de todo** — si el Worker crashea antes de enviar headers, el browser reporta error de CORS (misleading).
 - **`env.AI`** es el binding de Workers AI. `getattr(env, "AI", None)` para chequearlo.
+- **Yahoo Finance bloqueado desde datacenter**: el Worker no puede pedir precios a Yahoo Finance (devuelve 401/403 desde IPs de Cloudflare). Solución: cripto vía Binance API, acciones/CEDEARs desde D1 (data del último screener).
+- **CORS — puertos de finanzas**: `ALLOWED_ORIGINS` incluye `http://localhost:5174` y `http://localhost:8001` para desarrollo local de finanzas.
 
 ## Screener — gotchas
 
@@ -215,7 +227,7 @@ El prompt está en `worker/src/providers/prompt.py` (`build_prompt()`). El backe
 - **Descarga bulk**: `yf.download("AAPL MSFT ...", period="1y")` — un solo request HTTP para todos los tickers.
 - **Multi-level columns**: yfinance con un solo ticker no genera columnas multi-nivel. `screener.py` maneja ambos casos.
 - **Fuente S&P 500**: CSV de GitHub. Wikipedia devuelve 403 con `pd.read_html`.
-- **yfinance**: requiere 1.3.0+. Versiones anteriores fallan con `JSONDecodeError`.
+- **yfinance**: pinneado a `==1.3.0` en `requirements.txt` para que local y GitHub Actions usen exactamente la misma versión (versiones anteriores fallan con `JSONDecodeError`; versiones distintas producen scores diferentes).
 - **MTF aproximado**: temporalidades reales (15m/1h/4h) no disponibles con datos diarios. Se usan 4 señales de EMAs diarias.
 - **Pine Script originales**: en `c:\Users\Compu\Documents\Dev\Finanzas\suite indicators\`.
 
@@ -240,6 +252,13 @@ El prompt está en `worker/src/providers/prompt.py` (`build_prompt()`). El backe
 - [x] Pivot points Classic y Fibonacci con toggle
 - [x] Patrones de velas detectados (hammer, doji, engulfing, etc.)
 - [x] Rediseño UI: header oscuro, acento ámbar, cards con borde de color
+- [x] start-all.ps1 / stop-all.ps1 — arranca los 4 procesos sin ventanas de terminal
+- [x] Finanzas conectado a Cloudflare Worker para precios (no requiere maximos local)
+- [x] Modal ⚙️ en finanzas para alternar fuente de precios online/local
+- [x] Agente de finanzas con precios de mercado reales y valuación completa de cartera
+- [x] Auto-creación de posiciones al guardar transacciones (individual y batch)
+- [x] /api/crypto-quotes en backend local (Binance) y Worker
+- [x] Worker: /api/quotes usa D1 para acciones y Binance para cripto (Yahoo Finance bloqueado)
 
 ### Features pendientes
 - [ ] Alertas por email o Telegram cuando cambia la señal
@@ -252,4 +271,6 @@ En `finanzas/` vive una app separada de seguimiento de patrimonio personal (cuen
 
 Ver [finanzas/CLAUDE.md](finanzas/CLAUDE.md) para documentación técnica y [finanzas/README.md](finanzas/README.md) para instrucciones de uso.
 
-La app de finanzas consume los endpoints de precios de maximos (`localhost:8000/api/quotes`, `/api/dollar`) para valuar posiciones.
+La app de finanzas consume los endpoints de precios de maximos para valuar posiciones. Por defecto usa el **Cloudflare Worker** (no requiere maximos local). Desde ⚙️ en el header de finanzas se puede cambiar a local. Ver detalles de flujo de datos en [FLUJO.md](FLUJO.md).
+
+Endpoints consumidos: `/api/dollar`, `/api/quotes`, `/api/crypto-quotes`.
