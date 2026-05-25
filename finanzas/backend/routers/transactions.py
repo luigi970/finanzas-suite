@@ -133,6 +133,27 @@ def create_transaction(data: TransactionIn):
         (data.account_id, data.date, data.description, data.amount, data.currency.upper(), data.type, data.category, data.source, data.unit_price, realized_pnl, data.fee, fee_currency)
     )
     conn.commit()
+
+    # Crear posición si no existe para este activo
+    from routers.positions import guess_asset_type
+    asset = data.currency.upper()
+    existing = conn.execute(
+        "SELECT id FROM positions WHERE account_id = ? AND asset = ? AND (end_date IS NULL OR end_date = '')",
+        (data.account_id, asset)
+    ).fetchone()
+    if not existing:
+        qty_row = conn.execute("""
+            SELECT SUM(CASE WHEN type='income' THEN amount ELSE -amount END) as qty
+            FROM transactions WHERE account_id = ? AND currency = ?
+        """, (data.account_id, asset)).fetchone()
+        qty = round(qty_row['qty'] or 0, 8)
+        if qty > 0:
+            conn.execute(
+                "INSERT INTO positions (account_id, asset, asset_type, quantity) VALUES (?, ?, ?, ?)",
+                (data.account_id, asset, guess_asset_type(asset), qty)
+            )
+            conn.commit()
+
     row = conn.execute("SELECT * FROM transactions WHERE id = ?", (cur.lastrowid,)).fetchone()
     conn.close()
     return dict(row)
