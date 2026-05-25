@@ -39,8 +39,9 @@ Wait-Port 5174 "finanzas frontend"
 
 # Abrir browser
 Write-Host ""
-Write-Host "  Abriendo finanzas en http://localhost:5174" -ForegroundColor Cyan
+Write-Host "  Abriendo apps..." -ForegroundColor Cyan
 Start-Process "http://localhost:5174"
+Start-Process "http://localhost:5173"
 
 Write-Host ""
 Write-Host "  Todo corriendo. Logs en .\logs\" -ForegroundColor Green
