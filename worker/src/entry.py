@@ -298,38 +298,48 @@ async def on_fetch(request, env):
         except Exception as e:
             return _j({"news": [], "error": str(e)})
 
-    # GET /api/quotes?tickers=AAPL,MSFT — real-time prices via Yahoo Finance
+    # GET /api/quotes?tickers=AAPL,BTC-USD — crypto via Binance, stocks via D1
     if method == "GET" and path == "/api/quotes":
         tickers_str = qs.get("tickers", "")
         if not tickers_str:
             return _j({"quotes": {}})
-        try:
-            url = f"https://query1.finance.yahoo.com/v7/finance/quote?symbols={tickers_str}&lang=en-US&region=US"
-            resp = await fetch(url, headers={"User-Agent": "Mozilla/5.0"})
-            data = json.loads(await resp.text())
-            results = (data.get("quoteResponse") or {}).get("result") or []
-            quotes = {}
-            for r in results:
-                symbol = r.get("symbol")
-                price  = r.get("regularMarketPrice")
-                prev   = r.get("regularMarketPreviousClose")
-                if not (symbol and price is not None):
-                    continue
-                change     = r.get("regularMarketChange")
-                change_pct = r.get("regularMarketChangePercent")
-                quotes[symbol] = {
-                    "price":      round(price, 2),
-                    "change":     round(change, 2)     if change     is not None else None,
-                    "change_pct": round(change_pct, 2) if change_pct is not None else None,
-                    "open":       r.get("regularMarketOpen"),
-                    "high":       r.get("regularMarketDayHigh"),
-                    "low":        r.get("regularMarketDayLow"),
-                    "volume":     r.get("regularMarketVolume"),
-                    "prev_close": round(prev, 2) if prev is not None else None,
-                }
-            return _j({"quotes": quotes})
-        except Exception as e:
-            return _j({"quotes": {}, "error": str(e)})
+        tickers     = [t.strip() for t in tickers_str.split(",") if t.strip()]
+        crypto_list = [t for t in tickers if t.endswith("-USD")]
+        stock_list  = [t for t in tickers if not t.endswith("-USD")]
+        quotes = {}
+
+        # Crypto: Binance (funciona desde datacenter)
+        for t in crypto_list:
+            base = t[:-4]
+            try:
+                resp = await fetch(
+                    f"https://api.binance.com/api/v3/ticker/price?symbol={base}USDT",
+                    headers={"User-Agent": "maximos/1.0"},
+                )
+                if resp.status == 200:
+                    d = json.loads(await resp.text())
+                    if "price" in d:
+                        price = round(float(d["price"]), 4)
+                        quotes[t] = {"price": price, "change": None, "change_pct": None}
+            except Exception:
+                pass
+
+        # Stocks / CEDEARs: D1 (datos del último screener run)
+        if stock_list:
+            try:
+                placeholders = ",".join(["?"] * len(stock_list))
+                result = await env.DB.prepare(
+                    f"SELECT ticker, price FROM screener_results WHERE ticker IN ({placeholders})"
+                ).bind(*stock_list).all()
+                for row in result.results.to_py():
+                    t = row.get("ticker")
+                    p = row.get("price")
+                    if t and p is not None:
+                        quotes[t] = {"price": round(float(p), 4), "change": None, "change_pct": None}
+            except Exception:
+                pass
+
+        return _j({"quotes": quotes})
 
     # GET /api/crypto-quotes?symbols=BTC,ETH — precios en tiempo real desde Binance
     if method == "GET" and path == "/api/crypto-quotes":

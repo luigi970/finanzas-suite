@@ -9,7 +9,7 @@ router = APIRouter(prefix="/api/agent", tags=["agent"])
 
 GROQ_API_KEY   = os.getenv("GROQ_API_KEY", "")
 GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY", "")
-MAXIMOS_URL    = os.getenv("MAXIMOS_URL", "http://localhost:8000")
+MAXIMOS_URL    = os.getenv("MAXIMOS_URL", "https://maximos-worker.luchotour.workers.dev")
 
 SYSTEM_PROMPT = """Sos un asesor financiero personal de alto nivel. Hablás en español rioplatense, tono profesional y directo. Sin markdown, texto corrido.
 

@@ -542,7 +542,7 @@ function IngestPanel({ accounts, onDone }) {
 
 // ── Chat ──────────────────────────────────────────────────────────────────────
 // ── PatrimonioTab ────────────────────────────────────────────────────────────
-const MAXIMOS_API = 'http://localhost:8000'
+const MAXIMOS_API = import.meta.env.VITE_MAXIMOS_URL || 'https://maximos-worker.luchotour.workers.dev'
 const STABLECOINS = new Set(['USDT','USDC','DAI','BUSD','FDUSD','TUSD','PYUSD'])
 const FIAT_USD    = new Set(['USD'])
 const FIAT_ARS    = new Set(['ARS'])
@@ -706,7 +706,7 @@ function PatrimonioTab({ positions, transactions = [] }) {
         }
       }
     } catch (e) {
-      setError('No se pudo conectar con maximos. Asegurate de que esté corriendo en localhost:8000.')
+      setError(`No se pudo conectar con maximos (${MAXIMOS_API}). Verificá tu conexión o que el servidor esté corriendo.`)
     } finally {
       setLoading(false)
     }
