@@ -1327,6 +1327,93 @@ function MovimientosTab({ transactions, accounts, onEdit, onDelete, onNewManual,
   )
 }
 
+// ── SettingsModal ─────────────────────────────────────────────────────────────
+function SettingsModal({ maximosMode, onMode, onClose }) {
+  const [localStatus, setLocalStatus] = useState(null) // null | true | false
+  const [starting, setStarting]       = useState(false)
+
+  useEffect(() => {
+    if (maximosMode === 'local') checkLocal()
+  }, [maximosMode])
+
+  async function checkLocal() {
+    setLocalStatus(null)
+    try {
+      const r = await fetch('/api/maximos/status')
+      const d = await r.json()
+      setLocalStatus(d.running)
+    } catch { setLocalStatus(false) }
+  }
+
+  async function startLocal() {
+    setStarting(true)
+    try {
+      await fetch('/api/maximos/start', { method: 'POST' })
+      // Polling hasta que arranque (max 15s)
+      for (let i = 0; i < 15; i++) {
+        await new Promise(r => setTimeout(r, 1000))
+        const r = await fetch('/api/maximos/status')
+        const d = await r.json()
+        if (d.running) { setLocalStatus(true); break }
+      }
+    } catch {}
+    setStarting(false)
+  }
+
+  return (
+    <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4" onClick={onClose}>
+      <div className="bg-white rounded-2xl shadow-xl w-full max-w-sm p-6" onClick={e => e.stopPropagation()}>
+        <div className="flex items-center justify-between mb-5">
+          <h2 className="text-base font-semibold text-gray-900">Configuración</h2>
+          <button onClick={onClose} className="text-gray-400 hover:text-gray-600 text-xl leading-none">×</button>
+        </div>
+
+        <p className="text-xs text-gray-500 mb-3">Fuente de precios de mercado</p>
+        <div className="flex flex-col gap-2">
+          {[
+            { id: 'online', label: 'Online', sub: 'maximos en Cloudflare', icon: '☁️' },
+            { id: 'local',  label: 'Local',  sub: 'maximos en localhost:8000', icon: '💻' },
+          ].map(opt => (
+            <button key={opt.id} onClick={() => { onMode(opt.id); if (opt.id === 'local') setLocalStatus(null) }}
+              className={`flex items-center gap-3 p-3 rounded-xl border-2 text-left transition-colors ${
+                maximosMode === opt.id ? 'border-amber-500 bg-amber-50' : 'border-gray-200 hover:border-gray-300'
+              }`}>
+              <span className="text-xl">{opt.icon}</span>
+              <div>
+                <div className="text-sm font-medium text-gray-900">{opt.label}</div>
+                <div className="text-xs text-gray-500">{opt.sub}</div>
+              </div>
+              {maximosMode === opt.id && <span className="ml-auto text-amber-500 text-sm">✓</span>}
+            </button>
+          ))}
+        </div>
+
+        {maximosMode === 'local' && (
+          <div className="mt-4 p-3 rounded-xl bg-gray-50 border border-gray-200">
+            <div className="flex items-center gap-2 mb-2">
+              {localStatus === null && <span className="text-xs text-gray-400">Verificando...</span>}
+              {localStatus === true  && <><span className="w-2 h-2 rounded-full bg-green-500 shrink-0" /><span className="text-xs text-green-700 font-medium">maximos corriendo</span></>}
+              {localStatus === false && <><span className="w-2 h-2 rounded-full bg-red-500 shrink-0" /><span className="text-xs text-red-600 font-medium">maximos no está corriendo</span></>}
+              <button onClick={checkLocal} className="ml-auto text-xs text-gray-400 hover:text-gray-600">↻</button>
+            </div>
+            {localStatus === false && (
+              <button onClick={startLocal} disabled={starting}
+                className="w-full py-1.5 rounded-lg bg-amber-500 hover:bg-amber-600 text-white text-xs font-medium disabled:opacity-50 transition-colors">
+                {starting ? 'Arrancando...' : 'Arrancar maximos'}
+              </button>
+            )}
+          </div>
+        )}
+
+        <p className="text-xs text-gray-400 mt-4">
+          Usá <strong>Online</strong> si no tenés maximos local.
+          Usá <strong>Local</strong> para precios de acciones más actualizados.
+        </p>
+      </div>
+    </div>
+  )
+}
+
 // ── App ───────────────────────────────────────────────────────────────────────
 export default function App() {
   const [tab, setTab] = useState('patrimonio')
@@ -1585,41 +1672,11 @@ export default function App() {
       {modal === 'help' && <HelpModal onClose={() => setModal(null)} />}
 
       {modal === 'settings' && (
-        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4" onClick={() => setModal(null)}>
-          <div className="bg-white rounded-2xl shadow-xl w-full max-w-sm p-6" onClick={e => e.stopPropagation()}>
-            <div className="flex items-center justify-between mb-5">
-              <h2 className="text-base font-semibold text-gray-900">Configuración</h2>
-              <button onClick={() => setModal(null)} className="text-gray-400 hover:text-gray-600 text-xl leading-none">×</button>
-            </div>
-
-            <p className="text-xs text-gray-500 mb-3">Fuente de precios de mercado</p>
-            <div className="flex flex-col gap-2">
-              {[
-                { id: 'online', label: 'Online', sub: 'maximos en Cloudflare', icon: '☁️' },
-                { id: 'local',  label: 'Local',  sub: 'maximos en localhost:8000', icon: '💻' },
-              ].map(opt => (
-                <button key={opt.id} onClick={() => saveMaximosMode(opt.id)}
-                  className={`flex items-center gap-3 p-3 rounded-xl border-2 text-left transition-colors ${
-                    maximosMode === opt.id
-                      ? 'border-amber-500 bg-amber-50'
-                      : 'border-gray-200 hover:border-gray-300'
-                  }`}>
-                  <span className="text-xl">{opt.icon}</span>
-                  <div>
-                    <div className="text-sm font-medium text-gray-900">{opt.label}</div>
-                    <div className="text-xs text-gray-500">{opt.sub}</div>
-                  </div>
-                  {maximosMode === opt.id && <span className="ml-auto text-amber-500 text-sm">✓</span>}
-                </button>
-              ))}
-            </div>
-
-            <p className="text-xs text-gray-400 mt-4">
-              Usá <strong>Online</strong> si no tenés maximos corriendo localmente.
-              Usá <strong>Local</strong> para precios de acciones más actualizados.
-            </p>
-          </div>
-        </div>
+        <SettingsModal
+          maximosMode={maximosMode}
+          onMode={saveMaximosMode}
+          onClose={() => setModal(null)}
+        />
       )}
     </div>
   )
