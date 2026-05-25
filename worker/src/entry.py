@@ -10,7 +10,9 @@ from storage.db import get_latest_run, get_results, get_lists_meta, get_history
 ALLOWED_ORIGINS = {
     "https://maximos.pages.dev",
     "http://localhost:5173",
+    "http://localhost:5174",
     "http://localhost:8000",
+    "http://localhost:8001",
 }
 
 LIST_IDS = {"sp500", "nasdaq100", "etfs", "adrs_arg", "crypto", "custom"}

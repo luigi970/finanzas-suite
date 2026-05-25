@@ -542,7 +542,8 @@ function IngestPanel({ accounts, onDone }) {
 
 // ── Chat ──────────────────────────────────────────────────────────────────────
 // ── PatrimonioTab ────────────────────────────────────────────────────────────
-const MAXIMOS_API = import.meta.env.VITE_MAXIMOS_URL || 'https://maximos-worker.luchotour.workers.dev'
+const MAXIMOS_LOCAL  = 'http://localhost:8000'
+const MAXIMOS_ONLINE = import.meta.env.VITE_MAXIMOS_URL || 'https://maximos-worker.luchotour.workers.dev'
 const STABLECOINS = new Set(['USDT','USDC','DAI','BUSD','FDUSD','TUSD','PYUSD'])
 const FIAT_USD    = new Set(['USD'])
 const FIAT_ARS    = new Set(['ARS'])
@@ -665,13 +666,14 @@ function PatrimonioTypeCard({ type, group, pct }) {
   )
 }
 
-function PatrimonioTab({ positions, transactions = [] }) {
+function PatrimonioTab({ positions, transactions = [], maximosUrl = MAXIMOS_ONLINE }) {
   const [prices,   setPrices]   = useState({})
   const [blueRate, setBlueRate] = useState(null)
   const [loading,  setLoading]  = useState(true)
   const [error,    setError]    = useState(null)
   const [layout,   setLayout]   = useState(() => localStorage.getItem('patrimonio_layout') || 'grid')
   const onLayout = v => { setLayout(v); localStorage.setItem('patrimonio_layout', v) }
+  const MAXIMOS_API = maximosUrl
 
   // Resumen de movimientos del mes actual
   const thisMonth = new Date().toISOString().slice(0, 7)
@@ -1331,8 +1333,11 @@ export default function App() {
   const [accounts, setAccounts] = useState([])
   const [positions, setPositions] = useState([])
   const [transactions, setTransactions] = useState([])
-  const [modal, setModal] = useState(null) // null | 'add-account' | 'add-position' | 'ingest' | 'help'
+  const [modal, setModal] = useState(null) // null | 'add-account' | 'add-position' | 'ingest' | 'help' | 'settings'
   const [editTarget, setEditTarget] = useState(null)
+  const [maximosMode, setMaximosMode] = useState(() => localStorage.getItem('maximos_mode') || 'online')
+  const maximosUrl = maximosMode === 'local' ? MAXIMOS_LOCAL : MAXIMOS_ONLINE
+  const saveMaximosMode = m => { setMaximosMode(m); localStorage.setItem('maximos_mode', m) }
 
   const load = useCallback(async () => {
     const [ac, po, tx] = await Promise.all([
@@ -1419,6 +1424,11 @@ export default function App() {
           <span className="text-xs text-gray-400 ml-2">personal</span>
         </div>
         <div className="flex items-center gap-2">
+          <button onClick={() => setModal('settings')}
+            title="Configuración"
+            className="text-gray-400 hover:text-white text-base px-2 py-1.5 rounded-lg border border-gray-700 hover:border-gray-500 transition-colors">
+            ⚙️
+          </button>
           <button onClick={() => setModal('help')}
             className="text-gray-400 hover:text-white text-xs font-medium px-2.5 py-1.5 rounded-lg border border-gray-700 hover:border-gray-500 transition-colors">
             ? Ayuda
@@ -1451,7 +1461,7 @@ export default function App() {
 
         {/* PATRIMONIO */}
         {tab === 'patrimonio' && (
-          <PatrimonioTab positions={positions} transactions={transactions} />
+          <PatrimonioTab positions={positions} transactions={transactions} maximosUrl={maximosUrl} />
         )}
 
         {/* PORTFOLIO */}
@@ -1573,6 +1583,44 @@ export default function App() {
       )}
 
       {modal === 'help' && <HelpModal onClose={() => setModal(null)} />}
+
+      {modal === 'settings' && (
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4" onClick={() => setModal(null)}>
+          <div className="bg-white rounded-2xl shadow-xl w-full max-w-sm p-6" onClick={e => e.stopPropagation()}>
+            <div className="flex items-center justify-between mb-5">
+              <h2 className="text-base font-semibold text-gray-900">Configuración</h2>
+              <button onClick={() => setModal(null)} className="text-gray-400 hover:text-gray-600 text-xl leading-none">×</button>
+            </div>
+
+            <p className="text-xs text-gray-500 mb-3">Fuente de precios de mercado</p>
+            <div className="flex flex-col gap-2">
+              {[
+                { id: 'online', label: 'Online', sub: 'maximos en Cloudflare', icon: '☁️' },
+                { id: 'local',  label: 'Local',  sub: 'maximos en localhost:8000', icon: '💻' },
+              ].map(opt => (
+                <button key={opt.id} onClick={() => saveMaximosMode(opt.id)}
+                  className={`flex items-center gap-3 p-3 rounded-xl border-2 text-left transition-colors ${
+                    maximosMode === opt.id
+                      ? 'border-amber-500 bg-amber-50'
+                      : 'border-gray-200 hover:border-gray-300'
+                  }`}>
+                  <span className="text-xl">{opt.icon}</span>
+                  <div>
+                    <div className="text-sm font-medium text-gray-900">{opt.label}</div>
+                    <div className="text-xs text-gray-500">{opt.sub}</div>
+                  </div>
+                  {maximosMode === opt.id && <span className="ml-auto text-amber-500 text-sm">✓</span>}
+                </button>
+              ))}
+            </div>
+
+            <p className="text-xs text-gray-400 mt-4">
+              Usá <strong>Online</strong> si no tenés maximos corriendo localmente.
+              Usá <strong>Local</strong> para precios de acciones más actualizados.
+            </p>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
