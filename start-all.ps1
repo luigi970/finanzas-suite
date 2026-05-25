@@ -4,16 +4,14 @@ $Root = $PSScriptRoot
 $LogDir = "$Root\logs"
 if (-not (Test-Path $LogDir)) { New-Item -ItemType Directory $LogDir | Out-Null }
 
-function Wait-Http($url, $label, $maxSecs = 30) {
+function Wait-Port($port, $label, $maxSecs = 40) {
     Write-Host "  Esperando $label..." -NoNewline
     for ($i = 0; $i -lt $maxSecs; $i++) {
-        try {
-            Invoke-WebRequest $url -TimeoutSec 1 -UseBasicParsing -ErrorAction Stop | Out-Null
-            Write-Host " OK" -ForegroundColor Green
-            return
-        } catch { Start-Sleep 1; Write-Host -NoNewline "." }
+        $ok = Test-NetConnection -ComputerName localhost -Port $port -InformationLevel Quiet -WarningAction SilentlyContinue
+        if ($ok) { Write-Host " OK" -ForegroundColor Green; return }
+        Start-Sleep 1; Write-Host -NoNewline "."
     }
-    Write-Host " timeout (ver logs/)" -ForegroundColor Yellow
+    Write-Host " timeout (ver logs\)" -ForegroundColor Yellow
 }
 
 Write-Host ""
@@ -34,9 +32,10 @@ Start-Process powershell -WindowStyle Hidden -ArgumentList `
 Start-Process powershell -WindowStyle Hidden -ArgumentList `
     "-Command", "cd '$Root\finanzas\frontend'; npm run dev > '$LogDir\finanzas-frontend.log' 2>&1"
 
-# Esperar backends
-Wait-Http "http://localhost:8001/api/health" "finanzas"
-Wait-Http "http://localhost:8000/api/status" "maximos (opcional)"
+# Esperar a que los puertos estén escuchando
+Wait-Port 8001 "finanzas backend"
+Wait-Port 8000 "maximos backend (opcional)"
+Wait-Port 5174 "finanzas frontend"
 
 # Abrir browser
 Write-Host ""
