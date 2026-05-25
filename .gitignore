@@ -16,6 +16,9 @@ frontend/dist/
 finanzas/frontend/node_modules/
 finanzas/frontend/dist/
 
+# Logs del launcher
+logs/
+
 # OS
 .DS_Store
 Thumbs.db
