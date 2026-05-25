@@ -93,6 +93,40 @@ def guess_asset_type(asset: str) -> str:
     if a in STABLECOIN_ASSETS: return 'stablecoin'
     return 'crypto'
 
+@router.post("/create-missing/{account_id}")
+def create_missing_positions(account_id: int):
+    """Solo crea posiciones que no existen — no toca las existentes."""
+    conn = get_db()
+    rows = conn.execute("""
+        SELECT currency AS asset,
+               SUM(CASE WHEN type='income' THEN amount ELSE -amount END) AS quantity
+        FROM transactions
+        WHERE account_id = ?
+        GROUP BY currency
+    """, (account_id,)).fetchall()
+
+    created = 0
+    for row in rows:
+        asset    = row['asset'].upper()
+        quantity = round(row['quantity'], 8)
+        if quantity <= 0:
+            continue
+        existing = conn.execute(
+            "SELECT id FROM positions WHERE account_id = ? AND asset = ? AND (end_date IS NULL OR end_date = '')",
+            (account_id, asset)
+        ).fetchone()
+        if not existing:
+            asset_type = guess_asset_type(asset)
+            conn.execute(
+                "INSERT INTO positions (account_id, asset, asset_type, quantity) VALUES (?, ?, ?, ?)",
+                (account_id, asset, asset_type, quantity)
+            )
+            created += 1
+
+    conn.commit()
+    conn.close()
+    return {"created": created}
+
 @router.post("/sync/{account_id}")
 def sync_positions(account_id: int):
     conn = get_db()
@@ -113,7 +147,7 @@ def sync_positions(account_id: int):
         asset_type = guess_asset_type(asset)
         # Solo toca posiciones sin fecha de vencimiento (no plazo fijo / fondo)
         existing = conn.execute(
-            "SELECT id FROM positions WHERE account_id = ? AND asset = ? AND end_date IS NULL",
+            "SELECT id FROM positions WHERE account_id = ? AND asset = ? AND (end_date IS NULL OR end_date = '')",
             (account_id, asset)
         ).fetchone()
         if existing:

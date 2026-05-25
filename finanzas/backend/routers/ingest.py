@@ -9,12 +9,24 @@ router = APIRouter(prefix="/api/ingest", tags=["ingest"])
 EXTRACTION_PROMPT = """Sos un extractor de transacciones financieras. Dado el siguiente documento bancario o financiero, extraé todas las transacciones que encuentres.
 
 Para cada transacción devolvé un JSON con estos campos:
-- date: fecha en formato YYYY-MM-DD
-- description: descripción de la operación
-- amount: monto como número positivo
-- currency: moneda (ARS, USD, USDT, BTC, etc.)
-- type: "income" si es un ingreso/acreditación, "expense" si es un egreso/débito
-- category: categoría sugerida (comida, transporte, sueldo, transferencia, retiro, inversión, servicio, entretenimiento, salud, otro)
+- date: fecha en formato YYYY-MM-DD (si no hay año usá el año actual)
+- description: descripción breve de la operación
+- amount: monto como número positivo (la cantidad del activo, no el valor en USD)
+- currency: moneda o activo (ARS, USD, USDT, BTC, ETH, etc.)
+- type: SOLO uno de estos tres valores:
+    "income"   → ingreso, acreditación, compra de cripto/acción (el activo entra a la cuenta)
+    "expense"  → egreso, débito, venta de cripto/acción (el activo sale de la cuenta), gasto
+    "transfer" → transferencia entre cuentas propias del mismo usuario
+- category: categoría sugerida (sueldo, freelance, inversión, comida, transporte, servicios, alquiler_pagado, alquiler_cobrado, entretenimiento, salud, educación, retiro, comisión, otro)
+- unit_price: precio por unidad en USD al momento de la operación (solo para cripto y acciones, null para fiat y stablecoins)
+- fee: comisión cobrada como número positivo (null si no hay)
+- fee_currency: moneda de la comisión, ej "BNB", "USD" (null si no hay fee)
+
+Reglas importantes:
+- type DEBE ser exactamente "income", "expense" o "transfer". Nunca uses otro valor.
+- Si ves una compra de BTC/ETH/cripto: type="income", amount=cantidad de cripto, unit_price=precio en USD
+- Si ves una venta de BTC/ETH/cripto: type="expense", amount=cantidad vendida, unit_price=precio de venta en USD
+- Si ves un gasto en ARS/USD: type="expense", unit_price=null
 
 Devolvé SOLO un JSON válido con esta estructura:
 {"transactions": [...]}

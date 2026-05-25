@@ -245,3 +245,11 @@ El prompt está en `worker/src/providers/prompt.py` (`build_prompt()`). El backe
 - [ ] Alertas por email o Telegram cuando cambia la señal
 - [ ] MTF real con descarga intraday para 15m/1h/4h
 - [ ] Lista personalizada (custom tickers) en la UI
+
+## Proyecto relacionado — Finanzas Personales
+
+En `finanzas/` vive una app separada de seguimiento de patrimonio personal (cuentas, posiciones, movimientos, agente IA). Tiene su propio backend FastAPI (puerto 8001), frontend Vite (puerto 5174) y base de datos SQLite local.
+
+Ver [finanzas/CLAUDE.md](finanzas/CLAUDE.md) para documentación técnica y [finanzas/README.md](finanzas/README.md) para instrucciones de uso.
+
+La app de finanzas consume los endpoints de precios de maximos (`localhost:8000/api/quotes`, `/api/dollar`) para valuar posiciones.

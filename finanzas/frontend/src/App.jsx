@@ -1,4 +1,25 @@
-import { useState, useEffect, useRef, useCallback } from 'react'
+import { useState, useEffect, useRef, useCallback, useMemo } from 'react'
+
+function calcAccruedInterest(pos) {
+  if (!pos.rate || !pos.start_date) return null
+  const start = new Date(pos.start_date)
+  if (isNaN(start)) return null
+  const today = new Date()
+  const end = pos.end_date ? new Date(pos.end_date) : null
+  const effectiveEnd = (end && !isNaN(end) && end < today) ? end : today
+  const days = (effectiveEnd - start) / (1000 * 60 * 60 * 24)
+  if (days <= 0) return null
+  return pos.quantity * (pos.rate / 100) * (days / 365)
+}
+
+function downloadCSV(rows, filename) {
+  const csv = rows.map(r => r.map(v => `"${String(v ?? '').replace(/"/g, '""')}"`).join(',')).join('\n')
+  const blob = new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8' })
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url; a.download = filename; a.click()
+  URL.revokeObjectURL(url)
+}
 
 const API = ''
 
@@ -15,6 +36,7 @@ async function api(path, opts = {}) {
 const ACCOUNT_TYPES = [
   { value: 'bank',   label: 'Banco',    icon: '🏦' },
   { value: 'crypto', label: 'Crypto',   icon: '₿'  },
+  { value: 'wallet', label: 'Wallet',   icon: '👛' },
   { value: 'broker', label: 'Broker',   icon: '📈' },
   { value: 'cash',   label: 'Efectivo', icon: '💵' },
   { value: 'other',  label: 'Otro',     icon: '📁' },
@@ -28,18 +50,19 @@ const ASSET_TYPES = [
   { value: 'cedear',     label: 'CEDEAR' },
   { value: 'fixed_term', label: 'Plazo fijo' },
   { value: 'fund',       label: 'Fondo de inversión' },
+  { value: 'flexible',   label: 'Rendimiento flexible' },
 ]
 
 const CATEGORIES = [
   'sueldo','freelance','inversión','alquiler_cobrado',
   'comida','transporte','servicios','alquiler_pagado',
   'entretenimiento','salud','educación','ropa',
-  'transferencia','retiro','otro',
+  'transferencia','retiro','comisión','otro',
 ]
 
 const ACCOUNT_COLORS = [
-  '#f59e0b','#64748b','#10b981','#ef4444',
-  '#3b82f6','#8b5cf6','#ec4899','#14b8a6',
+  '#f59e0b','#eab308','#64748b','#10b981',
+  '#ef4444','#3b82f6','#8b5cf6','#ec4899','#14b8a6',
 ]
 
 function fmtAmount(amount) {
@@ -68,32 +91,40 @@ function HelpModal({ onClose }) {
       title: 'Configurá tus cuentas',
       tab: 'Cuentas',
       icon: '🏦',
-      desc: 'Andá al tab "Cuentas" y agregá cada lugar donde tenés plata: bancos, exchanges de crypto, broker, efectivo. Cada cuenta tiene un tipo y un color para identificarla fácil.',
-      examples: ['BBVA → Banco', 'Binance → Crypto', 'Invertir Online → Broker', 'Billetera → Efectivo'],
+      desc: 'Agregá cada lugar donde tenés plata: banco, exchange de crypto, broker, efectivo. Cada cuenta tiene un tipo y un color.',
+      examples: ['BBVA → Banco', 'Binance → Crypto', 'Invertir Online → Broker', 'Efectivo → Efectivo'],
     },
     {
       num: '2',
       title: 'Cargá tus posiciones',
       tab: 'Portfolio',
       icon: '📊',
-      desc: 'En el tab "Portfolio" agregá lo que tenés en cada cuenta ahora mismo. Para cada posición indicás el activo, la cantidad y el tipo. Los plazos fijos y fondos también tienen fecha de vencimiento y tasa.',
-      examples: ['BBVA: 500.000 ARS (fiat)', 'Binance: 0.05 BTC (crypto)', 'Nexo: 1.000 USDT plazo fijo al 8% hasta 03/06'],
+      desc: 'Agregá lo que tenés en cada cuenta ahora mismo: cripto, acciones, plazos fijos, fiat. Para plazos fijos y staking indicá la tasa y fecha de vencimiento — el interés devengado se calcula solo.',
+      examples: ['BBVA: 500.000 ARS', 'Binance: 0.05 BTC (precio promedio 60.000 USD)', 'Nexo: 1.000 USDT al 8% hasta 03/06'],
     },
     {
       num: '3',
-      title: 'Importá tus movimientos',
+      title: 'Importá o cargá movimientos',
       tab: 'Movimientos',
       icon: '📎',
-      desc: 'Hacé click en "+ Cargar movimientos". Podés subir un PDF, CSV, imagen, o simplemente pegar texto copiado del homebanking. La IA extrae todas las transacciones automáticamente y te muestra una preview para confirmar antes de guardar.',
-      examples: ['PDF del resumen de tarjeta', 'CSV exportado del banco', 'Screenshot del extracto', 'Texto pegado de la app'],
+      desc: 'Subí un PDF, imagen o CSV, o pegá texto del homebanking. La IA extrae las transacciones con monto, fecha, tipo y categoría. Podés editar o eliminar filas de la preview antes de confirmar. También podés cargar operaciones manualmente una por una.',
+      examples: ['PDF del resumen de tarjeta', 'Screenshot de Binance', 'Texto pegado del homebanking', 'Carga manual de una venta de ETH'],
     },
     {
       num: '4',
+      title: 'Registrá compras y ventas de activos',
+      tab: 'Movimientos',
+      icon: '💹',
+      desc: 'Al cargar una compra o venta de cripto/acción, completá el campo "Precio por unidad". Esto actualiza el precio promedio de tu posición y calcula el P&L realizado automáticamente al vender.',
+      examples: ['Compra 0.01 BTC a USD 95.000 → actualiza avg_price', 'Venta 0.005 BTC a USD 102.000 → muestra P&L realizado'],
+    },
+    {
+      num: '5',
       title: 'Consultá al agente',
       tab: 'Agente',
       icon: '🤖',
-      desc: 'En el tab "Agente" podés preguntarle cualquier cosa sobre tus finanzas en lenguaje natural. Tiene acceso a todas tus cuentas, posiciones y movimientos. También puede cruzar con señales del mercado.',
-      examples: ['¿Cuánto gasté este mes?', '¿En qué moneda tengo más exposición?', '¿Cuándo vence mi plazo fijo?', '¿Tengo plata disponible para invertir?'],
+      desc: 'Preguntale cualquier cosa sobre tus finanzas en lenguaje natural. Tiene acceso a tus cuentas, posiciones, movimientos y P&L. También puede sugerirte consultar el screener de mercado.',
+      examples: ['¿Cuánto gasté este mes?', '¿En qué moneda tengo más exposición?', '¿Cuándo vence mi plazo fijo?', '¿Cuál fue mi P&L realizado en ETH?'],
     },
   ]
 
@@ -111,7 +142,7 @@ function HelpModal({ onClose }) {
                 <div className="w-8 h-8 rounded-full bg-amber-500 text-white text-sm font-bold flex items-center justify-center">
                   {s.num}
                 </div>
-                {s.num !== '4' && <div className="w-px flex-1 bg-gray-200 mt-2" />}
+                {s.num !== '5' && <div className="w-px flex-1 bg-gray-200 mt-2" />}
               </div>
               <div className="pb-4 flex-1">
                 <div className="flex items-center gap-2 mb-1">
@@ -216,7 +247,8 @@ function PositionForm({ accounts, initial, onSave, onClose }) {
     notes: initial?.notes ?? '',
   })
   const set = k => e => setForm(f => ({ ...f, [k]: e.target.value }))
-  const hasTerm = ['fixed_term', 'fund'].includes(form.asset_type)
+  const hasTerm     = ['fixed_term', 'fund', 'flexible'].includes(form.asset_type)
+  const isFlexible  = form.asset_type === 'flexible'
 
   async function submit(e) {
     e.preventDefault()
@@ -278,23 +310,27 @@ function PositionForm({ accounts, initial, onSave, onClose }) {
             <input type="date" value={form.start_date} onChange={set('start_date')}
               className="mt-1 w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-amber-400" />
           </div>
-          <div>
-            <label className="text-xs font-medium text-gray-500 uppercase tracking-wide">Vencimiento</label>
-            <input type="date" value={form.end_date} onChange={set('end_date')}
-              className="mt-1 w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-amber-400" />
-          </div>
+          {!isFlexible && (
+            <div>
+              <label className="text-xs font-medium text-gray-500 uppercase tracking-wide">Vencimiento</label>
+              <input type="date" value={form.end_date} onChange={set('end_date')}
+                className="mt-1 w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-amber-400" />
+            </div>
+          )}
           <div>
             <label className="text-xs font-medium text-gray-500 uppercase tracking-wide">Tasa anual %</label>
             <input type="number" step="0.01" value={form.rate} onChange={set('rate')}
               className="mt-1 w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-amber-400" />
           </div>
-          <div className="flex items-end pb-2">
-            <label className="flex items-center gap-2 text-sm text-gray-600 cursor-pointer">
-              <input type="checkbox" checked={!!form.auto_renew}
-                onChange={e => setForm(f => ({ ...f, auto_renew: e.target.checked ? 1 : 0 }))} />
-              Auto-renovar
-            </label>
-          </div>
+          {!isFlexible && (
+            <div className="flex items-end pb-2">
+              <label className="flex items-center gap-2 text-sm text-gray-600 cursor-pointer">
+                <input type="checkbox" checked={!!form.auto_renew}
+                  onChange={e => setForm(f => ({ ...f, auto_renew: e.target.checked ? 1 : 0 }))} />
+                Auto-renovar
+              </label>
+            </div>
+          )}
         </div>
       )}
       <div>
@@ -319,7 +355,15 @@ function IngestPanel({ accounts, onDone }) {
   const [loading, setLoading] = useState(false)
   const [text, setText] = useState('')
   const [saving, setSaving] = useState(false)
+  const [editingIdx, setEditingIdx] = useState(null)
   const fileRef = useRef()
+
+  function updatePreviewRow(idx, field, val) {
+    setPreview(p => p.map((t, i) => i === idx ? { ...t, [field]: val } : t))
+  }
+  function removePreviewRow(idx) {
+    setPreview(p => p.filter((_, i) => i !== idx))
+  }
 
   async function processFile(file) {
     setLoading(true)
@@ -427,19 +471,62 @@ function IngestPanel({ accounts, onDone }) {
       {preview && (
         <div className="space-y-3">
           <div className="flex items-center justify-between">
-            <span className="text-sm font-medium text-gray-700">{preview.length} transacciones encontradas</span>
-            <button onClick={() => setPreview(null)} className="text-xs text-gray-400 hover:text-gray-600">Descartar</button>
+            <span className="text-sm font-medium text-gray-700">{preview.length} transacciones encontradas · <span className="text-gray-400 font-normal">Hacé click para editar</span></span>
+            <button onClick={() => { setPreview(null); setEditingIdx(null) }} className="text-xs text-gray-400 hover:text-gray-600">Descartar</button>
           </div>
-          <div className="max-h-64 overflow-y-auto space-y-1.5">
+          <div className="max-h-80 overflow-y-auto space-y-1.5">
             {preview.map((t, i) => (
-              <div key={i} className="flex items-center gap-2 text-xs bg-gray-50 rounded-lg px-3 py-2">
-                <span className={`font-bold ${t.type === 'income' ? 'text-green-600' : 'text-red-600'}`}>
-                  {t.type === 'income' ? '+' : '-'}
-                </span>
-                <span className="text-gray-400 shrink-0">{t.date}</span>
-                <span className="flex-1 text-gray-600 truncate">{t.description}</span>
-                <span className="font-semibold tabular-nums shrink-0">{fmtAmount(t.amount)} {t.currency}</span>
-                <span className="text-gray-400 shrink-0">{t.category}</span>
+              <div key={i} className="text-xs bg-gray-50 rounded-lg overflow-hidden">
+                {editingIdx === i ? (
+                  <div className="p-2 space-y-2 bg-amber-50 border border-amber-200 rounded-lg">
+                    <div className="flex gap-1.5 flex-wrap">
+                      <input type="date" value={t.date || ''} onChange={e => updatePreviewRow(i,'date',e.target.value)}
+                        className="border border-gray-200 rounded px-2 py-1 text-xs bg-white w-32" />
+                      <select value={t.type} onChange={e => updatePreviewRow(i,'type',e.target.value)}
+                        className="border border-gray-200 rounded px-2 py-1 text-xs bg-white">
+                        <option value="income">Ingreso</option>
+                        <option value="expense">Egreso</option>
+                        <option value="transfer">Transferencia</option>
+                      </select>
+                      <input type="number" step="any" value={t.amount} onChange={e => updatePreviewRow(i,'amount',parseFloat(e.target.value)||0)}
+                        className="border border-gray-200 rounded px-2 py-1 text-xs bg-white w-24" placeholder="Monto" />
+                      <input type="text" value={t.currency} onChange={e => updatePreviewRow(i,'currency',e.target.value.toUpperCase())}
+                        className="border border-gray-200 rounded px-2 py-1 text-xs bg-white w-16" placeholder="USD" />
+                    </div>
+                    <input type="text" value={t.description||''} onChange={e => updatePreviewRow(i,'description',e.target.value)}
+                      className="w-full border border-gray-200 rounded px-2 py-1 text-xs bg-white" placeholder="Descripción" />
+                    <div className="flex gap-1.5 flex-wrap">
+                      <input type="number" step="any" value={t.unit_price||''} onChange={e => updatePreviewRow(i,'unit_price',e.target.value?parseFloat(e.target.value):null)}
+                        className="border border-gray-200 rounded px-2 py-1 text-xs bg-white w-28" placeholder="Precio unit. USD" />
+                      <input type="number" step="any" value={t.fee||''} onChange={e => updatePreviewRow(i,'fee',e.target.value?parseFloat(e.target.value):null)}
+                        className="border border-gray-200 rounded px-2 py-1 text-xs bg-white w-20" placeholder="Comisión" />
+                      <input type="text" value={t.fee_currency||''} onChange={e => updatePreviewRow(i,'fee_currency',e.target.value.toUpperCase())}
+                        className="border border-gray-200 rounded px-2 py-1 text-xs bg-white w-16" placeholder="BNB" />
+                    </div>
+                    <div className="flex gap-2">
+                      <button onClick={() => setEditingIdx(null)} className="flex-1 bg-amber-500 text-white rounded py-1 text-xs font-medium">Listo</button>
+                      <button onClick={() => { removePreviewRow(i); setEditingIdx(null) }} className="text-red-400 hover:text-red-600 text-xs px-2">Eliminar</button>
+                    </div>
+                  </div>
+                ) : (
+                  <button onClick={() => setEditingIdx(i)} className="w-full text-left px-3 py-2 hover:bg-amber-50 transition-colors">
+                    <div className="flex items-center gap-2">
+                      <span className={`font-bold shrink-0 ${t.type === 'income' ? 'text-green-600' : t.type === 'transfer' ? 'text-blue-500' : 'text-red-600'}`}>
+                        {t.type === 'income' ? '+' : t.type === 'transfer' ? '↔' : '-'}
+                      </span>
+                      <span className="text-gray-400 shrink-0">{t.date}</span>
+                      <span className="flex-1 text-gray-600 truncate">{t.description}</span>
+                      <span className="font-semibold tabular-nums shrink-0">{fmtAmount(t.amount)} {t.currency}</span>
+                      {t.category && <span className="text-gray-400 shrink-0">{t.category}</span>}
+                    </div>
+                    {(t.unit_price || t.fee) && (
+                      <div className="flex gap-3 pl-4 text-gray-400 mt-0.5">
+                        {t.unit_price && <span>@ USD {fmtAmount(t.unit_price)}</span>}
+                        {t.fee && <span className="text-orange-400">comisión {t.fee} {t.fee_currency}</span>}
+                      </div>
+                    )}
+                  </button>
+                )}
               </div>
             ))}
           </div>
@@ -461,7 +548,7 @@ const FIAT_USD    = new Set(['USD'])
 const FIAT_ARS    = new Set(['ARS'])
 
 function toYahooTicker(asset, assetType) {
-  if (assetType === 'crypto' || (!STABLECOINS.has(asset) && !FIAT_USD.has(asset) && !FIAT_ARS.has(asset) && assetType !== 'stock' && assetType !== 'cedear' && assetType !== 'fixed_term' && assetType !== 'fund')) {
+  if (assetType === 'crypto' || (!STABLECOINS.has(asset) && !FIAT_USD.has(asset) && !FIAT_ARS.has(asset) && assetType !== 'stock' && assetType !== 'cedear' && assetType !== 'fixed_term' && assetType !== 'fund' && assetType !== 'flexible')) {
     return `${asset}-USD`
   }
   return asset
@@ -469,14 +556,14 @@ function toYahooTicker(asset, assetType) {
 
 const TYPE_LABELS = {
   fiat: 'Fiat', stablecoin: 'Stablecoins', crypto: 'Crypto',
-  stock: 'Acciones', cedear: 'CEDEARs', fixed_term: 'Plazos fijos', fund: 'Fondos',
+  stock: 'Acciones', cedear: 'CEDEARs', fixed_term: 'Plazos fijos', fund: 'Fondos', flexible: 'Rend. flexible',
 }
-const TYPE_ORDER = ['fiat','stablecoin','crypto','stock','cedear','fixed_term','fund']
+const TYPE_ORDER = ['fiat','stablecoin','crypto','stock','cedear','fixed_term','fund','flexible']
 const TYPE_COLORS = {
   fiat: 'bg-blue-100 text-blue-700', stablecoin: 'bg-green-100 text-green-700',
   crypto: 'bg-orange-100 text-orange-700', stock: 'bg-purple-100 text-purple-700',
   cedear: 'bg-pink-100 text-pink-700', fixed_term: 'bg-amber-100 text-amber-700',
-  fund: 'bg-teal-100 text-teal-700',
+  fund: 'bg-teal-100 text-teal-700', flexible: 'bg-lime-100 text-lime-700',
 }
 
 function LayoutToggle({ value, onChange }) {
@@ -538,11 +625,17 @@ function PatrimonioTypeCard({ type, group, pct }) {
           {group.map(p => (
             <div key={p.id} className="flex items-center gap-3 px-4 py-2.5">
               <div className="flex-1 min-w-0">
-                <div className="flex items-center gap-2">
+                <div className="flex items-center gap-2 flex-wrap">
                   <span className="font-semibold text-sm text-gray-800">{p.asset}</span>
                   {p.end_date && <span className="text-[10px] bg-amber-100 text-amber-700 rounded px-1.5 py-0.5">vence {p.end_date}</span>}
+                  {p.rate && <span className="text-[10px] bg-green-100 text-green-700 rounded px-1.5 py-0.5">{p.rate}% anual</span>}
                 </div>
                 <div className="text-xs text-gray-400">{p.account_name} · {fmtAmount(p.quantity)} {p.asset}</div>
+                {p.accrued != null && (
+                  <div className="text-xs text-green-600 tabular-nums">
+                    +{fmtAmount(p.accrued)} {p.asset} interés devengado
+                  </div>
+                )}
               </div>
               <div className="text-right shrink-0">
                 {p.priceUSD != null ? (
@@ -550,8 +643,10 @@ function PatrimonioTypeCard({ type, group, pct }) {
                     <div className="font-semibold text-sm text-gray-800 tabular-nums">
                       USD {(p.valueUSD).toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                     </div>
-                    <div className="text-xs text-gray-400 tabular-nums">@ USD {fmtAmount(p.priceUSD)}</div>
-                    {p.pnlUSD != null && (
+                    {!['fixed_term','fund','flexible'].includes(p.asset_type) && (
+                      <div className="text-xs text-gray-400 tabular-nums">@ USD {fmtAmount(p.priceUSD)}</div>
+                    )}
+                    {p.pnlUSD != null && !['fixed_term','fund','flexible'].includes(p.asset_type) && (
                       <div className={`text-xs font-semibold tabular-nums ${p.pnlUSD >= 0 ? 'text-green-600' : 'text-red-500'}`}>
                         {p.pnlUSD >= 0 ? '+' : ''}USD {p.pnlUSD.toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                         {' '}({p.pnlPct >= 0 ? '+' : ''}{p.pnlPct.toFixed(2)}%)
@@ -600,7 +695,7 @@ function PatrimonioTab({ positions, transactions = [] }) {
       // 2. Precios de activos desde maximos
       const needsPrice = positions.filter(p =>
         !FIAT_ARS.has(p.asset) && !FIAT_USD.has(p.asset) && !STABLECOINS.has(p.asset) &&
-        p.asset_type !== 'fixed_term' && p.asset_type !== 'fund'
+        p.asset_type !== 'fixed_term' && p.asset_type !== 'fund' && p.asset_type !== 'flexible'
       )
       if (needsPrice.length > 0) {
         const tickers = [...new Set(needsPrice.map(p => toYahooTicker(p.asset, p.asset_type)))].join(',')
@@ -622,19 +717,32 @@ function PatrimonioTab({ positions, transactions = [] }) {
   function getPriceUSD(pos) {
     if (FIAT_USD.has(pos.asset) || STABLECOINS.has(pos.asset)) return 1
     if (FIAT_ARS.has(pos.asset)) return blueRate ? 1 / blueRate : null
-    if (pos.asset_type === 'fixed_term' || pos.asset_type === 'fund') return null
+    if (pos.asset_type === 'fixed_term' || pos.asset_type === 'fund' || pos.asset_type === 'flexible') return null
     const ticker = toYahooTicker(pos.asset, pos.asset_type)
     return prices[ticker]?.price ?? null
   }
 
-  // Calcular valores
+  // Calcular valores (incluyendo interés devengado para plazos fijos / staking)
   const enriched = positions.map(p => {
-    const priceUSD = getPriceUSD(p)
-    const valueUSD = priceUSD != null ? p.quantity * priceUSD : null
-    const costUSD  = p.avg_price != null ? p.avg_price * p.quantity : null
-    const pnlUSD   = (valueUSD != null && costUSD != null) ? valueUSD - costUSD : null
-    const pnlPct   = (priceUSD != null && p.avg_price != null) ? (priceUSD - p.avg_price) / p.avg_price * 100 : null
-    return { ...p, priceUSD, valueUSD, costUSD, pnlUSD, pnlPct }
+    const accrued  = calcAccruedInterest(p)  // en moneda nativa
+    let priceUSD   = getPriceUSD(p)
+    let valueUSD   = null
+
+    if (priceUSD != null) {
+      // Activo normal: principal + interés convertido a USD
+      const total = accrued != null ? p.quantity + accrued : p.quantity
+      valueUSD = total * priceUSD
+    } else if (p.asset_type === 'fixed_term' || p.asset_type === 'fund' || p.asset_type === 'flexible') {
+      // Plazo fijo / staking sin precio de mercado → valuamos por moneda
+      const total = accrued != null ? p.quantity + accrued : p.quantity
+      if (FIAT_USD.has(p.asset) || STABLECOINS.has(p.asset)) { valueUSD = total; priceUSD = 1 }
+      else if (FIAT_ARS.has(p.asset) && blueRate)            { valueUSD = total / blueRate; priceUSD = 1 / blueRate }
+    }
+
+    const costUSD = p.avg_price != null ? p.avg_price * p.quantity : null
+    const pnlUSD  = (valueUSD != null && costUSD != null) ? valueUSD - costUSD : null
+    const pnlPct  = (priceUSD != null && p.avg_price != null) ? (priceUSD - p.avg_price) / p.avg_price * 100 : null
+    return { ...p, priceUSD, valueUSD, costUSD, pnlUSD, pnlPct, accrued }
   })
 
   const totalUSD      = enriched.reduce((s, p) => s + (p.valueUSD ?? 0), 0)
@@ -643,6 +751,25 @@ function PatrimonioTab({ positions, transactions = [] }) {
   const hasPnl        = enriched.some(p => p.pnlUSD != null)
   const totalRealized = transactions.reduce((s, t) => s + (t.realized_pnl ?? 0), 0)
   const hasRealized   = transactions.some(t => t.realized_pnl != null)
+
+  const feeToUSD = (amount, cur) => {
+    if (!amount || !cur) return 0
+    const c = cur.toUpperCase()
+    if (c === 'USD' || c === 'USDT' || c === 'USDC') return amount
+    if (c === 'ARS' && blueRate) return amount / blueRate
+    const price = prices[`${c}-USD`]?.price
+    return price ? amount * price : 0
+  }
+  const totalFeesUSD = transactions.reduce((s, t) => {
+    // Campo fee en cualquier transacción
+    if (t.fee && t.fee_currency) s += feeToUSD(t.fee, t.fee_currency)
+    // Egreso categorizado como "comisión"
+    if (t.type === 'expense' && t.category === 'comisión') s += feeToUSD(t.amount, t.currency)
+    return s
+  }, 0)
+  const hasFees = transactions.some(t =>
+    (t.fee != null && t.fee > 0) || (t.type === 'expense' && t.category === 'comisión')
+  )
 
   // Agrupar por tipo
   const byType = {}
@@ -701,28 +828,52 @@ function PatrimonioTab({ positions, transactions = [] }) {
       )}
 
       {/* Total patrimonio */}
-      <div className="bg-slate-900 rounded-2xl p-6 text-white" style={{ borderTop: '3px solid #f59e0b' }}>
-        <div className="text-xs text-gray-400 uppercase tracking-wider mb-1">Patrimonio total estimado</div>
-        <div className="text-4xl font-bold tabular-nums">
-          {totalUSD > 0 ? `USD ${totalUSD.toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : '—'}
+      <div className="bg-slate-900 rounded-2xl p-6 text-white flex flex-col sm:flex-row sm:items-center gap-5" style={{ borderTop: '3px solid #f59e0b' }}>
+
+        {/* Izquierda: total principal */}
+        <div className="flex-1 min-w-0">
+          <div className="text-[11px] text-gray-500 uppercase tracking-widest mb-2">Patrimonio total estimado</div>
+          <div className="text-4xl sm:text-5xl font-bold tabular-nums tracking-tight">
+            {totalUSD > 0 ? `USD ${totalUSD.toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : '—'}
+          </div>
+          {totalARS && (
+            <div className="text-amber-400 text-base mt-1.5 tabular-nums font-medium">
+              ≈ ARS {totalARS.toLocaleString('es-AR', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
+            </div>
+          )}
+          {blueRate && (
+            <div className="text-xs text-gray-600 mt-3">Dólar blue: ${blueRate} · Precios vía maximos</div>
+          )}
         </div>
-        {totalARS && (
-          <div className="text-amber-400 text-lg mt-1 tabular-nums">
-            ≈ ARS {totalARS.toLocaleString('es-AR', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
+
+        {/* Derecha: stats cards */}
+        {(hasPnl || hasRealized || hasFees) && (
+          <div className="flex flex-wrap gap-3">
+            {hasPnl && (
+              <div className="bg-white/[0.06] rounded-xl px-4 py-3 min-w-[130px]">
+                <div className="text-[10px] text-gray-500 uppercase tracking-widest mb-1.5">No realizado</div>
+                <div className={`text-xl font-bold tabular-nums ${totalPnl >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                  {totalPnl >= 0 ? '+' : ''}USD {totalPnl.toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                </div>
+              </div>
+            )}
+            {hasRealized && (
+              <div className="bg-white/[0.06] rounded-xl px-4 py-3 min-w-[130px]">
+                <div className="text-[10px] text-gray-500 uppercase tracking-widest mb-1.5">Realizado</div>
+                <div className={`text-xl font-bold tabular-nums ${totalRealized >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                  {totalRealized >= 0 ? '+' : ''}USD {totalRealized.toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                </div>
+              </div>
+            )}
+            {hasFees && (
+              <div className="bg-white/[0.06] rounded-xl px-4 py-3 min-w-[130px]">
+                <div className="text-[10px] text-gray-500 uppercase tracking-widest mb-1.5">Comisiones</div>
+                <div className="text-xl font-bold tabular-nums text-orange-400">
+                  -USD {totalFeesUSD.toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                </div>
+              </div>
+            )}
           </div>
-        )}
-        {hasPnl && (
-          <div className={`text-sm font-semibold mt-2 tabular-nums ${totalPnl >= 0 ? 'text-green-400' : 'text-red-400'}`}>
-            {totalPnl >= 0 ? '▲' : '▼'} {totalPnl >= 0 ? '+' : ''}USD {totalPnl.toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} no realizado
-          </div>
-        )}
-        {hasRealized && (
-          <div className={`text-sm font-semibold tabular-nums ${totalRealized >= 0 ? 'text-green-400' : 'text-red-400'}`}>
-            {totalRealized >= 0 ? '▲' : '▼'} {totalRealized >= 0 ? '+' : ''}USD {totalRealized.toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} realizado
-          </div>
-        )}
-        {blueRate && (
-          <div className="text-xs text-gray-500 mt-2">Dólar blue: ${blueRate} · Precios vía maximos</div>
         )}
       </div>
 
@@ -763,6 +914,8 @@ function TransactionForm({ initial, accounts, onSave, onClose }) {
     type:          initial?.type ?? 'expense',
     category:      initial?.category ?? '',
     unit_price:    initial?.unit_price ?? '',
+    fee:           initial?.fee ?? '',
+    fee_currency:  initial?.fee_currency ?? '',
   })
   const set = k => e => setForm(f => ({ ...f, [k]: e.target.value }))
 
@@ -774,6 +927,8 @@ function TransactionForm({ initial, accounts, onSave, onClose }) {
     const base = { ...form, amount: parseFloat(form.amount), account_id: parseInt(form.account_id) }
     if (form.unit_price !== '' && showUnitPrice) base.unit_price = parseFloat(form.unit_price)
     else delete base.unit_price
+    if (form.fee !== '' && form.fee_currency) { base.fee = parseFloat(form.fee); base.fee_currency = form.fee_currency.toUpperCase() }
+    else { delete base.fee; delete base.fee_currency }
 
     if (isTransfer && form.to_account_id) {
       // Crear egreso en cuenta origen e ingreso en cuenta destino
@@ -797,8 +952,8 @@ function TransactionForm({ initial, accounts, onSave, onClose }) {
         <div>
           <label className="text-xs font-medium text-gray-500 uppercase tracking-wide">Tipo</label>
           <select value={form.type} onChange={set('type')} className={inputCls}>
-            <option value="income">Ingreso</option>
-            <option value="expense">Gasto</option>
+            <option value="income">Ingreso / Compra</option>
+            <option value="expense">Egreso / Venta / Gasto</option>
             <option value="transfer">Transferencia</option>
           </select>
         </div>
@@ -860,6 +1015,19 @@ function TransactionForm({ initial, accounts, onSave, onClose }) {
               ? 'Si lo completás, el costo promedio de tu posición se actualiza automáticamente.'
               : 'Si lo completás, se calcula y guarda la ganancia o pérdida realizada de esta venta.'}
           </p>
+        </div>
+      )}
+      {!isTransfer && (
+        <div>
+          <label className="text-xs font-medium text-gray-500 uppercase tracking-wide">
+            Comisión <span className="text-gray-400 normal-case font-normal">(opcional)</span>
+          </label>
+          <div className="flex gap-2 mt-1">
+            <input type="number" step="any" min="0" value={form.fee} onChange={set('fee')}
+              className={`${inputCls} flex-1`} placeholder="0.001" />
+            <input type="text" value={form.fee_currency} onChange={set('fee_currency')}
+              className="w-24 border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-amber-400 shrink-0" placeholder="BNB" maxLength={10} />
+          </div>
         </div>
       )}
       <div className="flex gap-2 pt-1">
@@ -991,7 +1159,9 @@ function Chat() {
       })
       setMessages(m => [...m, { role: 'assistant', content: data.reply }])
     } catch (e) {
-      setMessages(m => [...m, { role: 'assistant', content: 'Error al conectar con el agente.' }])
+      let msg = 'Error al conectar con el agente.'
+      try { const d = JSON.parse(e.message); if (d.detail) msg = d.detail } catch {}
+      setMessages(m => [...m, { role: 'assistant', content: msg }])
     } finally {
       setLoading(false)
     }
@@ -1034,6 +1204,127 @@ function Chat() {
   )
 }
 
+// ── MovimientosTab ────────────────────────────────────────────────────────────
+function MovimientosTab({ transactions, accounts, onEdit, onDelete, onNewManual, onImport }) {
+  const [search, setSearch]               = useState('')
+  const [filterMonth, setFilterMonth]     = useState('')
+  const [filterCategory, setFilterCategory] = useState('')
+  const [filterAccount, setFilterAccount] = useState('')
+  const [displayLimit, setDisplayLimit]   = useState(50)
+
+  const months     = useMemo(() => [...new Set(transactions.map(t => t.date?.slice(0, 7)).filter(Boolean))].sort().reverse(), [transactions])
+  const categories = useMemo(() => [...new Set(transactions.map(t => t.category).filter(Boolean))].sort(), [transactions])
+
+  const filtered = useMemo(() => transactions.filter(t => {
+    if (filterMonth    && !t.date?.startsWith(filterMonth))                                            return false
+    if (filterCategory && t.category !== filterCategory)                                               return false
+    if (filterAccount  && String(t.account_id) !== filterAccount)                                      return false
+    if (search) {
+      const q = search.toLowerCase()
+      if (![t.description, t.currency, t.category, t.account_name].some(v => v?.toLowerCase().includes(q))) return false
+    }
+    return true
+  }), [transactions, search, filterMonth, filterCategory, filterAccount])
+
+  const visible = filtered.slice(0, displayLimit)
+
+  function resetFilters() { setSearch(''); setFilterMonth(''); setFilterCategory(''); setFilterAccount(''); setDisplayLimit(50) }
+
+  function exportCSV() {
+    const headers = ['fecha','cuenta','descripcion','monto','moneda','tipo','categoria','precio_unit','pnl_realizado','comision','moneda_comision']
+    const rows = filtered.map(t => [t.date, t.account_name, t.description || '', t.amount, t.currency, t.type, t.category || '', t.unit_price || '', t.realized_pnl || '', t.fee || '', t.fee_currency || ''])
+    downloadCSV([headers, ...rows], `movimientos_${new Date().toISOString().slice(0,10)}.csv`)
+  }
+
+  const inputCls = 'border border-gray-200 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-amber-400 text-gray-600 bg-white'
+
+  return (
+    <div className="max-w-3xl mx-auto space-y-4">
+      <div className="flex items-center justify-between">
+        <h2 className="text-sm font-semibold text-gray-700 uppercase tracking-wide">Movimientos</h2>
+        <div className="flex items-center gap-3">
+          <button onClick={exportCSV} className="text-xs text-gray-400 hover:text-gray-600 transition-colors">↓ CSV</button>
+          <button onClick={onNewManual} className="text-xs text-gray-500 hover:text-amber-600">+ Manual</button>
+          <button onClick={onImport} className="text-xs text-amber-600 hover:underline">+ Importar</button>
+        </div>
+      </div>
+
+      {/* Filtros */}
+      <div className="flex flex-wrap gap-2">
+        <input value={search} onChange={e => { setSearch(e.target.value); setDisplayLimit(50) }}
+          placeholder="Buscar..." className={`${inputCls} flex-1 min-w-[150px]`} />
+        <select value={filterMonth} onChange={e => { setFilterMonth(e.target.value); setDisplayLimit(50) }} className={inputCls}>
+          <option value="">Todos los meses</option>
+          {months.map(m => <option key={m} value={m}>{m}</option>)}
+        </select>
+        <select value={filterCategory} onChange={e => { setFilterCategory(e.target.value); setDisplayLimit(50) }} className={inputCls}>
+          <option value="">Todas las categorías</option>
+          {categories.map(c => <option key={c} value={c}>{c}</option>)}
+        </select>
+        <select value={filterAccount} onChange={e => { setFilterAccount(e.target.value); setDisplayLimit(50) }} className={inputCls}>
+          <option value="">Todas las cuentas</option>
+          {accounts.map(a => <option key={a.id} value={String(a.id)}>{a.name}</option>)}
+        </select>
+        {(search || filterMonth || filterCategory || filterAccount) && (
+          <button onClick={resetFilters} className="text-xs text-gray-400 hover:text-gray-600 px-2">✕ Limpiar</button>
+        )}
+      </div>
+
+      {transactions.length === 0 ? (
+        <div className="text-center py-16 text-gray-400 text-sm">
+          <div className="text-4xl mb-3">📋</div>
+          <div>No hay movimientos cargados</div>
+        </div>
+      ) : filtered.length === 0 ? (
+        <div className="text-center py-10 text-gray-400 text-sm">
+          <div>No hay resultados para ese filtro</div>
+          <button onClick={resetFilters} className="mt-2 text-amber-500 hover:underline text-xs">Limpiar filtros</button>
+        </div>
+      ) : (
+        <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
+          {(filtered.length < transactions.length) && (
+            <div className="px-4 py-2 bg-amber-50 border-b border-amber-100 text-xs text-amber-700">
+              Mostrando {Math.min(visible.length, filtered.length)} de {filtered.length} movimientos filtrados (total: {transactions.length})
+            </div>
+          )}
+          <div className="divide-y divide-gray-50">
+            {visible.map(t => (
+              <div key={t.id} className="flex items-center gap-3 px-4 py-2.5 hover:bg-gray-50 group">
+                <div className={`w-1.5 h-1.5 rounded-full shrink-0 ${t.type === 'income' ? 'bg-green-500' : t.type === 'transfer' ? 'bg-blue-400' : 'bg-red-400'}`} />
+                <div className="flex-1 min-w-0">
+                  <div className="text-sm text-gray-700 truncate">{t.description || '—'}</div>
+                  <div className="text-xs text-gray-400">{t.account_name} · {t.date}{t.category && ` · ${t.category}`}</div>
+                </div>
+                <div className="text-right shrink-0">
+                  <div className={`font-semibold text-sm tabular-nums ${t.type === 'income' ? 'text-green-600' : t.type === 'transfer' ? 'text-blue-500' : 'text-red-600'}`}>
+                    {t.type === 'income' ? '+' : t.type === 'transfer' ? '↔' : '-'}{fmtAmount(t.amount)} {t.currency}
+                  </div>
+                  {t.realized_pnl != null && (
+                    <div className={`text-xs font-semibold tabular-nums ${t.realized_pnl >= 0 ? 'text-green-500' : 'text-red-500'}`}>
+                      {t.realized_pnl >= 0 ? '+' : ''}USD {t.realized_pnl.toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} realizado
+                    </div>
+                  )}
+                  {t.fee != null && t.fee > 0 && (
+                    <div className="text-xs text-orange-400 tabular-nums">comisión {t.fee} {t.fee_currency}</div>
+                  )}
+                </div>
+                <button onClick={() => onEdit(t)} className="text-gray-300 hover:text-amber-500 px-1 text-xs shrink-0">✏️</button>
+                <button onClick={() => onDelete(t.id)} className="text-gray-300 hover:text-red-500 px-1 text-xs shrink-0">🗑</button>
+              </div>
+            ))}
+          </div>
+          {filtered.length > displayLimit && (
+            <button onClick={() => setDisplayLimit(l => l + 50)}
+              className="w-full py-3 text-sm text-gray-400 hover:text-amber-600 hover:bg-gray-50 transition-colors border-t border-gray-100">
+              Cargar más · {filtered.length - displayLimit} restantes
+            </button>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
 // ── App ───────────────────────────────────────────────────────────────────────
 export default function App() {
   const [tab, setTab] = useState('patrimonio')
@@ -1047,7 +1338,7 @@ export default function App() {
     const [ac, po, tx] = await Promise.all([
       api('/api/accounts'),
       api('/api/positions'),
-      api('/api/transactions?limit=100'),
+      api('/api/transactions?limit=500'),
     ])
     setAccounts(ac)
     setPositions(po)
@@ -1098,10 +1389,13 @@ export default function App() {
   }
 
   async function saveTransaction(data) {
-    if (editTarget?.type === 'transaction') {
+    if (editTarget?.id) {
       await api(`/api/transactions/${editTarget.id}`, { method: 'PATCH', body: JSON.stringify(data) })
     } else {
       await api('/api/transactions', { method: 'POST', body: JSON.stringify(data) })
+      if (data.account_id) {
+        await api(`/api/positions/create-missing/${data.account_id}`, { method: 'POST' })
+      }
     }
     await load()
     setEditTarget(null)
@@ -1137,7 +1431,7 @@ export default function App() {
       </header>
 
       {/* Tabs */}
-      <div className="bg-white border-b border-gray-200 px-4 sm:px-6">
+      <div className="bg-white border-b border-gray-200 px-4 sm:px-6 sticky top-0 z-10">
         <div className="flex gap-0">
           {TABS.map(t => (
             <button key={t.id} onClick={() => setTab(t.id)}
@@ -1173,55 +1467,14 @@ export default function App() {
 
         {/* MOVIMIENTOS */}
         {tab === 'movimientos' && (
-          <div className="max-w-3xl mx-auto space-y-4">
-            <div className="flex items-center justify-between">
-              <h2 className="text-sm font-semibold text-gray-700 uppercase tracking-wide">Movimientos recientes</h2>
-              <div className="flex items-center gap-3">
-                <button onClick={() => { setModal('new-transaction'); setEditTarget(null) }}
-                  className="text-xs text-gray-500 hover:text-amber-600">+ Manual</button>
-                <button onClick={() => { setModal('ingest'); setEditTarget(null) }}
-                  className="text-xs text-amber-600 hover:underline">+ Importar</button>
-              </div>
-            </div>
-            {transactions.length === 0 ? (
-              <div className="text-center py-16 text-gray-400 text-sm">
-                <div className="text-4xl mb-3">📋</div>
-                <div>No hay movimientos cargados</div>
-              </div>
-            ) : (
-              <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
-                <div className="divide-y divide-gray-50">
-                  {transactions.map(t => (
-                    <div key={t.id} className="flex items-center gap-3 px-4 py-2.5 hover:bg-gray-50 group">
-                      <div className={`w-1.5 h-1.5 rounded-full shrink-0 ${t.type === 'income' ? 'bg-green-500' : 'bg-red-400'}`} />
-                      <div className="flex-1 min-w-0">
-                        <div className="text-sm text-gray-700 truncate">{t.description || '—'}</div>
-                        <div className="text-xs text-gray-400">{t.account_name} · {t.date} {t.category && `· ${t.category}`}</div>
-                      </div>
-                      <div className="text-right shrink-0">
-                        <div className={`font-semibold text-sm tabular-nums ${t.type === 'income' ? 'text-green-600' : 'text-red-600'}`}>
-                          {t.type === 'income' ? '+' : '-'}{fmtAmount(t.amount)} {t.currency}
-                        </div>
-                        {t.realized_pnl != null && (
-                          <div className={`text-xs font-semibold tabular-nums ${t.realized_pnl >= 0 ? 'text-green-500' : 'text-red-500'}`}>
-                            {t.realized_pnl >= 0 ? '+' : ''}USD {t.realized_pnl.toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} realizado
-                          </div>
-                        )}
-                      </div>
-                      <button onClick={() => { setEditTarget({ ...t, type: 'transaction' }); setModal('edit-transaction') }}
-                        className="text-gray-300 hover:text-amber-500 px-1 text-xs shrink-0">
-                        ✏️
-                      </button>
-                      <button onClick={() => deleteTransaction(t.id)}
-                        className="text-gray-300 hover:text-red-500 px-1 text-xs shrink-0">
-                        🗑
-                      </button>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
-          </div>
+          <MovimientosTab
+            transactions={transactions}
+            accounts={accounts}
+            onEdit={t => { setEditTarget(t); setModal('edit-transaction') }}
+            onDelete={deleteTransaction}
+            onNewManual={() => { setModal('new-transaction'); setEditTarget(null) }}
+            onImport={() => { setModal('ingest'); setEditTarget(null) }}
+          />
         )}
 
         {/* AGENTE */}
@@ -1233,7 +1486,7 @@ export default function App() {
 
         {/* CUENTAS */}
         {tab === 'cuentas' && (
-          <div className="max-w-2xl mx-auto space-y-4">
+          <div className="max-w-4xl mx-auto space-y-4">
             <div className="flex items-center justify-between">
               <h2 className="text-sm font-semibold text-gray-700 uppercase tracking-wide">Cuentas y wallets</h2>
               <button onClick={() => { setModal('add-account'); setEditTarget(null) }}
@@ -1247,24 +1500,28 @@ export default function App() {
                   className="mt-3 text-amber-600 text-xs hover:underline">Agregar cuenta</button>
               </div>
             ) : (
-              <div className="space-y-2">
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
                 {accounts.map(acc => (
-                  <div key={acc.id} className={`bg-white rounded-xl border border-gray-200 shadow-sm flex items-center gap-3 px-4 py-3 ${!acc.active ? 'opacity-50' : ''}`}
-                    style={{ borderLeft: `4px solid ${acc.color}` }}>
-                    <span className="text-xl">{typeIcon(acc.type)}</span>
-                    <div className="flex-1 min-w-0">
-                      <div className="font-medium text-sm text-gray-800">{acc.name}</div>
-                      <div className="text-xs text-gray-400">{ACCOUNT_TYPES.find(t => t.value === acc.type)?.label}</div>
+                  <div key={acc.id} className={`bg-white rounded-xl border border-gray-200 shadow-sm flex flex-col gap-3 p-4 ${!acc.active ? 'opacity-50' : ''}`}
+                    style={{ borderTop: `3px solid ${acc.color}` }}>
+                    <div className="flex items-center gap-3">
+                      <span className="text-2xl">{typeIcon(acc.type)}</span>
+                      <div className="flex-1 min-w-0">
+                        <div className="font-semibold text-sm text-gray-800 truncate">{acc.name}</div>
+                        <div className="text-xs text-gray-400">{ACCOUNT_TYPES.find(t => t.value === acc.type)?.label}</div>
+                      </div>
                     </div>
-                    <div className="flex gap-2">
+                    <div className="flex items-center justify-between border-t border-gray-100 pt-2">
                       <button onClick={() => toggleAccount(acc)}
-                        className="text-xs text-gray-400 hover:text-gray-600 px-2 py-1 rounded hover:bg-gray-100">
+                        className="text-xs text-gray-400 hover:text-gray-600">
                         {acc.active ? 'Ocultar' : 'Mostrar'}
                       </button>
-                      <button onClick={() => { setEditTarget(acc); setModal('add-account') }}
-                        className="text-xs text-gray-400 hover:text-amber-600 px-2 py-1 rounded hover:bg-gray-100">✏️</button>
-                      <button onClick={() => deleteAccount(acc.id)}
-                        className="text-xs text-gray-400 hover:text-red-500 px-2 py-1 rounded hover:bg-gray-100">🗑</button>
+                      <div className="flex gap-1">
+                        <button onClick={() => { setEditTarget(acc); setModal('add-account') }}
+                          className="text-gray-300 hover:text-amber-500 px-1.5 py-1 rounded hover:bg-gray-100 text-xs">✏️</button>
+                        <button onClick={() => deleteAccount(acc.id)}
+                          className="text-gray-300 hover:text-red-500 px-1.5 py-1 rounded hover:bg-gray-100 text-xs">🗑</button>
+                      </div>
                     </div>
                   </div>
                 ))}
@@ -1305,12 +1562,12 @@ export default function App() {
       )}
 
       {modal === 'edit-transaction' && editTarget && (
-        <Modal title="Editar movimiento" onClose={() => { setModal(null); setEditTarget(null) }}>
+        <Modal title="Editar movimiento" onClose={() => { setModal(null); setEditTarget(null); load() }}>
           <TransactionForm
             initial={editTarget}
             accounts={accounts}
             onSave={saveTransaction}
-            onClose={() => { setModal(null); setEditTarget(null) }}
+            onClose={() => { setModal(null); setEditTarget(null); load() }}
           />
         </Modal>
       )}

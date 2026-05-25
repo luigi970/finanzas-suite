@@ -863,7 +863,7 @@ function TickerModal({ stock: s, listId, onClose }) {
                       const above = p >= 0;
                       return (
                         <Tooltip key={label} text={`Precio ${above ? "por encima" : "por debajo"} de la ${label} un ${Math.abs(p).toFixed(2)}%. Valor actual de la ${label}: $${val?.toFixed(2)}.`}>
-                          <div className="flex flex-row gap-2 pr-4">
+                          <div className="flex flex-row gap-2 py-0.5 pr-4">
                             <span className="w-12 text-xs text-gray-500 font-medium shrink-0">{label}</span>
                             <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold shrink-0 ${above ? "bg-green-100 text-green-700" : "bg-red-100 text-red-600"}`}>
                               {above ? "↑ Arriba" : "↓ Abajo"}
@@ -931,7 +931,7 @@ function TickerModal({ stock: s, listId, onClose }) {
                               key.startsWith("R") ? `Resistencia ${key}: $${val.toFixed(2)}. Zona donde el precio puede frenar su suba (+${diff}% desde precio actual).` :
                               `Soporte ${key}: $${val.toFixed(2)}. Zona donde el precio puede encontrar piso (${diff}% desde precio actual).`
                             }>
-                              <div className={`flex items-center gap-2 py-0.5 ${isP ? "border-y border-gray-100 my-0.5 py-1" : ""}`}>
+                              <div className={`flex items-center gap-2 py-0.5 pr-4 ${isP ? "border-y border-gray-100 my-0.5 py-1" : ""}`}>
                                 <span className={`w-8 text-xs shrink-0 ${cls}`}>{key}</span>
                                 <div className={`w-2 h-2 rounded-full shrink-0 ${isP ? "bg-gray-400" : isAbove ? "bg-red-300" : "bg-green-300"}`} />
                                 <span className={`text-xs tabular-nums font-medium ${cls}`}>${val.toFixed(2)}</span>

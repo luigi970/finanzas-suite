@@ -63,6 +63,8 @@ def init_db():
         "ALTER TABLE positions ADD COLUMN avg_price REAL",
         "ALTER TABLE transactions ADD COLUMN unit_price REAL",
         "ALTER TABLE transactions ADD COLUMN realized_pnl REAL",
+        "ALTER TABLE transactions ADD COLUMN fee REAL",
+        "ALTER TABLE transactions ADD COLUMN fee_currency TEXT",
     ]:
         try:
             conn.execute(sql)

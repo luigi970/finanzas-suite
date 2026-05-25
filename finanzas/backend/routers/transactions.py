@@ -17,6 +17,10 @@ class TransactionIn(BaseModel):
     category: Optional[str] = None
     source: Optional[str] = "manual"
     unit_price: Optional[float] = None
+    fee: Optional[float] = None
+    fee_currency: Optional[str] = None
+
+VALID_TYPES = {'income', 'expense', 'transfer'}
 
 class TransactionItem(BaseModel):
     date: str
@@ -26,6 +30,9 @@ class TransactionItem(BaseModel):
     type: str
     category: Optional[str] = None
     source: Optional[str] = "manual"
+    unit_price: Optional[float] = None
+    fee: Optional[float] = None
+    fee_currency: Optional[str] = None
 
 class TransactionBatch(BaseModel):
     account_id: int
@@ -39,6 +46,8 @@ class TransactionUpdate(BaseModel):
     type: Optional[str] = None
     category: Optional[str] = None
     unit_price: Optional[float] = None
+    fee: Optional[float] = None
+    fee_currency: Optional[str] = None
 
 
 def _apply_unit_price(conn, account_id: int, currency: str, tx_type: str, amount: float, unit_price: float):
@@ -48,7 +57,7 @@ def _apply_unit_price(conn, account_id: int, currency: str, tx_type: str, amount
         return None
 
     pos = conn.execute(
-        "SELECT id, quantity, avg_price FROM positions WHERE account_id = ? AND asset = ? AND end_date IS NULL",
+        "SELECT id, quantity, avg_price FROM positions WHERE account_id = ? AND asset = ? AND (end_date IS NULL OR end_date = '')",
         (account_id, asset)
     ).fetchone()
 
@@ -73,8 +82,31 @@ def _apply_unit_price(conn, account_id: int, currency: str, tx_type: str, amount
     return realized_pnl
 
 
+@router.get("/export")
+def export_transactions(account_id: Optional[int] = None):
+    from fastapi.responses import StreamingResponse
+    import csv, io
+    conn = get_db()
+    params = []
+    where = "WHERE 1=1"
+    if account_id:
+        where += " AND t.account_id = ?"
+        params.append(account_id)
+    rows = conn.execute(
+        f"SELECT t.date, a.name as account_name, t.description, t.amount, t.currency, t.type, t.category, t.unit_price, t.realized_pnl, t.fee, t.fee_currency, t.source FROM transactions t JOIN accounts a ON t.account_id = a.id {where} ORDER BY t.date DESC",
+        params
+    ).fetchall()
+    conn.close()
+    output = io.StringIO()
+    writer = csv.writer(output)
+    writer.writerow(['fecha', 'cuenta', 'descripcion', 'monto', 'moneda', 'tipo', 'categoria', 'precio_unit', 'pnl_realizado', 'comision', 'moneda_comision', 'fuente'])
+    for r in rows:
+        writer.writerow([r['date'], r['account_name'], r['description'] or '', r['amount'], r['currency'], r['type'], r['category'] or '', r['unit_price'] or '', r['realized_pnl'] or '', r['fee'] or '', r['fee_currency'] or '', r['source'] or ''])
+    output.seek(0)
+    return StreamingResponse(iter([output.getvalue()]), media_type="text/csv", headers={"Content-Disposition": "attachment; filename=movimientos.csv"})
+
 @router.get("")
-def list_transactions(account_id: Optional[int] = None, limit: int = 200):
+def list_transactions(account_id: Optional[int] = None, limit: int = 500):
     conn = get_db()
     if account_id:
         rows = conn.execute(
@@ -95,23 +127,40 @@ def create_transaction(data: TransactionIn):
     realized_pnl = None
     if data.unit_price and data.type in ('income', 'expense'):
         realized_pnl = _apply_unit_price(conn, data.account_id, data.currency, data.type, data.amount, data.unit_price)
+    fee_currency = data.fee_currency.upper() if data.fee_currency else None
     cur = conn.execute(
-        "INSERT INTO transactions (account_id, date, description, amount, currency, type, category, source, unit_price, realized_pnl) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-        (data.account_id, data.date, data.description, data.amount, data.currency.upper(), data.type, data.category, data.source, data.unit_price, realized_pnl)
+        "INSERT INTO transactions (account_id, date, description, amount, currency, type, category, source, unit_price, realized_pnl, fee, fee_currency) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        (data.account_id, data.date, data.description, data.amount, data.currency.upper(), data.type, data.category, data.source, data.unit_price, realized_pnl, data.fee, fee_currency)
     )
     conn.commit()
     row = conn.execute("SELECT * FROM transactions WHERE id = ?", (cur.lastrowid,)).fetchone()
     conn.close()
     return dict(row)
 
+import re as _re
+_DATE_RE = _re.compile(r'^\d{4}-\d{2}-\d{2}$')
+
+def _sanitize_date(d):
+    from datetime import date
+    if d and _DATE_RE.match(str(d)):
+        return d
+    return date.today().isoformat()
+
 @router.post("/batch", status_code=201)
 def create_transactions_batch(data: TransactionBatch):
     conn = get_db()
     inserted = []
     for t in data.transactions:
+        tx_type = t.type if t.type in VALID_TYPES else 'expense'
+        currency = t.currency.upper()
+        fee_currency = t.fee_currency.upper() if t.fee_currency else None
+        tx_date = _sanitize_date(t.date)
+        realized_pnl = None
+        if t.unit_price and tx_type in ('income', 'expense'):
+            realized_pnl = _apply_unit_price(conn, data.account_id, currency, tx_type, t.amount, t.unit_price)
         cur = conn.execute(
-            "INSERT INTO transactions (account_id, date, description, amount, currency, type, category, source) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-            (data.account_id, t.date, t.description, t.amount, t.currency.upper(), t.type, t.category, t.source or "manual")
+            "INSERT INTO transactions (account_id, date, description, amount, currency, type, category, source, unit_price, realized_pnl, fee, fee_currency) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (data.account_id, tx_date, t.description, t.amount, currency, tx_type, t.category, t.source or "manual", t.unit_price, realized_pnl, t.fee, fee_currency)
         )
         inserted.append(cur.lastrowid)
     conn.commit()
@@ -133,6 +182,22 @@ def update_transaction(transaction_id: int, data: TransactionUpdate):
         raise HTTPException(400, "No fields to update")
     if "currency" in fields:
         fields["currency"] = fields["currency"].upper()
+    if "fee_currency" in fields and fields["fee_currency"]:
+        fields["fee_currency"] = fields["fee_currency"].upper()
+
+    # Recalculate realized_pnl if unit_price is involved
+    existing = conn.execute("SELECT * FROM transactions WHERE id = ?", (transaction_id,)).fetchone()
+    if existing:
+        tx = dict(existing)
+        unit_price = fields.get("unit_price", tx.get("unit_price"))
+        tx_type    = fields.get("type",       tx.get("type"))
+        currency   = fields.get("currency",   tx.get("currency"))
+        amount     = fields.get("amount",     tx.get("amount"))
+        account_id = fields.get("account_id", tx.get("account_id"))
+        if unit_price and tx_type in ("income", "expense"):
+            realized_pnl = _apply_unit_price(conn, account_id, currency, tx_type, amount, unit_price)
+            fields["realized_pnl"] = realized_pnl
+
     sets = ", ".join(f"{k} = ?" for k in fields)
     values = list(fields.values())
     conn.execute(f"UPDATE transactions SET {sets} WHERE id = ?", (*values, transaction_id))
