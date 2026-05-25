@@ -6,8 +6,8 @@ Write-Host ""
 foreach ($port in $ports) {
     $conn = Get-NetTCPConnection -LocalPort $port -ErrorAction SilentlyContinue
     if ($conn) {
-        $pid = $conn.OwningProcess | Select-Object -First 1
-        Stop-Process -Id $pid -Force -ErrorAction SilentlyContinue
+        $procId = $conn.OwningProcess | Select-Object -First 1
+        Stop-Process -Id $procId -Force -ErrorAction SilentlyContinue
         Write-Host "  Puerto $port liberado" -ForegroundColor Green
     } else {
         Write-Host "  Puerto $port ya estaba libre" -ForegroundColor Gray
