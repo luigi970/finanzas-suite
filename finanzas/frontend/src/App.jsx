@@ -712,7 +712,7 @@ function PatrimonioTab({ positions, transactions = [], maximosUrl = MAXIMOS_ONLI
     } finally {
       setLoading(false)
     }
-  }, [positions])
+  }, [positions, maximosUrl])
 
   useEffect(() => { if (positions.length) load() }, [load, positions])
 
