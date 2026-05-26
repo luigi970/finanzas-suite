@@ -192,7 +192,12 @@ def _short_ai_rec(row: dict, groq_key: str) -> str:
 
 
 def _send_ntfy(topic: str, title: str, body: str, click_url: str, priority: str, tag: str):
-    headers = {"Title": title, "Priority": priority, "Tags": tag}
+    from urllib.parse import quote
+    headers = {
+        "Title": quote(title),
+        "Priority": priority,
+        "Tags": tag,
+    }
     if click_url:
         headers["Click"] = click_url
     try:
