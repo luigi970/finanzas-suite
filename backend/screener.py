@@ -636,22 +636,20 @@ def prime_to_signal(direction: str, long_score: int, short_score: int) -> str:
 
 # ── Screener ──────────────────────────────────────────────────────────────────
 
-def _yf_download(tickers: list[str], period: str = "1y", chunk_size: int = 100, workers: int = 4) -> pd.DataFrame:
-    """Download yfinance data in parallel chunks to avoid slow single-request downloads for large lists."""
+def _yf_download(tickers: list[str], period: str = "1y", chunk_size: int = 100) -> pd.DataFrame:
+    """Download yfinance data sequentially in chunks to avoid Yahoo Finance rate limiting."""
+    import time
     chunks = [tickers[i:i + chunk_size] for i in range(0, len(tickers), chunk_size)]
-
-    def fetch(chunk):
+    parts = []
+    for chunk in chunks:
         df = yf.download(" ".join(chunk), period=period, progress=False, auto_adjust=True)
         if df.empty:
-            return None
+            continue
         if not isinstance(df.columns, pd.MultiIndex):
             df.columns = pd.MultiIndex.from_tuples([(col, chunk[0]) for col in df.columns])
-        return df
-
-    with concurrent.futures.ThreadPoolExecutor(max_workers=min(workers, len(chunks))) as ex:
-        parts = list(ex.map(fetch, chunks))
-
-    parts = [p for p in parts if p is not None]
+        parts.append(df)
+        if len(chunks) > 1:
+            time.sleep(0.5)
     return pd.concat(parts, axis=1) if parts else pd.DataFrame()
 
 
