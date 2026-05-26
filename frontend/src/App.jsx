@@ -1578,6 +1578,15 @@ export default function App() {
     if (status === "ready") fetchStocks();
   }, [signalFilter, status, fetchStocks]);
 
+  // Deep link: ?ticker=NVDA abre el modal directamente (viene de alertas ntfy)
+  useEffect(() => {
+    if (stocks.length === 0) return;
+    const param = new URLSearchParams(window.location.search).get("ticker");
+    if (!param || selectedTicker) return;
+    const found = stocks.find(s => s.ticker === param.toUpperCase());
+    if (found) setSelectedTicker(found);
+  }, [stocks]);
+
   const handleRefresh = async () => {
     setLoading(true);
     await fetch(`${API_BASE}/api/refresh`, {
