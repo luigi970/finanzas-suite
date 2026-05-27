@@ -134,25 +134,30 @@ def create_transaction(data: TransactionIn):
     )
     conn.commit()
 
-    # Crear posición si no existe para este activo
+    # Crear o actualizar posición para este activo
     from routers.positions import guess_asset_type
     asset = data.currency.upper()
+    qty_row = conn.execute("""
+        SELECT SUM(CASE WHEN type='income' THEN amount ELSE -amount END) as qty
+        FROM transactions WHERE account_id = ? AND currency = ?
+    """, (data.account_id, asset)).fetchone()
+    qty = round(qty_row['qty'] or 0, 8)
+
     existing = conn.execute(
-        "SELECT id FROM positions WHERE account_id = ? AND asset = ? AND (end_date IS NULL OR end_date = '')",
+        "SELECT id, asset_type FROM positions WHERE account_id = ? AND asset = ? AND (end_date IS NULL OR end_date = '')",
         (data.account_id, asset)
     ).fetchone()
-    if not existing:
-        qty_row = conn.execute("""
-            SELECT SUM(CASE WHEN type='income' THEN amount ELSE -amount END) as qty
-            FROM transactions WHERE account_id = ? AND currency = ?
-        """, (data.account_id, asset)).fetchone()
-        qty = round(qty_row['qty'] or 0, 8)
-        if qty > 0:
-            conn.execute(
-                "INSERT INTO positions (account_id, asset, asset_type, quantity) VALUES (?, ?, ?, ?)",
-                (data.account_id, asset, guess_asset_type(asset), qty)
-            )
-            conn.commit()
+    if existing:
+        conn.execute(
+            "UPDATE positions SET quantity = ?, updated_at = datetime('now') WHERE id = ?",
+            (qty, existing['id'])
+        )
+    elif qty > 0:
+        conn.execute(
+            "INSERT INTO positions (account_id, asset, asset_type, quantity) VALUES (?, ?, ?, ?)",
+            (data.account_id, asset, guess_asset_type(asset), qty)
+        )
+    conn.commit()
 
     row = conn.execute("SELECT * FROM transactions WHERE id = ?", (cur.lastrowid,)).fetchone()
     conn.close()
@@ -186,25 +191,29 @@ def create_transactions_batch(data: TransactionBatch):
         inserted.append(cur.lastrowid)
     conn.commit()
 
-    # Crear posiciones faltantes para los activos importados
+    # Crear o actualizar posiciones para los activos importados
     from routers.positions import guess_asset_type
     currencies = {t.currency.upper() for t in data.transactions}
     for asset in currencies:
+        qty_row = conn.execute("""
+            SELECT SUM(CASE WHEN type='income' THEN amount ELSE -amount END) as qty
+            FROM transactions WHERE account_id = ? AND currency = ?
+        """, (data.account_id, asset)).fetchone()
+        qty = round(qty_row['qty'] or 0, 8)
         existing = conn.execute(
             "SELECT id FROM positions WHERE account_id = ? AND asset = ? AND (end_date IS NULL OR end_date = '')",
             (data.account_id, asset)
         ).fetchone()
-        if not existing:
-            qty_row = conn.execute("""
-                SELECT SUM(CASE WHEN type='income' THEN amount ELSE -amount END) as qty
-                FROM transactions WHERE account_id = ? AND currency = ?
-            """, (data.account_id, asset)).fetchone()
-            qty = round(qty_row['qty'] or 0, 8)
-            if qty > 0:
-                conn.execute(
-                    "INSERT INTO positions (account_id, asset, asset_type, quantity) VALUES (?, ?, ?, ?)",
-                    (data.account_id, asset, guess_asset_type(asset), qty)
-                )
+        if existing:
+            conn.execute(
+                "UPDATE positions SET quantity = ?, updated_at = datetime('now') WHERE id = ?",
+                (qty, existing['id'])
+            )
+        elif qty > 0:
+            conn.execute(
+                "INSERT INTO positions (account_id, asset, asset_type, quantity) VALUES (?, ?, ?, ?)",
+                (data.account_id, asset, guess_asset_type(asset), qty)
+            )
     conn.commit()
     conn.close()
     return {"inserted": len(inserted), "ids": inserted}
