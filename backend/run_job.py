@@ -254,7 +254,7 @@ def main():
             sys.exit(1)
         _send_ntfy(
             ntfy_topic,
-            title="maximos — prueba de notificacion",
+            title="maximos - prueba de notificacion",
             body="Si ves esto, las alertas funcionan correctamente.",
             click_url=pages_url or "",
             priority="default",
