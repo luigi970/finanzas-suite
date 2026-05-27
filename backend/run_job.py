@@ -218,7 +218,7 @@ def send_alerts(prev: dict, results: list, groq_key: str, ntfy_topic: str, pages
     for row, old_sig, new_sig in changes:
         ticker = row["ticker"]
         ai_text = _short_ai_rec(row, groq_key)
-        arrow = "↑" if SIGNAL_RANK.get(new_sig, 2) > SIGNAL_RANK.get(old_sig, 2) else "↓"
+        arrow = "(+)" if SIGNAL_RANK.get(new_sig, 2) > SIGNAL_RANK.get(old_sig, 2) else "(-)"
         title = f"{ticker}: {new_sig.replace('_', ' ')} {arrow}"
         lines = [
             f"{SIGNAL_EMOJI.get(new_sig, '⚪')} {old_sig} → {new_sig} | Score {row['score']} | {str(row.get('zone','?')).upper()}",
