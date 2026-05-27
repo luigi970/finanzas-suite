@@ -229,7 +229,7 @@ def send_alerts(prev: dict, results: list, groq_key: str, ntfy_topic: str, pages
         tp1 = row.get("tp1")
         if sl and tp1:
             lines.append(f"SL {sl} | TP1 {tp1}")
-        click_url = f"{pages_url}/?ticker={ticker}" if pages_url else ""
+        click_url = f"{pages_url}/api/ai-alert?ticker={ticker}" if pages_url else ""
         priority = "high" if "fuerte" in new_sig else "default"
         _send_ntfy(ntfy_topic, title, "\n".join(lines), click_url, priority, SIGNAL_TAGS.get(new_sig, "white_circle"))
         print(f"[ntfy] {ticker}: {old_sig} → {new_sig}")

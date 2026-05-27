@@ -371,4 +371,107 @@ async def on_fetch(request, env):
         except Exception as e:
             return _j({"dollar": [], "error": str(e)})
 
+    # GET /api/ai-alert?ticker=NVDA — página HTML con recomendación IA (para alertas ntfy)
+    if method == "GET" and path == "/api/ai-alert":
+        ticker = qs.get("ticker", "").upper()
+        if not ticker:
+            return Response("Falta ticker", status=400)
+
+        def _html(content: str, status: int = 200) -> Response:
+            return Response(content, status=status, headers={"Content-Type": "text/html; charset=utf-8"})
+
+        # Buscar ticker en D1 (en cualquier lista)
+        ticker_data = None
+        try:
+            result = await db.prepare(
+                "SELECT data FROM screener_results WHERE ticker = ? ORDER BY score DESC LIMIT 1"
+            ).bind(ticker).all()
+            for row in result.results:
+                ticker_data = json.loads(row.to_py()["data"])
+                break
+        except Exception as e:
+            return _html(f"<p>Error buscando ticker: {e}</p>", 500)
+
+        if not ticker_data:
+            return _html(f"<p>Ticker {ticker} no encontrado.</p>", 404)
+
+        # Llamar a IA
+        from providers.prompt import build_prompt
+        cf_ai     = getattr(env, "AI", None)
+        groq_key  = getattr(env, "GROQ_API_KEY", None)
+        gemini_key = getattr(env, "GOOGLE_API_KEY", None)
+        recommendation = "No se pudo obtener la recomendación."
+        for provider, arg in [(cf_analyze, cf_ai), (groq_analyze, groq_key), (gemini_analyze, gemini_key)]:
+            if not arg:
+                continue
+            try:
+                recommendation = await provider(ticker_data, arg)
+                break
+            except Exception:
+                continue
+
+        signal = ticker_data.get("signal", "neutral")
+        score  = ticker_data.get("score", 0)
+        zone   = (ticker_data.get("zone") or "").upper()
+        price  = ticker_data.get("price", 0)
+        sl     = ticker_data.get("sl")
+        tp1    = ticker_data.get("tp1")
+        tp2    = ticker_data.get("tp2")
+
+        signal_label = signal.replace("_", " ").upper()
+        signal_colors = {
+            "compra_fuerte": ("#166534", "#86efac"),
+            "compra":        ("#14532d", "#bbf7d0"),
+            "neutral":       ("#374151", "#d1d5db"),
+            "venta":         ("#7c2d12", "#fdba74"),
+            "venta_fuerte":  ("#7f1d1d", "#fca5a5"),
+        }
+        bg_color, text_color = signal_colors.get(signal, ("#374151", "#d1d5db"))
+
+        sl_tp_html = ""
+        if sl and tp1:
+            sl_tp_html = f"""
+            <div style="display:flex;gap:1rem;margin-top:1rem;font-size:0.9rem;">
+              <span style="color:#f87171;">SL ${sl}</span>
+              <span style="color:#4ade80;">TP1 ${tp1}</span>
+              {"<span style='color:#4ade80;'>TP2 $" + str(tp2) + "</span>" if tp2 else ""}
+            </div>"""
+
+        html = f"""<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{ticker} - maximos</title>
+<style>
+  * {{ box-sizing: border-box; margin: 0; padding: 0; }}
+  body {{ font-family: system-ui, -apple-system, sans-serif; background: #0f172a; color: #e2e8f0;
+          padding: 1.5rem; max-width: 480px; margin: 0 auto; }}
+  .header {{ border-top: 3px solid #f59e0b; padding-top: 1rem; margin-bottom: 1.25rem; }}
+  .ticker {{ font-size: 2rem; font-weight: 700; color: #f59e0b; }}
+  .price  {{ font-size: 1rem; color: #94a3b8; margin-top: 0.15rem; }}
+  .badge  {{ display: inline-block; padding: 0.3rem 0.9rem; border-radius: 999px;
+             font-size: 0.8rem; font-weight: 700; margin: 0.75rem 0;
+             background: {bg_color}; color: {text_color}; letter-spacing: 0.05em; }}
+  .meta   {{ font-size: 0.8rem; color: #64748b; margin-bottom: 1rem; }}
+  .rec    {{ line-height: 1.7; color: #cbd5e1; font-size: 0.95rem; }}
+  .footer {{ margin-top: 1.5rem; padding-top: 1rem; border-top: 1px solid #1e293b;
+             font-size: 0.75rem; color: #475569; text-align: center; }}
+</style>
+</head>
+<body>
+  <div class="header">
+    <div class="ticker">{ticker}</div>
+    <div class="price">${price}</div>
+  </div>
+  <div class="badge">{signal_label}</div>
+  <div class="meta">Score {score} &middot; {zone}</div>
+  <div class="rec">{recommendation}</div>
+  {sl_tp_html}
+  <div class="footer">maximos &middot; {ticker}</div>
+</body>
+</html>"""
+
+        return _html(html)
+
     return _j({"error": "not found"}, status=404)
