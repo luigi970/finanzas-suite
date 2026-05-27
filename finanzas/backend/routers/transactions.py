@@ -50,36 +50,58 @@ class TransactionUpdate(BaseModel):
     fee_currency: Optional[str] = None
 
 
-def _apply_unit_price(conn, account_id: int, currency: str, tx_type: str, amount: float, unit_price: float):
-    """Update avg_price on income; calculate and return realized_pnl on expense."""
-    asset = currency.upper()
-    if asset in FIAT_CURRENCIES or unit_price <= 0:
+def _calc_realized_pnl(conn, account_id: int, asset: str, unit_price: float, amount: float):
+    """Calcula P&L realizado para un egreso usando el avg_price actual de la posición."""
+    if asset in FIAT_CURRENCIES or not unit_price or unit_price <= 0:
         return None
+    pos = conn.execute(
+        "SELECT avg_price FROM positions WHERE account_id = ? AND asset = ? AND (end_date IS NULL OR end_date = '')",
+        (account_id, asset)
+    ).fetchone()
+    if pos and pos['avg_price']:
+        return round((unit_price - pos['avg_price']) * amount, 2)
+    return None
+
+
+def _sync_position(conn, account_id: int, asset: str):
+    """Recalcula quantity y avg_price de la posición desde todos los movimientos."""
+    from routers.positions import guess_asset_type
+
+    qty_row = conn.execute("""
+        SELECT SUM(CASE WHEN type='income' THEN amount ELSE -amount END) as qty
+        FROM transactions WHERE account_id = ? AND currency = ?
+    """, (account_id, asset)).fetchone()
+    qty = round(qty_row['qty'] or 0, 8)
+
+    avg_row = conn.execute("""
+        SELECT SUM(amount * unit_price) / NULLIF(SUM(amount), 0) as avg_price
+        FROM transactions
+        WHERE account_id = ? AND currency = ? AND type = 'income'
+          AND unit_price IS NOT NULL AND unit_price > 0
+    """, (account_id, asset)).fetchone()
+    avg_price = round(float(avg_row['avg_price']), 8) if avg_row and avg_row['avg_price'] else None
 
     pos = conn.execute(
-        "SELECT id, quantity, avg_price FROM positions WHERE account_id = ? AND asset = ? AND (end_date IS NULL OR end_date = '')",
+        "SELECT id FROM positions WHERE account_id = ? AND asset = ? AND (end_date IS NULL OR end_date = '')",
         (account_id, asset)
     ).fetchone()
 
-    realized_pnl = None
-
-    if tx_type == 'income':
-        if pos:
-            old_qty = pos['quantity'] or 0
-            old_avg = pos['avg_price'] or unit_price
-            new_total_qty = old_qty + amount
-            new_avg = (old_qty * old_avg + amount * unit_price) / new_total_qty if new_total_qty > 0 else unit_price
+    if pos:
+        if avg_price is not None:
             conn.execute(
-                "UPDATE positions SET avg_price = ?, updated_at = datetime('now') WHERE id = ?",
-                (round(new_avg, 8), pos['id'])
+                "UPDATE positions SET quantity = ?, avg_price = ?, updated_at = datetime('now') WHERE id = ?",
+                (qty, avg_price, pos['id'])
             )
-        # If no position yet, it will be created manually or via sync — avg_price will be set then
-
-    elif tx_type == 'expense':
-        if pos and pos['avg_price'] is not None:
-            realized_pnl = round((unit_price - pos['avg_price']) * amount, 2)
-
-    return realized_pnl
+        else:
+            conn.execute(
+                "UPDATE positions SET quantity = ?, updated_at = datetime('now') WHERE id = ?",
+                (qty, pos['id'])
+            )
+    elif qty > 0:
+        conn.execute(
+            "INSERT INTO positions (account_id, asset, asset_type, quantity, avg_price) VALUES (?, ?, ?, ?, ?)",
+            (account_id, asset, guess_asset_type(asset), qty, avg_price)
+        )
 
 
 @router.get("/export")
@@ -124,41 +146,18 @@ def list_transactions(account_id: Optional[int] = None, limit: int = 500):
 @router.post("", status_code=201)
 def create_transaction(data: TransactionIn):
     conn = get_db()
+    asset = data.currency.upper()
     realized_pnl = None
-    if data.unit_price and data.type in ('income', 'expense'):
-        realized_pnl = _apply_unit_price(conn, data.account_id, data.currency, data.type, data.amount, data.unit_price)
+    if data.unit_price and data.type == 'expense':
+        realized_pnl = _calc_realized_pnl(conn, data.account_id, asset, data.unit_price, data.amount)
     fee_currency = data.fee_currency.upper() if data.fee_currency else None
     cur = conn.execute(
         "INSERT INTO transactions (account_id, date, description, amount, currency, type, category, source, unit_price, realized_pnl, fee, fee_currency) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-        (data.account_id, data.date, data.description, data.amount, data.currency.upper(), data.type, data.category, data.source, data.unit_price, realized_pnl, data.fee, fee_currency)
+        (data.account_id, data.date, data.description, data.amount, asset, data.type, data.category, data.source, data.unit_price, realized_pnl, data.fee, fee_currency)
     )
     conn.commit()
-
-    # Crear o actualizar posición para este activo
-    from routers.positions import guess_asset_type
-    asset = data.currency.upper()
-    qty_row = conn.execute("""
-        SELECT SUM(CASE WHEN type='income' THEN amount ELSE -amount END) as qty
-        FROM transactions WHERE account_id = ? AND currency = ?
-    """, (data.account_id, asset)).fetchone()
-    qty = round(qty_row['qty'] or 0, 8)
-
-    existing = conn.execute(
-        "SELECT id, asset_type FROM positions WHERE account_id = ? AND asset = ? AND (end_date IS NULL OR end_date = '')",
-        (data.account_id, asset)
-    ).fetchone()
-    if existing:
-        conn.execute(
-            "UPDATE positions SET quantity = ?, updated_at = datetime('now') WHERE id = ?",
-            (qty, existing['id'])
-        )
-    elif qty > 0:
-        conn.execute(
-            "INSERT INTO positions (account_id, asset, asset_type, quantity) VALUES (?, ?, ?, ?)",
-            (data.account_id, asset, guess_asset_type(asset), qty)
-        )
+    _sync_position(conn, data.account_id, asset)
     conn.commit()
-
     row = conn.execute("SELECT * FROM transactions WHERE id = ?", (cur.lastrowid,)).fetchone()
     conn.close()
     return dict(row)
@@ -182,8 +181,8 @@ def create_transactions_batch(data: TransactionBatch):
         fee_currency = t.fee_currency.upper() if t.fee_currency else None
         tx_date = _sanitize_date(t.date)
         realized_pnl = None
-        if t.unit_price and tx_type in ('income', 'expense'):
-            realized_pnl = _apply_unit_price(conn, data.account_id, currency, tx_type, t.amount, t.unit_price)
+        if t.unit_price and tx_type == 'expense':
+            realized_pnl = _calc_realized_pnl(conn, data.account_id, currency, t.unit_price, t.amount)
         cur = conn.execute(
             "INSERT INTO transactions (account_id, date, description, amount, currency, type, category, source, unit_price, realized_pnl, fee, fee_currency) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (data.account_id, tx_date, t.description, t.amount, currency, tx_type, t.category, t.source or "manual", t.unit_price, realized_pnl, t.fee, fee_currency)
@@ -191,29 +190,10 @@ def create_transactions_batch(data: TransactionBatch):
         inserted.append(cur.lastrowid)
     conn.commit()
 
-    # Crear o actualizar posiciones para los activos importados
-    from routers.positions import guess_asset_type
+    # Recalcular posiciones (qty y avg_price) desde todos los movimientos
     currencies = {t.currency.upper() for t in data.transactions}
     for asset in currencies:
-        qty_row = conn.execute("""
-            SELECT SUM(CASE WHEN type='income' THEN amount ELSE -amount END) as qty
-            FROM transactions WHERE account_id = ? AND currency = ?
-        """, (data.account_id, asset)).fetchone()
-        qty = round(qty_row['qty'] or 0, 8)
-        existing = conn.execute(
-            "SELECT id FROM positions WHERE account_id = ? AND asset = ? AND (end_date IS NULL OR end_date = '')",
-            (data.account_id, asset)
-        ).fetchone()
-        if existing:
-            conn.execute(
-                "UPDATE positions SET quantity = ?, updated_at = datetime('now') WHERE id = ?",
-                (qty, existing['id'])
-            )
-        elif qty > 0:
-            conn.execute(
-                "INSERT INTO positions (account_id, asset, asset_type, quantity) VALUES (?, ?, ?, ?)",
-                (data.account_id, asset, guess_asset_type(asset), qty)
-            )
+        _sync_position(conn, data.account_id, asset)
     conn.commit()
     conn.close()
     return {"inserted": len(inserted), "ids": inserted}
@@ -236,27 +216,26 @@ def update_transaction(transaction_id: int, data: TransactionUpdate):
     if "fee_currency" in fields and fields["fee_currency"]:
         fields["fee_currency"] = fields["fee_currency"].upper()
 
-    # Recalculate realized_pnl if unit_price is involved
     existing = conn.execute("SELECT * FROM transactions WHERE id = ?", (transaction_id,)).fetchone()
-    if existing:
-        tx = dict(existing)
-        unit_price = fields.get("unit_price", tx.get("unit_price"))
-        tx_type    = fields.get("type",       tx.get("type"))
-        currency   = fields.get("currency",   tx.get("currency"))
-        amount     = fields.get("amount",     tx.get("amount"))
-        account_id = fields.get("account_id", tx.get("account_id"))
-        if unit_price and tx_type in ("income", "expense"):
-            realized_pnl = _apply_unit_price(conn, account_id, currency, tx_type, amount, unit_price)
-            fields["realized_pnl"] = realized_pnl
+    if not existing:
+        conn.close()
+        raise HTTPException(404, "Transaction not found")
+    tx = dict(existing)
 
     sets = ", ".join(f"{k} = ?" for k in fields)
     values = list(fields.values())
     conn.execute(f"UPDATE transactions SET {sets} WHERE id = ?", (*values, transaction_id))
     conn.commit()
+
+    # Resync posición afectada
+    account_id = tx.get("account_id")
+    asset = fields.get("currency", tx.get("currency", "")).upper()
+    if account_id and asset:
+        _sync_position(conn, account_id, asset)
+        conn.commit()
+
     row = conn.execute("SELECT * FROM transactions WHERE id = ?", (transaction_id,)).fetchone()
     conn.close()
-    if not row:
-        raise HTTPException(404, "Transaction not found")
     return dict(row)
 
 @router.get("/summary")
