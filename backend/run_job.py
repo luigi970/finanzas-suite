@@ -194,7 +194,7 @@ def _short_ai_rec(row: dict, groq_key: str) -> str:
 def _send_ntfy(topic: str, title: str, body: str, click_url: str, priority: str, tag: str):
     from urllib.parse import quote
     headers = {
-        "Title": quote(title),
+        "Title": quote(title, safe=" .,:/!?-_()[]"),
         "Priority": priority,
         "Tags": tag,
     }
