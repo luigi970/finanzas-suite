@@ -243,7 +243,25 @@ def main():
     parser.add_argument("--list", default="sp500", dest="list_id")
     parser.add_argument("--crypto-limit", type=int, default=20)
     parser.add_argument("--custom-tickers", default="", dest="custom_tickers")
+    parser.add_argument("--test-ntfy", action="store_true", dest="test_ntfy")
     args = parser.parse_args()
+
+    if args.test_ntfy:
+        ntfy_topic = os.environ.get("NTFY_TOPIC", "")
+        pages_url = os.environ.get("PAGES_URL", "")
+        if not ntfy_topic:
+            print("ERROR: NTFY_TOPIC no configurado", file=sys.stderr)
+            sys.exit(1)
+        _send_ntfy(
+            ntfy_topic,
+            title="maximos — prueba de notificacion",
+            body="Si ves esto, las alertas funcionan correctamente.",
+            click_url=pages_url or "",
+            priority="default",
+            tag="white_check_mark",
+        )
+        print(f"[ntfy] Notificación de prueba enviada a topic '{ntfy_topic}'")
+        sys.exit(0)
 
     token = os.environ.get("CF_API_TOKEN") or os.environ.get("CLOUDFLARE_API_TOKEN")
     account_id = os.environ.get("CF_ACCOUNT_ID") or os.environ.get("CLOUDFLARE_ACCOUNT_ID")

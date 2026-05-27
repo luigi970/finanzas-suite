@@ -16,6 +16,10 @@ on:
         description: "Máximo de criptos (si list_id=crypto)"
         required: false
         default: "20"
+      test_ntfy:
+        description: "Enviar notificación de prueba a ntfy (sin correr screener)"
+        required: false
+        default: "false"
 
 jobs:
   screener:
@@ -76,7 +80,11 @@ jobs:
           PAGES_URL: ${{ secrets.PAGES_URL }}
         run: |
           cd backend
-          python run_job.py --list ${{ matrix.list_id }} --crypto-limit ${{ steps.list.outputs.crypto_limit }}
+          if [ "${{ github.event.inputs.test_ntfy }}" = "true" ]; then
+            python run_job.py --test-ntfy
+          else
+            python run_job.py --list ${{ matrix.list_id }} --crypto-limit ${{ steps.list.outputs.crypto_limit }}
+          fi
 
   screener-custom:
     runs-on: ubuntu-latest
