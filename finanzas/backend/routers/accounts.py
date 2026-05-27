@@ -7,7 +7,7 @@ router = APIRouter(prefix="/api/accounts", tags=["accounts"])
 
 class AccountIn(BaseModel):
     name: str
-    type: str   # bank | crypto | broker | cash | other
+    type: str   # bank | exchange | wallet_crypto | wallet | broker | cash | other
     color: Optional[str] = "#6366f1"
 
 class AccountUpdate(BaseModel):

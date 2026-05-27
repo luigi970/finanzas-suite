@@ -34,12 +34,13 @@ async function api(path, opts = {}) {
 }
 
 const ACCOUNT_TYPES = [
-  { value: 'bank',   label: 'Banco',    icon: '🏦' },
-  { value: 'crypto', label: 'Crypto',   icon: '₿'  },
-  { value: 'wallet', label: 'Wallet',   icon: '👛' },
-  { value: 'broker', label: 'Broker',   icon: '📈' },
-  { value: 'cash',   label: 'Efectivo', icon: '💵' },
-  { value: 'other',  label: 'Otro',     icon: '📁' },
+  { value: 'bank',          label: 'Banco',         icon: '🏦' },
+  { value: 'exchange',      label: 'Exchange',       icon: '₿'  },
+  { value: 'wallet_crypto', label: 'Wallet Crypto',  icon: '🔐' },
+  { value: 'wallet',        label: 'Wallet Fiat',    icon: '👛' },
+  { value: 'broker',        label: 'Broker',         icon: '📈' },
+  { value: 'cash',          label: 'Efectivo',       icon: '💵' },
+  { value: 'other',         label: 'Otro',           icon: '📁' },
 ]
 
 const ASSET_TYPES = [
