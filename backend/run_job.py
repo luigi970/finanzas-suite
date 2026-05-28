@@ -136,106 +136,6 @@ def upsert_result(token, account_id, db_id, run_id: int, list_id: str, row: dict
     )
 
 
-# ── ntfy alerts ───────────────────────────────────────────────────────────────
-
-SIGNAL_RANK = {"compra_fuerte": 4, "compra": 3, "neutral": 2, "venta": 1, "venta_fuerte": 0}
-SIGNAL_EMOJI = {"compra_fuerte": "🟢", "compra": "🟡", "neutral": "⚪", "venta": "🟠", "venta_fuerte": "🔴"}
-SIGNAL_TAGS  = {"compra_fuerte": "chart_increasing", "compra": "chart_with_upwards_trend",
-                "venta_fuerte": "chart_decreasing", "venta": "chart_with_downwards_trend", "neutral": "white_circle"}
-
-
-def _fetch_prev_signals(token, account_id, db_id, list_id) -> dict:
-    try:
-        result = d1_query(token, account_id, db_id,
-                          "SELECT ticker, signal, score FROM screener_results WHERE list_id = ?",
-                          [list_id])
-        rows = result[0]["results"]
-        return {r["ticker"]: r["signal"] for r in rows}
-    except Exception:
-        return {}
-
-
-def _is_notable(old: str, new: str) -> bool:
-    if old == new:
-        return False
-    return (
-        (old == "neutral" and new in ("compra", "compra_fuerte", "venta", "venta_fuerte")) or
-        (old == "compra"  and new == "compra_fuerte") or
-        (old == "venta"   and new == "venta_fuerte") or
-        (new == "neutral" and old in ("compra", "compra_fuerte", "venta", "venta_fuerte"))
-    )
-
-
-def _short_ai_rec(row: dict, groq_key: str) -> str:
-    if not groq_key:
-        return ""
-    try:
-        prompt = (
-            f"Sos un analista técnico. Respondé en máximo 2 oraciones en español rioplatense, sin markdown.\n"
-            f"Ticker: {row['ticker']} | Señal: {row['signal']} | Score: {row['score']} | "
-            f"Zona: {row.get('zone','?')} | RSI: {row.get('rsi','?')} | "
-            f"Vol ratio: {row.get('vol_ratio','?')} | SL: {row.get('sl','?')} | TP1: {row.get('tp1','?')}\n"
-            f"Explicá brevemente por qué cambió la señal y qué debería hacer el trader."
-        )
-        resp = requests.post(
-            "https://api.groq.com/openai/v1/chat/completions",
-            headers={"Authorization": f"Bearer {groq_key}", "Content-Type": "application/json"},
-            json={"model": "llama-3.3-70b-versatile", "messages": [{"role": "user", "content": prompt}],
-                  "max_tokens": 100, "temperature": 0.3},
-            timeout=15,
-        )
-        if resp.ok:
-            return resp.json()["choices"][0]["message"]["content"].strip()
-    except Exception as e:
-        print(f"[ntfy] AI error: {e}", file=sys.stderr)
-    return ""
-
-
-def _send_ntfy(topic: str, title: str, body: str, click_url: str, priority: str, tag: str):
-    from urllib.parse import quote
-    headers = {
-        "Title": quote(title, safe=" .,:/!?-_()[]"),
-        "Priority": priority,
-        "Tags": tag,
-    }
-    if click_url:
-        headers["Click"] = click_url
-    try:
-        requests.post(f"https://ntfy.sh/{topic}", data=body.encode("utf-8"), headers=headers, timeout=10)
-    except Exception as e:
-        print(f"[ntfy] Error enviando: {e}", file=sys.stderr)
-
-
-def send_alerts(prev: dict, results: list, groq_key: str, ntfy_topic: str, pages_url: str):
-    if not ntfy_topic:
-        return
-    changes = [(r, prev.get(r["ticker"], "neutral"), r["signal"])
-               for r in results if _is_notable(prev.get(r["ticker"], "neutral"), r["signal"])]
-    if not changes:
-        print("[ntfy] Sin cambios de señal relevantes.")
-        return
-    print(f"[ntfy] {len(changes)} cambio(s) detectado(s).")
-    for row, old_sig, new_sig in changes:
-        ticker = row["ticker"]
-        ai_text = _short_ai_rec(row, groq_key)
-        arrow = "(+)" if SIGNAL_RANK.get(new_sig, 2) > SIGNAL_RANK.get(old_sig, 2) else "(-)"
-        title = f"{ticker}: {new_sig.replace('_', ' ')} {arrow}"
-        lines = [
-            f"{SIGNAL_EMOJI.get(new_sig, '⚪')} {old_sig} → {new_sig} | Score {row['score']} | {str(row.get('zone','?')).upper()}",
-        ]
-        if ai_text:
-            lines.append(ai_text)
-        sl  = row.get("sl")
-        tp1 = row.get("tp1")
-        if sl and tp1:
-            lines.append(f"SL {sl} | TP1 {tp1}")
-        click_url = f"{pages_url}/api/ai-alert?ticker={ticker}" if pages_url else ""
-        priority = "high" if "fuerte" in new_sig else "default"
-        _send_ntfy(ntfy_topic, title, "\n".join(lines), click_url, priority, SIGNAL_TAGS.get(new_sig, "white_circle"))
-        print(f"[ntfy] {ticker}: {old_sig} → {new_sig}")
-        time.sleep(0.5)
-
-
 # ── main ──────────────────────────────────────────────────────────────────────
 
 def main():
@@ -243,25 +143,7 @@ def main():
     parser.add_argument("--list", default="sp500", dest="list_id")
     parser.add_argument("--crypto-limit", type=int, default=20)
     parser.add_argument("--custom-tickers", default="", dest="custom_tickers")
-    parser.add_argument("--test-ntfy", action="store_true", dest="test_ntfy")
     args = parser.parse_args()
-
-    if args.test_ntfy:
-        ntfy_topic = os.environ.get("NTFY_TOPIC", "")
-        pages_url = os.environ.get("PAGES_URL", "")
-        if not ntfy_topic:
-            print("ERROR: NTFY_TOPIC no configurado", file=sys.stderr)
-            sys.exit(1)
-        _send_ntfy(
-            ntfy_topic,
-            title="maximos - prueba de notificacion",
-            body="Si ves esto, las alertas funcionan correctamente.",
-            click_url=pages_url or "",
-            priority="default",
-            tag="white_check_mark",
-        )
-        print(f"[ntfy] Notificación de prueba enviada a topic '{ntfy_topic}'")
-        sys.exit(0)
 
     token = os.environ.get("CF_API_TOKEN") or os.environ.get("CLOUDFLARE_API_TOKEN")
     account_id = os.environ.get("CF_ACCOUNT_ID") or os.environ.get("CLOUDFLARE_ACCOUNT_ID")
@@ -280,9 +162,6 @@ def main():
         d1_query(token, account_id, db_id,
                  "DELETE FROM screener_results WHERE list_id = 'custom'")
         print("[job] Resultados custom anteriores eliminados")
-
-    # Guardar señales anteriores antes de sobreescribir (para alertas)
-    prev_signals = _fetch_prev_signals(token, account_id, db_id, args.list_id) if args.list_id != "custom" else {}
 
     run_id = create_run(token, account_id, db_id, args.list_id, len(tickers))
     print(f"[job] Run ID: {run_id}")
@@ -315,14 +194,6 @@ def main():
     insert_history(token, account_id, db_id, args.list_id, today, results)
     update_history_prices(token, account_id, db_id, args.list_id, today, results)
     print(f"[history] {len(results)} registros insertados/actualizados para {today}")
-
-    # Alertas ntfy
-    send_alerts(
-        prev_signals, results,
-        groq_key=os.environ.get("GROQ_API_KEY", ""),
-        ntfy_topic=os.environ.get("NTFY_TOPIC", ""),
-        pages_url=os.environ.get("PAGES_URL", ""),
-    )
 
     if errors:
         print(f"[job] Tickers con error: {[t for t, _ in errors[:10]]}")

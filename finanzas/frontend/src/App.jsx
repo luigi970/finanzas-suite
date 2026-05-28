@@ -550,7 +550,7 @@ const FIAT_USD    = new Set(['USD'])
 const FIAT_ARS    = new Set(['ARS'])
 
 function toYahooTicker(asset, assetType) {
-  if (assetType === 'crypto' || (!STABLECOINS.has(asset) && !FIAT_USD.has(asset) && !FIAT_ARS.has(asset) && assetType !== 'stock' && assetType !== 'cedear' && assetType !== 'fixed_term' && assetType !== 'fund' && assetType !== 'flexible')) {
+  if (assetType === 'crypto' || (!STABLECOINS.has(asset) && !FIAT_USD.has(asset) && !FIAT_ARS.has(asset) && assetType !== 'stock' && assetType !== 'cedear' && assetType !== 'fixed_term' && assetType !== 'fund')) {
     return `${asset}-USD`
   }
   return asset
@@ -698,7 +698,7 @@ function PatrimonioTab({ positions, transactions = [], maximosUrl = MAXIMOS_ONLI
       // 2. Precios de activos desde maximos
       const needsPrice = positions.filter(p =>
         !FIAT_ARS.has(p.asset) && !FIAT_USD.has(p.asset) && !STABLECOINS.has(p.asset) &&
-        p.asset_type !== 'fixed_term' && p.asset_type !== 'fund' && p.asset_type !== 'flexible'
+        p.asset_type !== 'fixed_term' && p.asset_type !== 'fund'
       )
       if (needsPrice.length > 0) {
         const tickers = [...new Set(needsPrice.map(p => toYahooTicker(p.asset, p.asset_type)))].join(',')
@@ -720,7 +720,7 @@ function PatrimonioTab({ positions, transactions = [], maximosUrl = MAXIMOS_ONLI
   function getPriceUSD(pos) {
     if (FIAT_USD.has(pos.asset) || STABLECOINS.has(pos.asset)) return 1
     if (FIAT_ARS.has(pos.asset)) return blueRate ? 1 / blueRate : null
-    if (pos.asset_type === 'fixed_term' || pos.asset_type === 'fund' || pos.asset_type === 'flexible') return null
+    if (pos.asset_type === 'fixed_term' || pos.asset_type === 'fund') return null
     const ticker = toYahooTicker(pos.asset, pos.asset_type)
     return prices[ticker]?.price ?? null
   }
