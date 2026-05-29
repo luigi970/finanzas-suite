@@ -685,6 +685,14 @@ function TickerModal({ stock: s, listId, onClose }) {
             >
               Análisis técnico
             </button>
+            <a
+              href={`https://www.tradingview.com/chart/?symbol=${toTvSymbol(s.ticker)}`}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="flex-1 text-xs py-1.5 rounded-lg border border-blue-200 text-blue-600 hover:bg-blue-50 transition font-medium text-center"
+            >
+              TradingView ↗
+            </a>
           </div>
         </div>
 
