@@ -26,7 +26,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        list_id: [sp500, nasdaq100, etfs, adrs_arg, crypto]
+        list_id: [sp500, nasdaq100, etfs, adrs_arg, crypto, commodities]
 
     steps:
       - uses: actions/checkout@v4

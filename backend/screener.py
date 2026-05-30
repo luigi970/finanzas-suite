@@ -35,6 +35,14 @@ LISTS: dict[str, list[str]] = {
         "GGAL","BMA","SUPV","BBAR","PAMP","CEPU","EDN","TGSU2",
         "LOMA","CRESY","IRS","MELI","GLOB","VIST","YPF","PAM","TGS",
     ],
+    "commodities": [
+        # Metales
+        "GC=F","SI=F","HG=F","PL=F","PA=F",
+        # Energía
+        "CL=F","BZ=F","NG=F","RB=F","HO=F",
+        # Agrícolas
+        "ZW=F","ZC=F","ZS=F","KC=F","CC=F","CT=F","SB=F","OJ=F",
+    ],
     # Top 100 crypto por market cap (sin stablecoins) — ordenados de mayor a menor.
     # get_tickers() acepta el parámetro `crypto_limit` para devolver los primeros N.
     "crypto": [

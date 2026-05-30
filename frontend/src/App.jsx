@@ -1121,12 +1121,13 @@ const FILTER_OPTIONS = [
 ];
 
 const LIST_CONFIG = [
-  { id: "sp500",     label: "S&P 500" },
-  { id: "nasdaq100", label: "Nasdaq 100" },
-  { id: "etfs",      label: "ETFs" },
-  { id: "adrs_arg",  label: "ADRs Argentina" },
-  { id: "crypto",    label: "Crypto" },
-  { id: "dolar",     label: "Dólar" },
+  { id: "sp500",       label: "S&P 500" },
+  { id: "nasdaq100",   label: "Nasdaq 100" },
+  { id: "etfs",        label: "ETFs" },
+  { id: "adrs_arg",    label: "ADRs Argentina" },
+  { id: "crypto",      label: "Crypto" },
+  { id: "commodities", label: "Commodities" },
+  { id: "dolar",       label: "Dólar" },
 ];
 
 const PULSE_CONFIG = {

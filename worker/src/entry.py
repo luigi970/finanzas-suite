@@ -15,7 +15,7 @@ ALLOWED_ORIGINS = {
     "http://localhost:8001",
 }
 
-LIST_IDS = {"sp500", "nasdaq100", "etfs", "adrs_arg", "crypto", "custom"}
+LIST_IDS = {"sp500", "nasdaq100", "etfs", "adrs_arg", "crypto", "commodities", "custom"}
 
 
 def _cors(request) -> dict:
