@@ -1,6 +1,6 @@
 # Stock Screener — maximos
 
-> Analizá acciones, ETFs y criptomonedas con indicadores técnicos profesionales portados desde TradingView. Resultados pre-calculados diariamente, disponibles al instante.
+> Screener de acciones, ETFs, criptos y commodities. Datos de Yahoo Finance (acciones) y Binance (cripto), procesados con indicadores portados desde Pine Script (TradingView) — score 0–100, señal de trading y recomendación IA por ticker.
 
 ![Frontend](https://img.shields.io/badge/Frontend-React%20%2B%20Tailwind-61DAFB?style=flat-square&logo=react)
 ![Worker](https://img.shields.io/badge/API-Cloudflare%20Workers-F38020?style=flat-square&logo=cloudflare)
@@ -31,9 +31,10 @@ Descarga datos de Yahoo Finance y aplica el sistema **Helper Prime + Helper Puls
 |---|---|
 | S&P 500 | 503 acciones |
 | Nasdaq 100 | 100 empresas tech |
-| ETFs | 49 ETFs (sectores, renta fija, commodities) |
+| ETFs | 49 ETFs (sectores, renta fija, inversos) |
 | ADRs Argentina | GGAL, YPF, MELI, GLOB, VIST y más |
 | Crypto | Top 10–100 por market cap (slider ajustable) |
+| Commodities | Metales, energía y agrícolas (Gold, WTI, Wheat, etc.) |
 
 ---
 
@@ -140,7 +141,7 @@ El deploy es automático vía GitHub Actions al hacer push a `main`.
 |---|---|---|
 | `worker/**` o `frontend/**` | `deploy.yml` | Redeploy del Worker y/o rebuild de Pages |
 | Botón "Analizar" en la app | `screener.yml` | Corre el screener y escribe en D1 |
-| Cron 2am UTC (lun–vie) | `screener.yml` | Actualiza automáticamente sp500/nasdaq100/etfs/adrs_arg |
+| Cron 2am UTC (lun–vie) | `screener.yml` | Actualiza sp500/nasdaq100/etfs/adrs_arg/commodities |
 
 ### Secrets necesarios en GitHub
 
