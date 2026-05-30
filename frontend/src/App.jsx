@@ -142,7 +142,15 @@ function toTvSymbol(ticker) {
   return ticker;
 }
 
+const COMMODITY_NAMES = {
+  "GC=F": "Gold", "SI=F": "Silver", "HG=F": "Copper", "PL=F": "Platinum", "PA=F": "Palladium",
+  "CL=F": "WTI Crude", "BZ=F": "Brent", "NG=F": "Natural Gas", "RB=F": "Gasolina", "HO=F": "Heating Oil",
+  "ZW=F": "Wheat", "ZC=F": "Corn", "ZS=F": "Soybeans",
+  "KC=F": "Coffee", "CC=F": "Cocoa", "CT=F": "Cotton", "SB=F": "Sugar", "OJ=F": "OJ",
+};
+
 function displayTicker(ticker) {
+  if (COMMODITY_NAMES[ticker]) return COMMODITY_NAMES[ticker];
   return ticker.endsWith("-USD") ? ticker.slice(0, -4) : ticker;
 }
 
