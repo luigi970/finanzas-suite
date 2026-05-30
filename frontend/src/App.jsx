@@ -1828,7 +1828,7 @@ export default function App() {
               )}
             </div>
             <p className="text-xs text-amber-600 mt-1 text-right">
-              {status === "downloading" ? "Conectando…" : `${Math.round((processed / totalTickers) * 100)}%`}
+              {status === "downloading" ? "Conectando…" : `${totalTickers > 0 ? Math.round((processed / totalTickers) * 100) : 0}%`}
             </p>
           </div>
         )}
