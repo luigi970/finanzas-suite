@@ -73,6 +73,17 @@ def _sync_position(conn, account_id: int, asset: str):
     """, (account_id, asset)).fetchone()
     qty = round(qty_row['qty'] or 0, 8)
 
+    # Restar lo que ya está asignado a posiciones manuales (plazo fijo / fondo)
+    # que tienen fecha de vencimiento futura — esas no las toca _sync_position
+    manual_row = conn.execute("""
+        SELECT COALESCE(SUM(quantity), 0) as manual_qty
+        FROM positions
+        WHERE account_id = ? AND asset = ?
+          AND asset_type IN ('fixed_term', 'fund')
+          AND end_date IS NOT NULL AND end_date != '' AND end_date > date('now')
+    """, (account_id, asset)).fetchone()
+    qty = round(qty - (manual_row['manual_qty'] or 0), 8)
+
     avg_row = conn.execute("""
         SELECT SUM(amount * unit_price) / NULLIF(SUM(amount), 0) as avg_price
         FROM transactions

@@ -1069,8 +1069,17 @@ function TransactionForm({ initial, accounts, onSave, onClose }) {
 }
 
 // ── AccountCard ───────────────────────────────────────────────────────────────
-function AccountCard({ acc, positions, onEdit, onDelete }) {
+function AccountCard({ acc, positions, onEdit, onDelete, onSync }) {
   const [open, setOpen] = useState(true)
+  const [syncing, setSyncing] = useState(false)
+
+  async function handleSync(e) {
+    e.stopPropagation()
+    setSyncing(true)
+    await onSync(acc.id)
+    setSyncing(false)
+  }
+
   return (
     <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden flex flex-col"
       style={{ borderTop: `3px solid ${acc.color}` }}>
@@ -1079,6 +1088,10 @@ function AccountCard({ acc, positions, onEdit, onDelete }) {
         <span className="text-base">{typeIcon(acc.type)}</span>
         <span className="font-semibold text-gray-800 text-sm flex-1">{acc.name}</span>
         <span className="text-xs text-gray-400">{positions.length} pos.</span>
+        <span onClick={handleSync} title="Sincronizar cantidades desde movimientos"
+          className="text-gray-300 hover:text-amber-500 text-xs px-1 transition-colors">
+          {syncing ? '⏳' : '🔄'}
+        </span>
         <span className={`text-gray-400 text-[10px] transition-transform duration-200 ${open ? 'rotate-180' : ''}`}>▼</span>
       </button>
       {open && (
@@ -1112,7 +1125,7 @@ function AccountCard({ acc, positions, onEdit, onDelete }) {
 }
 
 // ── PortfolioTab ──────────────────────────────────────────────────────────────
-function PortfolioTab({ accounts, positions, onAddPosition, onEditPosition, onDeletePosition }) {
+function PortfolioTab({ accounts, positions, onAddPosition, onEditPosition, onDeletePosition, onSyncAccount }) {
   const activeAccounts = accounts.filter(a => a.active)
   const hasPositions = positions.length > 0
   const [layout, setLayout] = useState(() => localStorage.getItem('portfolio_layout') || 'grid')
@@ -1148,6 +1161,7 @@ function PortfolioTab({ accounts, positions, onAddPosition, onEditPosition, onDe
                   positions={acPos}
                   onEdit={onEditPosition}
                   onDelete={onDeletePosition}
+                  onSync={onSyncAccount}
                 />
               </div>
             )
@@ -1581,6 +1595,10 @@ export default function App() {
             onAddPosition={() => { setModal('add-position'); setEditTarget(null) }}
             onEditPosition={p => { setEditTarget(p); setModal('add-position') }}
             onDeletePosition={deletePosition}
+            onSyncAccount={async (accountId) => {
+              await api(`/api/positions/sync/${accountId}`, { method: 'POST' })
+              await load()
+            }}
           />
         )}
 

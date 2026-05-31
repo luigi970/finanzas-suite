@@ -129,39 +129,14 @@ def create_missing_positions(account_id: int):
 
 @router.post("/sync/{account_id}")
 def sync_positions(account_id: int):
+    from routers.transactions import _sync_position
     conn = get_db()
-    rows = conn.execute("""
-        SELECT currency AS asset,
-               SUM(CASE WHEN type='income' THEN amount ELSE -amount END) AS quantity
-        FROM transactions
-        WHERE account_id = ?
-        GROUP BY currency
-    """, (account_id,)).fetchall()
-
-    synced = 0
-    for row in rows:
-        asset    = row['asset'].upper()
-        quantity = round(row['quantity'], 8)
-        if quantity <= 0:
-            continue
-        asset_type = guess_asset_type(asset)
-        # Solo toca posiciones sin fecha de vencimiento (no plazo fijo / fondo)
-        existing = conn.execute(
-            "SELECT id FROM positions WHERE account_id = ? AND asset = ? AND (end_date IS NULL OR end_date = '')",
-            (account_id, asset)
-        ).fetchone()
-        if existing:
-            conn.execute(
-                "UPDATE positions SET quantity = ?, updated_at = datetime('now') WHERE id = ?",
-                (quantity, existing['id'])
-            )
-        else:
-            conn.execute(
-                "INSERT INTO positions (account_id, asset, asset_type, quantity) VALUES (?, ?, ?, ?)",
-                (account_id, asset, asset_type, quantity)
-            )
-        synced += 1
-
+    assets = conn.execute(
+        "SELECT DISTINCT currency FROM transactions WHERE account_id = ?",
+        (account_id,)
+    ).fetchall()
+    for row in assets:
+        _sync_position(conn, account_id, row['currency'].upper())
     conn.commit()
     conn.close()
-    return {"synced": synced}
+    return {"synced": len(assets)}
