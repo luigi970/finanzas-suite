@@ -250,6 +250,7 @@ function PositionForm({ accounts, initial, onSave, onClose }) {
   const set = k => e => setForm(f => ({ ...f, [k]: e.target.value }))
   const hasTerm     = ['fixed_term', 'fund', 'flexible'].includes(form.asset_type)
   const isFlexible  = form.asset_type === 'flexible'
+  const isCedear    = form.asset_type === 'cedear'
 
   async function submit(e) {
     e.preventDefault()
@@ -294,14 +295,27 @@ function PositionForm({ accounts, initial, onSave, onClose }) {
       {!['fiat', 'fixed_term'].includes(form.asset_type) && (
         <div>
           <label className="text-xs font-medium text-gray-500 uppercase tracking-wide">
-            Precio promedio de compra <span className="text-gray-400 font-normal normal-case">(USD, opcional)</span>
+            Precio promedio de compra{' '}
+            <span className="text-gray-400 font-normal normal-case">
+              {isCedear ? '(ARS por CEDEAR, opcional)' : '(USD, opcional)'}
+            </span>
           </label>
           <input type="number" step="any" min="0" value={form.avg_price} onChange={set('avg_price')}
-            placeholder="ej: 95000 para BTC comprado a USD 95k"
+            placeholder={isCedear ? 'ej: 14600 (precio pagado en ARS por CEDEAR)' : 'ej: 95000 para BTC comprado a USD 95k'}
             className="mt-1 w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-amber-400" />
           <p className="mt-1 text-[11px] text-gray-400 leading-snug">
             Cargalo una sola vez. Las compras futuras que registres con precio lo actualizarán automáticamente.
           </p>
+        </div>
+      )}
+      {isCedear && (
+        <div>
+          <label className="text-xs font-medium text-gray-500 uppercase tracking-wide">
+            Ratio <span className="text-gray-400 font-normal normal-case">(cuántos CEDEARs = 1 acción subyacente)</span>
+          </label>
+          <input type="number" step="1" min="1" value={form.rate} onChange={set('rate')}
+            placeholder="ej: 25 para AAPL — verificá en tu broker"
+            className="mt-1 w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-amber-400" />
         </div>
       )}
       {hasTerm && (
@@ -630,7 +644,7 @@ function PatrimonioTypeCard({ type, group, pct }) {
                 <div className="flex items-center gap-2 flex-wrap">
                   <span className="font-semibold text-sm text-gray-800">{p.asset}</span>
                   {p.end_date && <span className="text-[10px] bg-amber-100 text-amber-700 rounded px-1.5 py-0.5">vence {p.end_date}</span>}
-                  {p.rate && <span className="text-[10px] bg-green-100 text-green-700 rounded px-1.5 py-0.5">{p.rate}% anual</span>}
+                  {p.rate && <span className="text-[10px] bg-green-100 text-green-700 rounded px-1.5 py-0.5">{p.asset_type === 'cedear' ? `ratio ${p.rate}` : `${p.rate}% anual`}</span>}
                 </div>
                 <div className="text-xs text-gray-400">{p.account_name} · {fmtAmount(p.quantity)} {p.asset}</div>
                 {p.accrued != null && (
@@ -722,7 +736,10 @@ function PatrimonioTab({ positions, transactions = [], maximosUrl = MAXIMOS_ONLI
     if (FIAT_ARS.has(pos.asset)) return blueRate ? 1 / blueRate : null
     if (pos.asset_type === 'fixed_term' || pos.asset_type === 'fund') return null
     const ticker = toYahooTicker(pos.asset, pos.asset_type)
-    return prices[ticker]?.price ?? null
+    const rawPrice = prices[ticker]?.price ?? null
+    if (rawPrice == null) return null
+    if (pos.asset_type === 'cedear' && pos.rate > 0) return rawPrice / pos.rate
+    return rawPrice
   }
 
   // Calcular valores (incluyendo interés devengado para plazos fijos / staking)
@@ -742,9 +759,13 @@ function PatrimonioTab({ positions, transactions = [], maximosUrl = MAXIMOS_ONLI
       else if (FIAT_ARS.has(p.asset) && blueRate)            { valueUSD = total / blueRate; priceUSD = 1 / blueRate }
     }
 
-    const costUSD = p.avg_price != null ? p.avg_price * p.quantity : null
+    const isCedear = p.asset_type === 'cedear'
+    const avgPriceUSD = isCedear && blueRate && p.avg_price
+      ? p.avg_price / blueRate   // avg_price en ARS → convertir a USD por CEDEAR
+      : p.avg_price
+    const costUSD = avgPriceUSD != null ? avgPriceUSD * p.quantity : null
     const pnlUSD  = (valueUSD != null && costUSD != null) ? valueUSD - costUSD : null
-    const pnlPct  = (priceUSD != null && p.avg_price != null) ? (priceUSD - p.avg_price) / p.avg_price * 100 : null
+    const pnlPct  = (priceUSD != null && avgPriceUSD != null) ? (priceUSD - avgPriceUSD) / avgPriceUSD * 100 : null
     return { ...p, priceUSD, valueUSD, costUSD, pnlUSD, pnlPct, accrued }
   })
 
@@ -1076,7 +1097,7 @@ function AccountCard({ acc, positions, onEdit, onDelete }) {
               </div>
               <div className="text-right shrink-0">
                 <div className="font-semibold text-sm text-gray-800 tabular-nums">{fmtAmount(p.quantity)}</div>
-                {p.rate && <div className="text-[10px] text-green-600">{p.rate}% anual</div>}
+                {p.rate && <div className="text-[10px] text-green-600">{p.asset_type === 'cedear' ? `ratio ${p.rate}` : `${p.rate}% anual`}</div>}
               </div>
               <div className="flex gap-1 shrink-0">
                 <button onClick={() => onEdit(p)} className="text-xs text-gray-300 hover:text-amber-500 px-1">✏️</button>
