@@ -84,13 +84,24 @@ def _sync_position(conn, account_id: int, asset: str):
     """, (account_id, asset)).fetchone()
     qty = round(qty - (manual_row['manual_qty'] or 0), 8)
 
-    avg_row = conn.execute("""
-        SELECT SUM(amount * unit_price) / NULLIF(SUM(amount), 0) as avg_price
-        FROM transactions
+    # Solo calcular avg_price si TODAS las compras tienen unit_price.
+    # Si alguna no tiene precio, preservar el avg_price actual (puede ser manual).
+    unpriced = conn.execute("""
+        SELECT COUNT(*) as cnt FROM transactions
         WHERE account_id = ? AND currency = ? AND type = 'income'
-          AND unit_price IS NOT NULL AND unit_price > 0
+          AND (unit_price IS NULL OR unit_price <= 0)
     """, (account_id, asset)).fetchone()
-    avg_price = round(float(avg_row['avg_price']), 8) if avg_row and avg_row['avg_price'] else None
+
+    if unpriced['cnt'] == 0:
+        avg_row = conn.execute("""
+            SELECT SUM(amount * unit_price) / NULLIF(SUM(amount), 0) as avg_price
+            FROM transactions
+            WHERE account_id = ? AND currency = ? AND type = 'income'
+              AND unit_price IS NOT NULL AND unit_price > 0
+        """, (account_id, asset)).fetchone()
+        avg_price = round(float(avg_row['avg_price']), 8) if avg_row and avg_row['avg_price'] else None
+    else:
+        avg_price = None  # preserva el avg_price existente en la posición
 
     pos = conn.execute(
         "SELECT id FROM positions WHERE account_id = ? AND asset = ? AND (end_date IS NULL OR end_date = '')",
