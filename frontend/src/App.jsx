@@ -993,7 +993,7 @@ function HelpModal({ onClose }) {
 
           <section>
             <h3 className="font-semibold text-gray-900 mb-1">1. Elegí una lista y analizá</h3>
-            <p>Seleccioná qué activos analizar: S&P 500, Nasdaq 100, ETFs, ADRs Argentina o Crypto. Presioná <strong>Analizar</strong> para cargar los resultados. Una vez cargados, podés filtrar dentro de la lista usando el buscador.</p>
+            <p>Seleccioná qué activos analizar: <strong>S&P 500, Nasdaq 100, ETFs, ADRs Argentina, Crypto</strong> o <strong>Commodities</strong> (Gold, Silver, WTI, Wheat, etc.). Presioná <strong>Analizar</strong> para cargar los resultados. Una vez cargados, podés filtrar por señal o usar el buscador.</p>
           </section>
 
           <section>
@@ -1001,6 +1001,7 @@ function HelpModal({ onClose }) {
             <p className="mb-1">Al tocar cualquier activo de la tabla abrís su panel de detalle, que incluye:</p>
             <ul className="list-disc list-inside space-y-0.5 text-xs text-gray-700">
               <li><strong>Gráfico de precio</strong> (últimos 3 meses via TradingView, click para ver fullscreen)</li>
+              <li><strong>TradingView ↗</strong> — abre el chart completo con el ticker precargado para usar tus propios indicadores</li>
               <li><strong>Score y señal</strong> con dirección, zona estructural y niveles SL/TP1/TP2</li>
               <li><strong>Divergencia</strong> — última señal de divergencia del oscilador de momentum</li>
               <li><strong>Medias Móviles</strong> — grilla MA5→MA200 con distancia % al precio actual</li>

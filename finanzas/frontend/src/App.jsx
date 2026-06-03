@@ -92,23 +92,23 @@ function HelpModal({ onClose }) {
       title: 'Configurá tus cuentas',
       tab: 'Cuentas',
       icon: '🏦',
-      desc: 'Agregá cada lugar donde tenés plata: banco, exchange de crypto, broker, efectivo. Cada cuenta tiene un tipo y un color.',
-      examples: ['BBVA → Banco', 'Binance → Crypto', 'Invertir Online → Broker', 'Efectivo → Efectivo'],
+      desc: 'Agregá cada lugar donde tenés plata: banco, exchange de crypto, wallet, broker, efectivo. Cada cuenta tiene un tipo y un color para identificarla fácilmente.',
+      examples: ['BBVA → Banco', 'Binance → Exchange', 'MetaMask → Wallet Crypto', 'Invertir Online → Broker', 'Billetera → Efectivo'],
     },
     {
       num: '2',
       title: 'Cargá tus posiciones',
       tab: 'Portfolio',
       icon: '📊',
-      desc: 'Agregá lo que tenés en cada cuenta ahora mismo: cripto, acciones, plazos fijos, fiat. Para plazos fijos y staking indicá la tasa y fecha de vencimiento — el interés devengado se calcula solo.',
-      examples: ['BBVA: 500.000 ARS', 'Binance: 0.05 BTC (precio promedio 60.000 USD)', 'Nexo: 1.000 USDT al 8% hasta 03/06'],
+      desc: 'Agregá lo que tenés en cada cuenta: cripto, acciones, CEDEARs, plazos fijos, fiat. Para plazos fijos y staking indicá la tasa y fecha de vencimiento — el interés devengado se calcula solo. Para CEDEARs completá el Ratio (cuántos CEDEARs = 1 acción) para que el valor en USD sea correcto. El botón 🔄 en cada cuenta resincroniza las cantidades si cargaste movimientos.',
+      examples: ['BBVA: 500.000 ARS', 'Binance: 0.05 BTC (precio promedio en USD)', 'Nexo: 1.000 USDT al 7.5% hasta 08/2026', 'IOL: 25 AAPL CEDEAR (ratio 20)'],
     },
     {
       num: '3',
       title: 'Importá o cargá movimientos',
       tab: 'Movimientos',
       icon: '📎',
-      desc: 'Subí un PDF, imagen o CSV, o pegá texto del homebanking. La IA extrae las transacciones con monto, fecha, tipo y categoría. Podés editar o eliminar filas de la preview antes de confirmar. También podés cargar operaciones manualmente una por una.',
+      desc: 'Subí un PDF, imagen o CSV, o pegá texto del homebanking. La IA extrae las transacciones con monto, fecha, tipo y categoría. Revisá la preview antes de confirmar. También podés cargar operaciones manualmente una por una.',
       examples: ['PDF del resumen de tarjeta', 'Screenshot de Binance', 'Texto pegado del homebanking', 'Carga manual de una venta de ETH'],
     },
     {
@@ -116,16 +116,24 @@ function HelpModal({ onClose }) {
       title: 'Registrá compras y ventas de activos',
       tab: 'Movimientos',
       icon: '💹',
-      desc: 'Al cargar una compra o venta de cripto/acción, completá el campo "Precio por unidad". Esto actualiza el precio promedio de tu posición y calcula el P&L realizado automáticamente al vender.',
-      examples: ['Compra 0.01 BTC a USD 95.000 → actualiza avg_price', 'Venta 0.005 BTC a USD 102.000 → muestra P&L realizado'],
+      desc: 'Al cargar una compra o venta de cripto/acción, completá el campo "Precio por unidad" en la moneda del activo. La app actualiza el precio promedio de tu posición y calcula automáticamente la ganancia o pérdida al vender.',
+      examples: ['Compra 0.01 BTC a USD 95.000 → actualiza precio promedio', 'Venta 0.005 BTC a USD 102.000 → registra ganancia realizada'],
     },
     {
       num: '5',
+      title: 'Vé tu patrimonio en tiempo real',
+      tab: 'Patrimonio',
+      icon: '💰',
+      desc: 'Muestra el valor total de tu cartera en USD y ARS usando precios de Binance (crypto) y el screener de mercado (acciones). Incluye intereses devengados, P&L no realizado y ganancia/pérdida acumulada realizada.',
+      examples: ['USD 12.450 total · ARS 16.000.000', '+USD 340 P&L no realizado', 'Plazo fijo: +ARS 1.200 interés devengado'],
+    },
+    {
+      num: '6',
       title: 'Consultá al agente',
       tab: 'Agente',
       icon: '🤖',
-      desc: 'Preguntale cualquier cosa sobre tus finanzas en lenguaje natural. Tiene acceso a tus cuentas, posiciones, movimientos y P&L. También puede sugerirte consultar el screener de mercado.',
-      examples: ['¿Cuánto gasté este mes?', '¿En qué moneda tengo más exposición?', '¿Cuándo vence mi plazo fijo?', '¿Cuál fue mi P&L realizado en ETH?'],
+      desc: 'Preguntale cualquier cosa sobre tus finanzas en lenguaje natural. Tiene acceso a tus cuentas, posiciones, movimientos y precios actuales de mercado.',
+      examples: ['¿Cuánto gasté este mes?', '¿En qué moneda tengo más exposición?', '¿Cuándo vence mi plazo fijo?', '¿Cuál fue mi ganancia en ETH?'],
     },
   ]
 
@@ -137,13 +145,13 @@ function HelpModal({ onClose }) {
           <button onClick={onClose} className="text-gray-400 hover:text-gray-600 text-xl leading-none">×</button>
         </div>
         <div className="overflow-y-auto flex-1 p-5 space-y-5">
-          {steps.map(s => (
+          {steps.map((s, i) => (
             <div key={s.num} className="flex gap-4">
               <div className="flex flex-col items-center shrink-0">
                 <div className="w-8 h-8 rounded-full bg-amber-500 text-white text-sm font-bold flex items-center justify-center">
                   {s.num}
                 </div>
-                {s.num !== '5' && <div className="w-px flex-1 bg-gray-200 mt-2" />}
+                {i < steps.length - 1 && <div className="w-px flex-1 bg-gray-200 mt-2" />}
               </div>
               <div className="pb-4 flex-1">
                 <div className="flex items-center gap-2 mb-1">
@@ -161,7 +169,7 @@ function HelpModal({ onClose }) {
             </div>
           ))}
           <div className="bg-amber-50 rounded-xl p-4 text-sm text-amber-700 leading-relaxed">
-            <strong>Consejo:</strong> empezá por las cuentas, después las posiciones, y recién entonces importá movimientos. Así el agente tiene toda la foto completa para ayudarte mejor.
+            <strong>Consejo:</strong> empezá por Cuentas, después Portfolio, y recién entonces Movimientos. Así el agente tiene toda la foto completa para ayudarte mejor. Las API keys (Groq y Google) se configuran desde el botón ⚙️ sin tocar ningún archivo.
           </div>
         </div>
       </div>
