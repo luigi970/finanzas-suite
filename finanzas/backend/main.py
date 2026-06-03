@@ -4,6 +4,8 @@ load_dotenv()
 import os, subprocess
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel
+from typing import Optional
 from database import init_db
 from routers import accounts, positions, transactions, ingest, agent
 import httpx
@@ -30,6 +32,30 @@ def startup():
 @app.get("/api/health")
 def health():
     return {"status": "ok"}
+
+ENV_PATH = os.path.join(os.path.dirname(__file__), ".env")
+
+@app.get("/api/config")
+def get_config():
+    return {
+        "groq":   os.environ.get("GROQ_API_KEY") or "",
+        "google": os.environ.get("GOOGLE_API_KEY") or "",
+    }
+
+class ConfigIn(BaseModel):
+    groq_key:   Optional[str] = None
+    google_key: Optional[str] = None
+
+@app.post("/api/config")
+def save_config(data: ConfigIn):
+    from dotenv import set_key
+    if data.groq_key and data.groq_key.strip():
+        set_key(ENV_PATH, "GROQ_API_KEY", data.groq_key.strip())
+        os.environ["GROQ_API_KEY"] = data.groq_key.strip()
+    if data.google_key and data.google_key.strip():
+        set_key(ENV_PATH, "GOOGLE_API_KEY", data.google_key.strip())
+        os.environ["GOOGLE_API_KEY"] = data.google_key.strip()
+    return {"ok": True}
 
 MAXIMOS_BACKEND = os.path.abspath(
     os.path.join(os.path.dirname(__file__), "..", "..", "backend")

@@ -1365,12 +1365,40 @@ function MovimientosTab({ transactions, accounts, onEdit, onDelete, onNewManual,
 
 // ── SettingsModal ─────────────────────────────────────────────────────────────
 function SettingsModal({ maximosMode, onMode, onClose }) {
-  const [localStatus, setLocalStatus] = useState(null) // null | true | false
+  const [localStatus, setLocalStatus] = useState(null)
   const [starting, setStarting]       = useState(false)
+  const [groqKey, setGroqKey]         = useState('')
+  const [googleKey, setGoogleKey]     = useState('')
+  const [showGroq, setShowGroq]       = useState(false)
+  const [showGoogle, setShowGoogle]   = useState(false)
+  const [saving, setSaving]           = useState(false)
+  const [saved, setSaved]             = useState(false)
 
   useEffect(() => {
     if (maximosMode === 'local') checkLocal()
+    loadKeys()
   }, [maximosMode])
+
+  async function loadKeys() {
+    try {
+      const d = await api('/api/config')
+      if (d.groq)   setGroqKey(d.groq)
+      if (d.google) setGoogleKey(d.google)
+    } catch {}
+  }
+
+  async function saveKeys() {
+    setSaving(true)
+    try {
+      await api('/api/config', {
+        method: 'POST',
+        body: JSON.stringify({ groq_key: groqKey || null, google_key: googleKey || null }),
+      })
+      setSaved(true)
+      setTimeout(() => setSaved(false), 3000)
+    } catch {}
+    setSaving(false)
+  }
 
   async function checkLocal() {
     setLocalStatus(null)
@@ -1445,6 +1473,47 @@ function SettingsModal({ maximosMode, onMode, onClose }) {
           Usá <strong>Online</strong> si no tenés maximos local.
           Usá <strong>Local</strong> para precios de acciones más actualizados.
         </p>
+
+        {/* API Keys */}
+        <div className="mt-5 pt-5 border-t border-gray-100">
+          <p className="text-xs text-gray-500 mb-3">API Keys — IA (ingest y agente)</p>
+          <div className="space-y-3">
+            {[
+              { key: 'groq',   label: 'Groq',           val: groqKey,   set: setGroqKey,   show: showGroq,   setShow: setShowGroq,   url: 'https://console.groq.com/keys',          placeholder: 'gsk_...' },
+              { key: 'google', label: 'Google (Gemini)', val: googleKey, set: setGoogleKey, show: showGoogle, setShow: setShowGoogle, url: 'https://aistudio.google.com/app/apikey', placeholder: 'AIza...' },
+            ].map(k => (
+              <div key={k.key}>
+                <div className="flex items-center gap-2 mb-1">
+                  <span className="text-xs font-medium text-gray-600">{k.label}</span>
+                  <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded-full ${k.val ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-600'}`}>
+                    {k.val ? '✓ configurada' : '✗ no configurada'}
+                  </span>
+                  <a href={k.url} target="_blank" rel="noopener noreferrer"
+                    className="ml-auto text-[10px] text-amber-500 hover:underline">obtener key ↗</a>
+                </div>
+                <div className="flex gap-1">
+                  <input
+                    type={k.show ? 'text' : 'password'}
+                    value={k.val} onChange={e => k.set(e.target.value)}
+                    placeholder={k.placeholder}
+                    className="flex-1 border border-gray-200 rounded-lg px-3 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-amber-400 font-mono"
+                  />
+                  <button onClick={() => k.setShow(s => !s)}
+                    className="px-2 text-gray-400 hover:text-gray-600 text-xs border border-gray-200 rounded-lg">
+                    {k.show ? '🙈' : '👁'}
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+          <button onClick={saveKeys} disabled={saving}
+            className="mt-3 w-full py-1.5 rounded-lg bg-amber-500 hover:bg-amber-600 text-white text-xs font-medium disabled:opacity-40 transition-colors">
+            {saving ? 'Guardando...' : saved ? '✓ Guardado' : 'Guardar keys'}
+          </button>
+          <p className="text-[11px] text-gray-400 mt-2 text-center">
+            Se guardan en el archivo .env del backend. Ambas son gratuitas.
+          </p>
+        </div>
       </div>
     </div>
   )
