@@ -46,14 +46,21 @@ class ConfigIn(BaseModel):
     groq_key:   Optional[str] = None
     google_key: Optional[str] = None
 
+MAXIMOS_ENV_PATH = os.path.abspath(
+    os.path.join(os.path.dirname(__file__), "..", "..", "backend", ".env")
+)
+
 @app.post("/api/config")
 def save_config(data: ConfigIn):
     from dotenv import set_key
+    for path in [ENV_PATH, MAXIMOS_ENV_PATH]:
+        if data.groq_key and data.groq_key.strip():
+            set_key(path, "GROQ_API_KEY", data.groq_key.strip())
+        if data.google_key and data.google_key.strip():
+            set_key(path, "GOOGLE_API_KEY", data.google_key.strip())
     if data.groq_key and data.groq_key.strip():
-        set_key(ENV_PATH, "GROQ_API_KEY", data.groq_key.strip())
         os.environ["GROQ_API_KEY"] = data.groq_key.strip()
     if data.google_key and data.google_key.strip():
-        set_key(ENV_PATH, "GOOGLE_API_KEY", data.google_key.strip())
         os.environ["GOOGLE_API_KEY"] = data.google_key.strip()
     return {"ok": True}
 
