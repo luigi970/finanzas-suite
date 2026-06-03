@@ -28,6 +28,7 @@ finanzas/
 # Desde la raíz del repo
 .\start-all.ps1   # arranca los 4 procesos sin ventanas
 .\stop-all.ps1    # detiene todo
+# También hay accesos directos en el escritorio: "Iniciar Finanzas" y "Detener Finanzas"
 ```
 
 ### Solo finanzas
@@ -54,6 +55,8 @@ GOOGLE_API_KEY=...     # fallback para ingest (visión) y agente
 MAXIMOS_URL=...        # opcional; por defecto usa el Cloudflare Worker de maximos
 ```
 
+Las keys también se pueden configurar desde la UI: ⚙️ → sección "API Keys". Se guardan automáticamente en `finanzas/backend/.env` y `backend/.env` (maximos) en simultáneo.
+
 ## API endpoints
 
 | Método | Ruta | Descripción |
@@ -66,7 +69,7 @@ MAXIMOS_URL=...        # opcional; por defecto usa el Cloudflare Worker de maxim
 | POST | `/api/positions` | Crear posición |
 | PATCH | `/api/positions/{id}` | Editar posición |
 | DELETE | `/api/positions/{id}` | Eliminar posición |
-| POST | `/api/positions/sync/{account_id}` | Recalcular cantidades desde transacciones |
+| POST | `/api/positions/sync/{account_id}` | Recalcular cantidades desde transacciones (descuenta fixed_term/fund) |
 | POST | `/api/positions/create-missing` | Crear posiciones faltantes desde historial de transacciones |
 | GET | `/api/transactions` | Listar (limit=500 por defecto) |
 | POST | `/api/transactions` | Crear una transacción (auto-crea posición si no existe) |
@@ -78,6 +81,8 @@ MAXIMOS_URL=...        # opcional; por defecto usa el Cloudflare Worker de maxim
 | POST | `/api/ingest/text` | Extraer transacciones desde texto |
 | POST | `/api/ingest/file` | Extraer desde PDF/imagen/CSV |
 | POST | `/api/agent/chat` | Chat IA con contexto financiero completo |
+| GET | `/api/config` | Devuelve valores actuales de GROQ_API_KEY y GOOGLE_API_KEY |
+| POST | `/api/config` | Escribe keys en .env de finanzas y maximos |
 | GET | `/api/maximos/status` | Chequea si maximos local (puerto 8000) está corriendo |
 | POST | `/api/maximos/start` | Arranca maximos local (uvicorn en puerto 8000) |
 
@@ -87,7 +92,7 @@ MAXIMOS_URL=...        # opcional; por defecto usa el Cloudflare Worker de maxim
 
 ### Tablas principales
 
-**accounts**: `id, name, type (bank|crypto|broker|cash|other), color, active`
+**accounts**: `id, name, type (bank|exchange|wallet_crypto|wallet|broker|cash|other), color, active`
 
 **positions**: `id, account_id, asset, asset_type (fiat|crypto|stablecoin|stock|cedear|fixed_term|fund|flexible), quantity, avg_price, start_date, end_date, rate, auto_renew, notes`
 
@@ -95,14 +100,30 @@ MAXIMOS_URL=...        # opcional; por defecto usa el Cloudflare Worker de maxim
 
 ## Lógica clave
 
-### P&L realizado (`_apply_unit_price` en transactions.py)
-- **income**: actualiza `avg_price` de la posición con media ponderada
-- **expense**: calcula `realized_pnl = (unit_price - avg_price) × amount`
+### P&L realizado
+- **expense con unit_price**: `realized_pnl = (unit_price - avg_price) × amount` usando el avg_price actual de la posición
 - Busca posición con `end_date IS NULL OR end_date = ''` (posiciones activas)
 - Solo aplica a activos no fiat (`FIAT_CURRENCIES = {ARS, USD, EUR, BRL, UYU}`)
 
+### `_sync_position` (transactions.py)
+Recalcula `quantity` y `avg_price` de la posición desde todos los movimientos. Reglas:
+- **Quantity**: suma ingresos - egresos de todas las transacciones del activo en la cuenta, **menos** lo que ya está en posiciones `fixed_term`/`fund` activas (con `end_date` futura). Esto evita que el flexible duplique lo que está en plazo fijo.
+- **avg_price**: solo se recalcula (media ponderada por monto) si **todas** las transacciones de ingreso tienen `unit_price`. Si alguna no tiene precio (ej. transferencias), se preserva el `avg_price` existente en la posición (puede ser manual).
+- Se llama automáticamente después de crear, editar o eliminar una transacción.
+- El botón 🔄 por cuenta en Portfolio también lo dispara vía `POST /api/positions/sync/{account_id}`.
+
+### CEDEARs
+- `asset_type = 'cedear'`, `asset` = ticker subyacente (ej. `AAPL`)
+- **`rate`** = ratio: cuántos CEDEARs equivalen a 1 acción subyacente (ej. 20 para AAPL)
+- **`avg_price`** = precio promedio pagado en **ARS** por CEDEAR (no en USD)
+- En PatrimonioTab: `priceUSD = stockPriceUSD / ratio`; `costUSD = (qty × avg_price_ARS) / blueRate`
+- El Portfolio muestra `ratio N` en vez de `N% anual` para CEDEARs
+
+### Posiciones flexible con crypto
+Las posiciones `asset_type = 'flexible'` con activos no-fiat/no-stablecoin (ej. ETH en Nexo staking) obtienen precio de mercado igual que crypto normal. El interés devengado se suma a la cantidad en la moneda nativa antes de calcular el valor en USD.
+
 ### Auto-creación de posiciones desde transacciones
-Tanto `POST /api/transactions` (individual) como `POST /api/transactions/batch` crean automáticamente una posición si el activo no tiene posición activa en esa cuenta. La cantidad se calcula sumando ingresos y restando egresos del historial. Si la cantidad resultante es ≤ 0, no se crea posición.
+Tanto `POST /api/transactions` como `POST /api/transactions/batch` crean automáticamente una posición si el activo no tiene posición activa en esa cuenta.
 
 ### Interés devengado (frontend, `calcAccruedInterest`)
 - Para `asset_type = 'fixed_term'`, `'fund'` o `'flexible'` con `rate` y `start_date`
@@ -126,6 +147,11 @@ Tanto `POST /api/transactions` (individual) como `POST /api/transactions/batch` 
 - Contexto enviado al modelo: cuentas, posiciones con valor en USD, P&L no realizado, últimas 50 transacciones, resumen mensual, P&L realizado acumulado, totales en USD y ARS
 - SYSTEM_PROMPT: asesor financiero personal, español rioplatense, profesional y directo, responde solo lo que se le pregunta, máximo 4 oraciones salvo análisis detallado explícito
 
+### Configuración de API keys (`main.py`)
+- `GET /api/config`: devuelve los valores actuales de `GROQ_API_KEY` y `GOOGLE_API_KEY` (texto plano, app local)
+- `POST /api/config`: recibe `{groq_key, google_key}`, escribe en `finanzas/backend/.env` y `backend/.env` usando `dotenv.set_key()`, y actualiza `os.environ` en el proceso actual
+- El backend maximos requiere reinicio para tomar las nuevas keys
+
 ### Maximos status/start (main.py)
 - `/api/maximos/status`: hace GET a `http://localhost:8000/api/status` con timeout 2s; devuelve `{"running": bool}`
 - `/api/maximos/start`: si no está corriendo, lanza `uvicorn main:app --port 8000` en `backend/` con `CREATE_NEW_CONSOLE` (Windows) o proceso daemon (Unix)
@@ -135,8 +161,9 @@ Tanto `POST /api/transactions` (individual) como `POST /api/transactions/batch` 
 - El frontend hace proxy al backend via Vite (`vite.config.js` → `/api → localhost:8001`)
 - `end_date = ''` (string vacío) ≠ `NULL` en SQLite — siempre usar `(end_date IS NULL OR end_date = '')` para posiciones activas
 - `prices[ticker]` en el frontend es un objeto `{ price, change, change_pct }`, no un número plano — acceder con `.price`
-- El batch endpoint llama `_apply_unit_price` por cada transacción — el orden importa para el avg_price
-- Las posiciones de tipo `fixed_term`/`fund`/`flexible` no tienen precio de mercado; el valor se calcula desde la moneda nativa + interés devengado
+- `_sync_position` descuenta posiciones `fixed_term`/`fund` activas (end_date futura) para no duplicar en flexible
+- `_sync_position` preserva `avg_price` si hay ingresos sin `unit_price` — el avg_price manual no se sobreescribe
+- CEDEARs: `rate` = ratio (no tasa de interés), `avg_price` en ARS (no USD)
 - `$pid` es variable reservada en PowerShell — usar `$procId` en stop-all.ps1
 - `Test-NetConnection` es más confiable que `Invoke-WebRequest` para port polling en ventanas ocultas de PowerShell
 
@@ -146,9 +173,10 @@ Tanto `POST /api/transactions` (individual) como `POST /api/transactions/batch` 
 - Tailwind CSS, acento ámbar (`amber-500`)
 - Header oscuro (`bg-slate-900`) con borde top `3px solid #f59e0b`
 - Tabs sticky: Patrimonio · Portfolio · Movimientos · Cuentas · Agente
-- `SettingsModal`: abre con ⚙️ en el header; toggle Online/Local para la fuente de precios; si está en Local, muestra status de maximos y botón para arrancarlo
+- `SettingsModal`: abre con ⚙️; toggle Online/Local para precios; sección API Keys con inputs show/hide para configurar GROQ y Google sin tocar el .env
+- Portfolio: botón 🔄 por cuenta para disparar sync de posiciones
+- `PatrimonioTab`: flexible no-fiat obtiene precio de mercado; CEDEARs usan ratio para calcular priceUSD
 - Constantes de URL en App.jsx:
   - `MAXIMOS_LOCAL = 'http://localhost:8000'`
   - `MAXIMOS_ONLINE = import.meta.env.VITE_MAXIMOS_URL || 'https://maximos-worker.luchotour.workers.dev'`
 - `maximosMode` persiste en `localStorage` ('online' por defecto)
-- `PatrimonioTab` recibe `maximosUrl` como prop y está en las deps del `useCallback` de precios para que el cambio de modo recargue los precios automáticamente

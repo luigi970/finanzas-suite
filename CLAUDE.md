@@ -98,7 +98,7 @@ Body de `/api/refresh`:
 ```json
 { "list_id": "sp500", "crypto_limit": 20 }
 ```
-`list_id`: `sp500` · `nasdaq100` · `etfs` · `adrs_arg` · `crypto`
+`list_id`: `sp500` · `nasdaq100` · `etfs` · `adrs_arg` · `crypto` · `commodities`
 
 Body de `/api/analyze`: el objeto completo del ticker (todos los campos calculados).
 
@@ -133,7 +133,8 @@ Status del Worker: `"idle"` → `"loading"` → `"ready"` (mapeado desde D1: `ru
 
 - **`status="idle"` durante startup**: GitHub Actions tarda 30-60s en crear el run record en D1 después del `repository_dispatch`. El frontend ignora `"idle"` cuando está en estado `"loading"` para no cortar el polling prematuramente.
 - **Custom list en D1**: se borran todos los resultados anteriores antes de cada run custom para que no se acumulen tickers de búsquedas anteriores.
-- **Matrix de screener**: `[sp500, nasdaq100, etfs, adrs_arg, crypto]`. El cron omite crypto. Custom usa un job separado (`screener-custom`).
+- **Matrix de screener**: `[sp500, nasdaq100, etfs, adrs_arg, crypto, commodities]`. El cron omite crypto. Custom usa un job separado (`screener-custom`).
+- **Commodities**: tickers de futuros Yahoo Finance (`GC=F` Gold, `SI=F` Silver, `CL=F` WTI, etc.). `displayTicker()` en el frontend los convierte a nombres legibles via `COMMODITY_NAMES`.
 - **deploy.yml path filter**: solo corre cuando cambia `worker/**` o `frontend/**`. Cambiar solo `.github/workflows/` no lo dispara — usar `workflow_dispatch`.
 
 ## Sistema de scoring — Helper Prime (0-100)
@@ -208,6 +209,7 @@ Parámetros: `pivot_len=3`, `min_bars_between=5`, `min_osc_delta=3.0`, `turn_lev
 | `etfs` | 49 ETFs | Hardcodeado en `screener.py` |
 | `adrs_arg` | 17 ADRs argentinos | Hardcodeado en `screener.py` |
 | `crypto` | Top N criptos (sin stablecoins) | Hardcodeado, limitado por `crypto_limit` |
+| `commodities` | 18 futuros: metales, energía y agrícolas | Hardcodeado en `screener.py` con tickers `=F` |
 
 ## IA — cadena de proveedores
 
@@ -243,6 +245,7 @@ El prompt está en `worker/src/providers/prompt.py` (`build_prompt()`). El backe
 - **Medias Móviles**: grid MA5→MA200 con badge ↑/↓, barra proporcional, precio y % distancia
 - **Pivots**: toggle Classic / Fibonacci, niveles R3→S3 con color coding (rojo=resistencia, verde=soporte)
 - **Patrón de velas**: badge con nombre y tipo (alcista/bajista/indecisión) en TickerModal header
+- **TradingView ↗**: botón en el modal que abre el chart con el ticker precargado. Crypto: `BTC-USD` → `BTCUSDT`. Futuros: ticker original (`GC=F`)
 
 ## Roadmap
 
@@ -259,6 +262,13 @@ El prompt está en `worker/src/providers/prompt.py` (`build_prompt()`). El backe
 - [x] Auto-creación de posiciones al guardar transacciones (individual y batch)
 - [x] /api/crypto-quotes en backend local (Binance) y Worker
 - [x] Worker: /api/quotes usa D1 para acciones y Binance para cripto (Yahoo Finance bloqueado)
+- [x] Lista de commodities (Gold, Silver, WTI, Wheat, etc.) con nombres legibles
+- [x] Botón TradingView ↗ en modal de ticker
+- [x] Accesos directos en escritorio (Iniciar/Detener Finanzas)
+- [x] Panel de API keys en ⚙️ de finanzas (configura ambos backends)
+- [x] CEDEARs con ratio en Portfolio y cálculo correcto en Patrimonio
+- [x] Fix USDT plazo fijo vs flexible: sync descuenta posiciones fixed_term activas
+- [x] Fix avg_price: se preserva cuando hay compras sin unit_price
 
 ### Features pendientes
 - [ ] Alertas por email o Telegram cuando cambia la señal
