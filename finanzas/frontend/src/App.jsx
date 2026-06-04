@@ -667,10 +667,10 @@ function PatrimonioTypeCard({ type, group, pct }) {
                     <div className="font-semibold text-sm text-gray-800 tabular-nums">
                       USD {(p.valueUSD).toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                     </div>
-                    {!['fixed_term','fund','flexible'].includes(p.asset_type) && (
+                    {!['fixed_term','fund'].includes(p.asset_type) && (
                       <div className="text-xs text-gray-400 tabular-nums">@ USD {fmtAmount(p.priceUSD)}</div>
                     )}
-                    {p.pnlUSD != null && !['fixed_term','fund','flexible'].includes(p.asset_type) && (
+                    {p.pnlUSD != null && !['fixed_term','fund'].includes(p.asset_type) && (
                       <div className={`text-xs font-semibold tabular-nums ${p.pnlUSD >= 0 ? 'text-green-600' : 'text-red-500'}`}>
                         {p.pnlUSD >= 0 ? '+' : ''}USD {p.pnlUSD.toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                         {' '}({p.pnlPct >= 0 ? '+' : ''}{p.pnlPct.toFixed(2)}%)
