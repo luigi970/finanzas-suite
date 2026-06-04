@@ -1129,6 +1129,13 @@ function AccountCard({ acc, positions, onEdit, onDelete, onSync }) {
                     )}
                     <div className="text-[10px] text-gray-500 tabular-nums">{fmtAmount(p.quantity)} {p.asset}</div>
                   </>
+                ) : ['crypto','stablecoin','stock','flexible'].includes(p.asset_type) && p.avg_price ? (
+                  <>
+                    <div className="font-semibold text-sm text-gray-800 tabular-nums">
+                      USD {(p.quantity * p.avg_price).toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                    </div>
+                    <div className="text-[10px] text-gray-500 tabular-nums">{fmtAmount(p.quantity)} {p.asset}</div>
+                  </>
                 ) : (
                   <>
                     <div className="font-semibold text-sm text-gray-800 tabular-nums">{fmtAmount(p.quantity)}</div>
