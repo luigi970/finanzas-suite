@@ -1114,11 +1114,27 @@ function AccountCard({ acc, positions, onEdit, onDelete, onSync }) {
                     <span className="text-[10px] bg-amber-100 text-amber-700 rounded px-1.5 py-0.5">vence {p.end_date}</span>
                   )}
                 </div>
-                {p.notes && <div className="text-xs text-gray-400 mt-0.5 truncate">{p.notes}</div>}
+                {p.asset_type === 'cedear' && p.rate
+                  ? <div className="text-[10px] text-green-600 mt-0.5">ratio {p.rate}</div>
+                  : p.notes && <div className="text-xs text-gray-400 mt-0.5 truncate">{p.notes}</div>
+                }
               </div>
               <div className="text-right shrink-0">
-                <div className="font-semibold text-sm text-gray-800 tabular-nums">{fmtAmount(p.quantity)}</div>
-                {p.rate && <div className="text-[10px] text-green-600">{p.asset_type === 'cedear' ? `ratio ${p.rate}` : `${p.rate}% anual`}</div>}
+                {p.asset_type === 'cedear' ? (
+                  <>
+                    {p.avg_price && (
+                      <div className="font-semibold text-sm text-gray-800 tabular-nums">
+                        ARS {(p.quantity * p.avg_price).toLocaleString('es-AR', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
+                      </div>
+                    )}
+                    <div className="text-[10px] text-gray-500 tabular-nums">{fmtAmount(p.quantity)} {p.asset}</div>
+                  </>
+                ) : (
+                  <>
+                    <div className="font-semibold text-sm text-gray-800 tabular-nums">{fmtAmount(p.quantity)}</div>
+                    {p.rate && <div className="text-[10px] text-green-600">{p.rate}% anual</div>}
+                  </>
+                )}
               </div>
               <div className="flex gap-1 shrink-0">
                 <button onClick={() => onEdit(p)} className="text-xs text-gray-300 hover:text-amber-500 px-1">✏️</button>
