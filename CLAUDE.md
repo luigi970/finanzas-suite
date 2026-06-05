@@ -269,6 +269,9 @@ El prompt está en `worker/src/providers/prompt.py` (`build_prompt()`). El backe
 - [x] CEDEARs con ratio en Portfolio y cálculo correcto en Patrimonio
 - [x] Fix USDT plazo fijo vs flexible: sync descuenta posiciones fixed_term activas
 - [x] Fix avg_price: se preserva cuando hay compras sin unit_price
+- [x] Portfolio muestra costo histórico (ARS para CEDEARs, USD para crypto/stocks) + cantidad
+- [x] P&L visible en Patrimonio para posiciones flexible con crypto (ETH staking, etc.)
+- [x] Labels contextuales en formulario de movimientos para CEDEARs
 
 ### Features pendientes
 - [ ] Alertas por email o Telegram cuando cambia la señal

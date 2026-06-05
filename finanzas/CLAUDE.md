@@ -175,7 +175,9 @@ Tanto `POST /api/transactions` como `POST /api/transactions/batch` crean automá
 - Tabs sticky: Patrimonio · Portfolio · Movimientos · Cuentas · Agente
 - `SettingsModal`: abre con ⚙️; toggle Online/Local para precios; sección API Keys con inputs show/hide para configurar GROQ y Google sin tocar el .env
 - Portfolio: botón 🔄 por cuenta para disparar sync de posiciones
-- `PatrimonioTab`: flexible no-fiat obtiene precio de mercado; CEDEARs usan ratio para calcular priceUSD
+- Portfolio AccountCard: CEDEARs muestran costo total en ARS + cantidad de láminas; crypto/stocks muestran costo total en USD + cantidad
+- `PatrimonioTab`: flexible no-fiat obtiene precio de mercado y muestra P&L igual que crypto; CEDEARs usan ratio para calcular priceUSD
+- Formulario de movimientos: labels contextuales para CEDEARs (Monto/Cantidad, Moneda/Activo, precio en ARS vs USD)
 - Constantes de URL en App.jsx:
   - `MAXIMOS_LOCAL = 'http://localhost:8000'`
   - `MAXIMOS_ONLINE = import.meta.env.VITE_MAXIMOS_URL || 'https://maximos-worker.luchotour.workers.dev'`
