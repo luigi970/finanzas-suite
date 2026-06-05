@@ -1017,13 +1017,15 @@ function TransactionForm({ initial, accounts, onSave, onClose }) {
       </div>
       <div className="grid grid-cols-2 gap-3">
         <div>
-          <label className="text-xs font-medium text-gray-500 uppercase tracking-wide">Monto</label>
+          <label className="text-xs font-medium text-gray-500 uppercase tracking-wide">Monto / Cantidad</label>
           <input type="number" step="any" min="0" value={form.amount} onChange={set('amount')} required className={inputCls} />
+          <p className="mt-0.5 text-[10px] text-gray-400">CEDEARs: cantidad de láminas</p>
         </div>
         <div>
-          <label className="text-xs font-medium text-gray-500 uppercase tracking-wide">Moneda</label>
+          <label className="text-xs font-medium text-gray-500 uppercase tracking-wide">Moneda / Activo</label>
           <input value={form.currency} onChange={set('currency')} required
-            className={inputCls} placeholder="ARS, USD, BTC..." />
+            className={inputCls} placeholder="ARS, BTC, NVDA..." />
+          <p className="mt-0.5 text-[10px] text-gray-400">CEDEARs: ticker (ej: NVDA)</p>
         </div>
       </div>
       {!isTransfer && (
@@ -1038,14 +1040,14 @@ function TransactionForm({ initial, accounts, onSave, onClose }) {
       {showUnitPrice && !isTransfer && (
         <div>
           <label className="text-xs font-medium text-gray-500 uppercase tracking-wide">
-            Precio por unidad (USD) <span className="text-gray-400 normal-case font-normal">(opcional)</span>
+            Precio por unidad <span className="text-gray-400 normal-case font-normal">(opcional)</span>
           </label>
           <input type="number" step="any" min="0" value={form.unit_price} onChange={set('unit_price')}
-            className={inputCls} placeholder="ej: 97500 para ETH a USD 97.500" />
+            className={inputCls} placeholder="ej: 97500" />
           <p className="mt-1 text-[11px] text-gray-400 leading-snug">
             {form.type === 'income'
-              ? 'Si lo completás, el costo promedio de tu posición se actualiza automáticamente.'
-              : 'Si lo completás, se calcula y guarda la ganancia o pérdida realizada de esta venta.'}
+              ? 'Actualiza el precio promedio de tu posición. USD para crypto/acciones, ARS para CEDEARs.'
+              : 'Calcula la ganancia o pérdida realizada. USD para crypto/acciones, ARS para CEDEARs.'}
           </p>
         </div>
       )}
