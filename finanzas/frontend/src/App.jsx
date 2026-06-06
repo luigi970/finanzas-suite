@@ -44,9 +44,9 @@ const ACCOUNT_TYPES = [
 ]
 
 const ASSET_TYPES = [
-  { value: 'fiat',       label: 'Fiat (ARS/USD)' },
-  { value: 'stablecoin', label: 'Stablecoin (USDT/USDC)' },
-  { value: 'crypto',     label: 'Crypto (BTC/ETH)' },
+  { value: 'fiat',       label: 'Fiat' },
+  { value: 'stablecoin', label: 'Stablecoin' },
+  { value: 'crypto',     label: 'Crypto' },
   { value: 'stock',      label: 'Acción' },
   { value: 'cedear',     label: 'CEDEAR' },
   { value: 'fixed_term', label: 'Plazo fijo' },
@@ -689,9 +689,7 @@ function PatrimonioTypeCard({ type, group, pct }) {
   )
 }
 
-function PatrimonioTab({ positions, transactions = [], maximosUrl = MAXIMOS_ONLINE }) {
-  const [prices,   setPrices]   = useState({})
-  const [blueRate, setBlueRate] = useState(null)
+function PatrimonioTab({ positions, transactions = [], maximosUrl = MAXIMOS_ONLINE, prices = {}, blueRate = null, onRefreshPrices }) {
   const [loading,  setLoading]  = useState(true)
   const [error,    setError]    = useState(null)
   const [layout,   setLayout]   = useState(() => localStorage.getItem('patrimonio_layout') || 'grid')
@@ -705,39 +703,22 @@ function PatrimonioTab({ positions, transactions = [], maximosUrl = MAXIMOS_ONLI
   const monthExpense = monthTx.filter(t => t.type === 'expense').reduce((s, t) => s + t.amount, 0)
   const currencies = [...new Set(monthTx.map(t => t.currency))].slice(0, 2).join(' / ') || '—'
 
-  const load = useCallback(async () => {
-    setLoading(true)
-    setError(null)
-    try {
-      // 1. Tipo de cambio blue desde maximos
-      const dollarRes = await fetch(`${MAXIMOS_API}/api/dollar`)
-      if (dollarRes.ok) {
-        const dollarData = await dollarRes.json()
-        const blue = (dollarData.dollar || []).find(d => d.nombre?.toLowerCase().includes('blue'))
-        if (blue) setBlueRate(blue.venta)
-      }
-
-      // 2. Precios de activos desde maximos
-      const needsPrice = positions.filter(p =>
-        !FIAT_ARS.has(p.asset) && !FIAT_USD.has(p.asset) && !STABLECOINS.has(p.asset) &&
-        p.asset_type !== 'fixed_term' && p.asset_type !== 'fund'
-      )
-      if (needsPrice.length > 0) {
-        const tickers = [...new Set(needsPrice.map(p => toYahooTicker(p.asset, p.asset_type)))].join(',')
-        const quotesRes = await fetch(`${MAXIMOS_API}/api/quotes?tickers=${tickers}`)
-        if (quotesRes.ok) {
-          const quotesData = await quotesRes.json()
-          setPrices(quotesData.quotes || {})
-        }
-      }
-    } catch (e) {
-      setError(`No se pudo conectar con maximos (${MAXIMOS_API}). Verificá tu conexión o que el servidor esté corriendo.`)
-    } finally {
+  useEffect(() => {
+    if (blueRate || Object.keys(prices).length > 0) {
       setLoading(false)
+      setError(null)
     }
-  }, [positions, maximosUrl])
+  }, [prices, blueRate])
 
-  useEffect(() => { if (positions.length) load() }, [load, positions])
+  useEffect(() => {
+    const t = setTimeout(() => {
+      if (!blueRate && Object.keys(prices).length === 0) {
+        setLoading(false)
+        setError(`No se pudo conectar con maximos (${MAXIMOS_API}). Verificá tu conexión o que el servidor esté corriendo.`)
+      }
+    }, 5000)
+    return () => clearTimeout(t)
+  }, []) // eslint-disable-line
 
   function getPriceUSD(pos) {
     if (FIAT_USD.has(pos.asset) || STABLECOINS.has(pos.asset)) return 1
@@ -828,7 +809,7 @@ function PatrimonioTab({ positions, transactions = [], maximosUrl = MAXIMOS_ONLI
       {error && (
         <div className="bg-amber-50 border border-amber-200 rounded-xl px-4 py-3 text-sm text-amber-700 flex items-center justify-between">
           <span>{error}</span>
-          <button onClick={load} className="text-amber-600 font-medium hover:underline">Reintentar</button>
+          <button onClick={() => onRefreshPrices?.(positions)} className="text-amber-600 font-medium hover:underline">Reintentar</button>
         </div>
       )}
 
@@ -925,7 +906,7 @@ function PatrimonioTab({ positions, transactions = [], maximosUrl = MAXIMOS_ONLI
         </div>
       </div>
 
-      <button onClick={load} className="text-xs text-amber-600 hover:underline w-full text-center py-2">
+      <button onClick={() => onRefreshPrices?.(positions)} className="text-xs text-amber-600 hover:underline w-full text-center py-2">
         Actualizar precios
       </button>
     </div>
@@ -963,9 +944,7 @@ function TransactionForm({ initial, accounts, onSave, onClose }) {
     else { delete base.fee; delete base.fee_currency }
 
     if (isTransfer && form.to_account_id) {
-      // Crear egreso en cuenta origen e ingreso en cuenta destino
-      await onSave({ ...base, type: 'expense', description: base.description || 'Transferencia' })
-      await onSave({ ...base, type: 'income',  account_id: parseInt(form.to_account_id), description: base.description || 'Transferencia' })
+      await onSave({ ...base, _transfer_to: parseInt(form.to_account_id), description: base.description || 'Transferencia' })
     } else {
       await onSave(base)
     }
@@ -1079,7 +1058,16 @@ function TransactionForm({ initial, accounts, onSave, onClose }) {
 }
 
 // ── AccountCard ───────────────────────────────────────────────────────────────
-function AccountCard({ acc, positions, onEdit, onDelete, onSync }) {
+function AccountCard({ acc, positions, onEdit, onDelete, onSync, prices = {}, blueRate = null }) {
+  function mktPriceUSD(p) {
+    if (FIAT_USD.has(p.asset) || STABLECOINS.has(p.asset)) return 1
+    if (FIAT_ARS.has(p.asset)) return blueRate ? 1 / blueRate : null
+    const ticker = toYahooTicker(p.asset, p.asset_type)
+    const raw = prices[ticker]?.price ?? null
+    if (raw == null) return null
+    if (p.asset_type === 'cedear' && p.rate > 0) return raw / p.rate
+    return raw
+  }
   const [open, setOpen] = useState(true)
   const [syncing, setSyncing] = useState(false)
 
@@ -1131,11 +1119,17 @@ function AccountCard({ acc, positions, onEdit, onDelete, onSync }) {
                     )}
                     <div className="text-[10px] text-gray-500 tabular-nums">{fmtAmount(p.quantity)} {p.asset}</div>
                   </>
-                ) : ['crypto','stablecoin','stock','flexible'].includes(p.asset_type) && p.avg_price ? (
+                ) : ['crypto','stablecoin','stock','flexible'].includes(p.asset_type) ? (
                   <>
-                    <div className="font-semibold text-sm text-gray-800 tabular-nums">
-                      USD {(p.quantity * p.avg_price).toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                    </div>
+                    {(() => {
+                      const mkt = mktPriceUSD(p)
+                      const usdVal = mkt != null ? p.quantity * mkt : (p.avg_price ? p.quantity * p.avg_price : null)
+                      return usdVal != null ? (
+                        <div className="font-semibold text-sm text-gray-800 tabular-nums">
+                          USD {usdVal.toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                        </div>
+                      ) : null
+                    })()}
                     <div className="text-[10px] text-gray-500 tabular-nums">{fmtAmount(p.quantity)} {p.asset}</div>
                   </>
                 ) : (
@@ -1158,7 +1152,7 @@ function AccountCard({ acc, positions, onEdit, onDelete, onSync }) {
 }
 
 // ── PortfolioTab ──────────────────────────────────────────────────────────────
-function PortfolioTab({ accounts, positions, onAddPosition, onEditPosition, onDeletePosition, onSyncAccount }) {
+function PortfolioTab({ accounts, positions, onAddPosition, onEditPosition, onDeletePosition, onSyncAccount, prices = {}, blueRate = null }) {
   const activeAccounts = accounts.filter(a => a.active)
   const hasPositions = positions.length > 0
   const [layout, setLayout] = useState(() => localStorage.getItem('portfolio_layout') || 'grid')
@@ -1195,6 +1189,8 @@ function PortfolioTab({ accounts, positions, onAddPosition, onEditPosition, onDe
                   onEdit={onEditPosition}
                   onDelete={onDeletePosition}
                   onSync={onSyncAccount}
+                  prices={prices}
+                  blueRate={blueRate}
                 />
               </div>
             )
@@ -1563,6 +1559,31 @@ export default function App() {
   const [maximosMode, setMaximosMode] = useState(() => localStorage.getItem('maximos_mode') || 'online')
   const maximosUrl = maximosMode === 'local' ? MAXIMOS_LOCAL : MAXIMOS_ONLINE
   const saveMaximosMode = m => { setMaximosMode(m); localStorage.setItem('maximos_mode', m) }
+  const [prices,   setPrices]   = useState({})
+  const [blueRate, setBlueRate] = useState(null)
+
+  const loadPrices = useCallback(async (pos) => {
+    try {
+      const dollarRes = await fetch(`${maximosUrl}/api/dollar`)
+      if (dollarRes.ok) {
+        const dd = await dollarRes.json()
+        const blue = (dd.dollar || []).find(d => d.nombre?.toLowerCase().includes('blue'))
+        if (blue) setBlueRate(blue.venta)
+      }
+      const needsPrice = pos.filter(p =>
+        !FIAT_ARS.has(p.asset) && !FIAT_USD.has(p.asset) && !STABLECOINS.has(p.asset) &&
+        p.asset_type !== 'fixed_term' && p.asset_type !== 'fund'
+      )
+      if (needsPrice.length > 0) {
+        const tickers = [...new Set(needsPrice.map(p => toYahooTicker(p.asset, p.asset_type)))].join(',')
+        const quotesRes = await fetch(`${maximosUrl}/api/quotes?tickers=${tickers}`)
+        if (quotesRes.ok) {
+          const quotesData = await quotesRes.json()
+          setPrices(quotesData.quotes || {})
+        }
+      }
+    } catch (_) {}
+  }, [maximosUrl])
 
   const load = useCallback(async () => {
     const [ac, po, tx] = await Promise.all([
@@ -1576,6 +1597,7 @@ export default function App() {
   }, [])
 
   useEffect(() => { load() }, [load])
+  useEffect(() => { if (positions.length) loadPrices(positions) }, [positions, loadPrices])
 
   async function saveAccount(data) {
     if (editTarget) {
@@ -1619,7 +1641,18 @@ export default function App() {
   }
 
   async function saveTransaction(data) {
-    if (editTarget?.id) {
+    if (data._transfer_to) {
+      const { _transfer_to, ...rest } = data
+      const expense = { ...rest, type: 'expense' }
+      const income  = { ...rest, type: 'income', account_id: _transfer_to }
+      if (editTarget?.id) {
+        await api(`/api/transactions/${editTarget.id}`, { method: 'PATCH', body: JSON.stringify(expense) })
+      } else {
+        await api('/api/transactions', { method: 'POST', body: JSON.stringify(expense) })
+      }
+      await api('/api/transactions', { method: 'POST', body: JSON.stringify(income) })
+      await api(`/api/positions/create-missing/${_transfer_to}`, { method: 'POST' })
+    } else if (editTarget?.id) {
       await api(`/api/transactions/${editTarget.id}`, { method: 'PATCH', body: JSON.stringify(data) })
     } else {
       await api('/api/transactions', { method: 'POST', body: JSON.stringify(data) })
@@ -1686,7 +1719,7 @@ export default function App() {
 
         {/* PATRIMONIO */}
         {tab === 'patrimonio' && (
-          <PatrimonioTab positions={positions} transactions={transactions} maximosUrl={maximosUrl} />
+          <PatrimonioTab positions={positions} transactions={transactions} maximosUrl={maximosUrl} prices={prices} blueRate={blueRate} onRefreshPrices={loadPrices} />
         )}
 
         {/* PORTFOLIO */}
@@ -1701,6 +1734,8 @@ export default function App() {
               await api(`/api/positions/sync/${accountId}`, { method: 'POST' })
               await load()
             }}
+            prices={prices}
+            blueRate={blueRate}
           />
         )}
 

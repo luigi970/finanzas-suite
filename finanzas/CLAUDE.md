@@ -108,7 +108,7 @@ Las keys también se pueden configurar desde la UI: ⚙️ → sección "API Key
 ### `_sync_position` (transactions.py)
 Recalcula `quantity` y `avg_price` de la posición desde todos los movimientos. Reglas:
 - **Quantity**: suma ingresos - egresos de todas las transacciones del activo en la cuenta, **menos** lo que ya está en posiciones `fixed_term`/`fund` activas (con `end_date` futura). Esto evita que el flexible duplique lo que está en plazo fijo.
-- **avg_price**: solo se recalcula (media ponderada por monto) si **todas** las transacciones de ingreso tienen `unit_price`. Si alguna no tiene precio (ej. transferencias), se preserva el `avg_price` existente en la posición (puede ser manual).
+- **avg_price**: se recalcula (media ponderada) usando **solo** las transacciones de ingreso que tienen `unit_price > 0`. Las transferencias (sin `unit_price`) se ignoran — no bloquean el cálculo ni distorsionan el promedio. Si no hay ninguna compra con precio, se preserva el `avg_price` existente (puede ser manual).
 - Se llama automáticamente después de crear, editar o eliminar una transacción.
 - El botón 🔄 por cuenta en Portfolio también lo dispara vía `POST /api/positions/sync/{account_id}`.
 
@@ -162,7 +162,7 @@ Tanto `POST /api/transactions` como `POST /api/transactions/batch` crean automá
 - `end_date = ''` (string vacío) ≠ `NULL` en SQLite — siempre usar `(end_date IS NULL OR end_date = '')` para posiciones activas
 - `prices[ticker]` en el frontend es un objeto `{ price, change, change_pct }`, no un número plano — acceder con `.price`
 - `_sync_position` descuenta posiciones `fixed_term`/`fund` activas (end_date futura) para no duplicar en flexible
-- `_sync_position` preserva `avg_price` si hay ingresos sin `unit_price` — el avg_price manual no se sobreescribe
+- `_sync_position` recalcula `avg_price` solo desde ingresos con `unit_price > 0` — las transferencias sin precio no bloquean el cálculo. Si no hay compras con precio, preserva el avg_price manual.
 - CEDEARs: `rate` = ratio (no tasa de interés), `avg_price` en ARS (no USD)
 - `$pid` es variable reservada en PowerShell — usar `$procId` en stop-all.ps1
 - `Test-NetConnection` es más confiable que `Invoke-WebRequest` para port polling en ventanas ocultas de PowerShell
@@ -175,9 +175,11 @@ Tanto `POST /api/transactions` como `POST /api/transactions/batch` crean automá
 - Tabs sticky: Patrimonio · Portfolio · Movimientos · Cuentas · Agente
 - `SettingsModal`: abre con ⚙️; toggle Online/Local para precios; sección API Keys con inputs show/hide para configurar GROQ y Google sin tocar el .env
 - Portfolio: botón 🔄 por cuenta para disparar sync de posiciones
-- Portfolio AccountCard: CEDEARs muestran costo total en ARS + cantidad de láminas; crypto/stocks muestran costo total en USD + cantidad
+- Portfolio AccountCard: CEDEARs muestran costo total en ARS + cantidad de láminas; crypto/stocks muestran **valor de mercado actual en USD** (precio real × cantidad) + cantidad. Fallback a costo histórico si el precio no está disponible.
+- `prices` y `blueRate` viven en `App` y se fetchean una vez al cargar posiciones — compartidos entre `PatrimonioTab` y `PortfolioTab`. Antes vivían dentro de `PatrimonioTab` y Portfolio no tenía acceso.
 - `PatrimonioTab`: flexible no-fiat obtiene precio de mercado y muestra P&L igual que crypto; CEDEARs usan ratio para calcular priceUSD
 - Formulario de movimientos: labels contextuales para CEDEARs (Monto/Cantidad, Moneda/Activo, precio en ARS vs USD)
+- Transferencias entre cuentas: el formulario envía `_transfer_to` en un solo `onSave`. `saveTransaction` hace PATCH del egreso en origen y POST del ingreso en destino — evita el bug donde editar a tipo transferencia sobreescribía el mismo registro dos veces.
 - Constantes de URL en App.jsx:
   - `MAXIMOS_LOCAL = 'http://localhost:8000'`
   - `MAXIMOS_ONLINE = import.meta.env.VITE_MAXIMOS_URL || 'https://maximos-worker.luchotour.workers.dev'`

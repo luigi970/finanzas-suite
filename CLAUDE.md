@@ -272,6 +272,9 @@ El prompt está en `worker/src/providers/prompt.py` (`build_prompt()`). El backe
 - [x] Portfolio muestra costo histórico (ARS para CEDEARs, USD para crypto/stocks) + cantidad
 - [x] P&L visible en Patrimonio para posiciones flexible con crypto (ETH staking, etc.)
 - [x] Labels contextuales en formulario de movimientos para CEDEARs
+- [x] Transferencias entre cuentas: formulario crea egreso en origen e ingreso en destino en un solo paso (fix bug edición)
+- [x] Portfolio muestra valor de mercado USD actual para crypto/stocks (prices compartidos desde App)
+- [x] `_sync_position`: avg_price se recalcula con nueva compra incluso si hay transferencias sin precio en el historial
 
 ### Features pendientes
 - [ ] Alertas por email o Telegram cuando cambia la señal

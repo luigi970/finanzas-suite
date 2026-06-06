@@ -25,6 +25,7 @@ En la parte superior hay botones para seleccionar qué activos querés analizar:
 | **ETFs** | 49 fondos cotizados (sectores, bonos, commodities, etc.) |
 | **ADRs Argentina** | GGAL, YPF, MELI, GLOB, VIST, BBAR y más |
 | **Crypto** | Las principales criptos por market cap (sin stablecoins) |
+| **Commodities** | Metales (Gold, Silver, Copper, Platinum), energía (WTI, Brent, Gas) y agrícolas (Wheat, Corn, Soy, Coffee, etc.) |
 
 Para **Crypto** aparece un slider que te permite elegir cuántas criptos incluir (10 a 100).
 
@@ -59,6 +60,7 @@ Hacé click en cualquier fila de la tabla para abrir el **panel de detalle**. Ah
 - Niveles de Stop Loss y Take Profit
 - Señal del Helper Pulse
 - **Recomendación generada por IA** (se carga automáticamente)
+- **Botón TradingView ↗** — abre el chart del ticker directamente en TradingView con el símbolo precargado
 
 ---
 
@@ -216,6 +218,7 @@ La IA usa tres proveedores en cascada: primero intenta con **Cloudflare Workers 
 | Nasdaq 100 | Lunes a viernes, 2am UTC |
 | ETFs | Lunes a viernes, 2am UTC |
 | ADRs Argentina | Lunes a viernes, 2am UTC |
+| Commodities | Lunes a viernes, 2am UTC |
 | Crypto | Solo cuando presionás **Analizar** manualmente |
 
 Podés pedir una actualización manual de cualquier lista en cualquier momento con el botón **Analizar**. Los resultados anteriores se muestran instantáneamente mientras el nuevo análisis corre en segundo plano.
