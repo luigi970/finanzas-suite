@@ -68,8 +68,8 @@ const ACCOUNT_COLORS = [
 
 function fmtAmount(amount) {
   if (amount === null || amount === undefined) return '—'
-  // detecta cuántos decimales significativos tiene
   const str = amount.toString()
+  if (str.includes('e') || str.includes('E')) return amount.toFixed(8).replace(/\.?0+$/, '')
   const decimals = str.includes('.') ? str.split('.')[1].replace(/0+$/, '').length : 0
   if (decimals > 4) return amount.toFixed(Math.min(decimals, 8))
   if (decimals > 2) return amount.toFixed(decimals)
@@ -545,7 +545,7 @@ function IngestPanel({ accounts, onDone }) {
                     {(t.unit_price || t.fee) && (
                       <div className="flex gap-3 pl-4 text-gray-400 mt-0.5">
                         {t.unit_price && <span>@ USD {fmtAmount(t.unit_price)}</span>}
-                        {t.fee && <span className="text-orange-400">comisión {t.fee} {t.fee_currency}</span>}
+                        {t.fee && <span className="text-orange-400">comisión {fmtAmount(t.fee)} {t.fee_currency}</span>}
                       </div>
                     )}
                   </button>
@@ -1030,19 +1030,18 @@ function TransactionForm({ initial, accounts, onSave, onClose }) {
           </p>
         </div>
       )}
-      {!isTransfer && (
-        <div>
-          <label className="text-xs font-medium text-gray-500 uppercase tracking-wide">
-            Comisión <span className="text-gray-400 normal-case font-normal">(opcional)</span>
-          </label>
-          <div className="flex gap-2 mt-1">
-            <input type="number" step="any" min="0" value={form.fee} onChange={set('fee')}
-              className={`${inputCls} flex-1`} placeholder="0.001" />
-            <input type="text" value={form.fee_currency} onChange={set('fee_currency')}
-              className="w-24 border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-amber-400 shrink-0" placeholder="BNB" maxLength={10} />
-          </div>
+      <div>
+        <label className="text-xs font-medium text-gray-500 uppercase tracking-wide">
+          Comisión <span className="text-gray-400 normal-case font-normal">(opcional)</span>
+        </label>
+        <div className="flex gap-2 mt-1">
+          <input type="number" step="any" min="0" value={form.fee} onChange={set('fee')}
+            className={`${inputCls} flex-1`} placeholder="0.001" />
+          <input type="text" value={form.fee_currency} onChange={set('fee_currency')}
+            className="w-24 border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-amber-400 shrink-0" placeholder="BNB" maxLength={10} />
         </div>
-      )}
+        {isTransfer && <p className="mt-1 text-[11px] text-gray-400">Si la comisión es en la misma moneda, se resta del monto recibido en destino.</p>}
+      </div>
       <div className="flex gap-2 pt-1">
         <button type="button" onClick={onClose}
           className="flex-1 py-2 rounded-lg border border-gray-200 text-sm text-gray-600 hover:bg-gray-50">
@@ -1372,7 +1371,7 @@ function MovimientosTab({ transactions, accounts, onEdit, onDelete, onNewManual,
                     </div>
                   )}
                   {t.fee != null && t.fee > 0 && (
-                    <div className="text-xs text-orange-400 tabular-nums">comisión {t.fee} {t.fee_currency}</div>
+                    <div className="text-xs text-orange-400 tabular-nums">comisión {fmtAmount(t.fee)} {t.fee_currency}</div>
                   )}
                 </div>
                 <button onClick={() => onEdit(t)} className="text-gray-300 hover:text-amber-500 px-1 text-xs shrink-0">✏️</button>
@@ -1644,7 +1643,11 @@ export default function App() {
     if (data._transfer_to) {
       const { _transfer_to, ...rest } = data
       const expense = { ...rest, type: 'expense' }
-      const income  = { ...rest, type: 'income', account_id: _transfer_to }
+      // Si la comisión está en la misma moneda, el destino recibe amount - fee
+      const receivedAmount = (rest.fee > 0 && rest.fee_currency?.toUpperCase() === rest.currency?.toUpperCase())
+        ? Math.max(0, rest.amount - rest.fee)
+        : rest.amount
+      const income  = { ...rest, type: 'income', account_id: _transfer_to, amount: receivedAmount, fee: undefined, fee_currency: undefined }
       if (editTarget?.id) {
         await api(`/api/transactions/${editTarget.id}`, { method: 'PATCH', body: JSON.stringify(expense) })
       } else {
