@@ -1130,6 +1130,25 @@ function AccountCard({ acc, positions, onEdit, onDelete, onSync, prices = {}, bl
                       ) : null
                     })()}
                     <div className="text-[10px] text-gray-500 tabular-nums">{fmtAmount(p.quantity)} {p.asset}</div>
+                    {(() => {
+                      try {
+                        const mkt = mktPriceUSD(p)
+                        if (mkt == null || !p.avg_price || STABLECOINS.has(p.asset) || FIAT_USD.has(p.asset)) return null
+                        const avgUSD = p.asset_type === 'cedear'
+                          ? (blueRate ? p.avg_price / blueRate : null)
+                          : p.avg_price
+                        if (!avgUSD || avgUSD <= 0) return null
+                        const pct = (mkt - avgUSD) / avgUSD * 100
+                        const fmtAvg = v => v >= 100
+                          ? v.toLocaleString('es-AR', { minimumFractionDigits: 0, maximumFractionDigits: 0 })
+                          : v >= 1 ? v.toFixed(2) : fmtAmount(v)
+                        return (
+                          <div className={`text-[10px] tabular-nums ${pct >= 0 ? 'text-green-600' : 'text-red-500'}`}>
+                            prom. USD {fmtAvg(avgUSD)} · {pct >= 0 ? '+' : ''}{pct.toFixed(1)}%
+                          </div>
+                        )
+                      } catch { return null }
+                    })()}
                   </>
                 ) : (
                   <>
