@@ -138,14 +138,16 @@ Tanto `POST /api/transactions` como `POST /api/transactions/batch` crean automá
 
 ### Agente IA (`routers/agent.py`)
 - Cadena: Groq → Gemini fallback
-- Fuente de precios: `MAXIMOS_URL` (env var, por defecto `https://maximos-worker.luchotour.workers.dev`)
-  - `GET /api/dollar` → tasa blue ARS/USD
-  - `GET /api/quotes?symbols=...` → precios de acciones/CEDEARs desde D1
-  - `GET /api/crypto-quotes?symbols=...` → precios de cripto desde Binance
-- `build_price_context()`: obtiene todos los precios necesarios para valuar la cartera
+- Fuentes de precios:
+  - **Crypto** (asset_type `crypto` o `flexible` no-fiat): directo a Binance desde el backend local — evita dependencia del CF Worker que puede tener problemas alcanzando Binance desde datacenter
+  - **Stocks / CEDEARs**: `MAXIMOS_URL/api/quotes` → D1 (precio del último screener)
+  - **Dólar blue**: `MAXIMOS_URL/api/dollar` → dolarapi.com
+- `to_yahoo_ticker`: maneja `flexible` no-fiat como crypto (devuelve `ASSET-USD`)
+- `build_price_context()`: valuación completa de cartera con precio actual × cantidad, P&L no realizado (vs precio promedio de compra) y precio promedio explícito en cada posición. End_date/tasa/notas incluidas para plazos fijos.
+- `build_technical_context()`: consulta `MAXIMOS_URL/api/stocks` para cada lista relevante (crypto, adrs_arg, sp500) y agrega señal, score, zona, RSI, ADX, MACD, volumen, EMAs MA20/50/200, patrón de velas y SL/TP de cada activo en cartera.
 - `_calc_accrued(p)`: replica el JS `calcAccruedInterest` — `quantity × (rate/100) × days/365`
-- Contexto enviado al modelo: cuentas, posiciones con valor en USD, P&L no realizado, últimas 50 transacciones, resumen mensual, P&L realizado acumulado, totales en USD y ARS
-- SYSTEM_PROMPT: asesor financiero personal, español rioplatense, profesional y directo, responde solo lo que se le pregunta, máximo 4 oraciones salvo análisis detallado explícito
+- Contexto enviado al modelo: cuentas, valuación con precios reales y P&L por posición, análisis técnico del screener, últimas 50 transacciones, resumen mensual, P&L realizado acumulado, totales en USD y ARS
+- SYSTEM_PROMPT: asesor directo que usa números exactos del usuario, toma posición concreta, no aproxima cuando tiene datos exactos, filosofía DCA + largo plazo, contexto argentino (blue, CEDEARs, plazo fijo vs inflación)
 
 ### Configuración de API keys (`main.py`)
 - `GET /api/config`: devuelve los valores actuales de `GROQ_API_KEY` y `GOOGLE_API_KEY` (texto plano, app local)
@@ -166,6 +168,9 @@ Tanto `POST /api/transactions` como `POST /api/transactions/batch` crean automá
 - CEDEARs: `rate` = ratio (no tasa de interés), `avg_price` en ARS (no USD)
 - `$pid` es variable reservada en PowerShell — usar `$procId` en stop-all.ps1
 - `Test-NetConnection` es más confiable que `Invoke-WebRequest` para port polling en ventanas ocultas de PowerShell
+- **Binance desde CF Worker**: el Worker puede tener problemas alcanzando `api.binance.com` desde datacenter. El agente fetchea crypto directo a Binance desde el backend local para evitarlo.
+- **`env.DB` vs `env.maximos_db`**: el binding D1 en el Worker se llama `maximos_db` (ver `wrangler.toml`). Usar siempre `env.maximos_db`, nunca `env.DB`.
+- **`flexible` no-fiat en `to_yahoo_ticker`**: posiciones con `asset_type='flexible'` y activo crypto (ej. ETH en Nexo staking) deben devolver `ETH-USD`, no `ETH`. El caso está manejado explícitamente.
 
 ## UI
 
@@ -175,8 +180,9 @@ Tanto `POST /api/transactions` como `POST /api/transactions/batch` crean automá
 - Tabs sticky: Patrimonio · Portfolio · Movimientos · Cuentas · Agente
 - `SettingsModal`: abre con ⚙️; toggle Online/Local para precios; sección API Keys con inputs show/hide para configurar GROQ y Google sin tocar el .env
 - Portfolio: botón 🔄 por cuenta para disparar sync de posiciones
-- Portfolio AccountCard: CEDEARs muestran costo total en ARS + cantidad de láminas; crypto/stocks muestran **valor de mercado actual en USD** (precio real × cantidad) + cantidad. Fallback a costo histórico si el precio no está disponible.
-- `prices` y `blueRate` viven en `App` y se fetchean una vez al cargar posiciones — compartidos entre `PatrimonioTab` y `PortfolioTab`. Antes vivían dentro de `PatrimonioTab` y Portfolio no tenía acceso.
+- Portfolio AccountCard: CEDEARs muestran costo total en ARS + cantidad; crypto/stocks/flexible muestran valor de mercado USD actual + cantidad + línea de precio promedio de compra con % P&L en verde/rojo (`prom. USD X · ±Y%`). Fallback a costo histórico si no hay precio disponible.
+- `prices` y `blueRate` viven en `App` y se fetchean una vez al cargar posiciones — compartidos entre `PatrimonioTab` y `PortfolioTab`.
+- `chatMessages` vive en `App` (constante `INITIAL_MESSAGES`) — persiste entre tabs sin reiniciar la conversación.
 - `PatrimonioTab`: flexible no-fiat obtiene precio de mercado y muestra P&L igual que crypto; CEDEARs usan ratio para calcular priceUSD
 - Formulario de movimientos: labels contextuales para CEDEARs (Monto/Cantidad, Moneda/Activo, precio en ARS vs USD)
 - Transferencias entre cuentas: el formulario envía `_transfer_to` en un solo `onSave`. `saveTransaction` hace PATCH del egreso en origen y POST del ingreso en destino — evita el bug donde editar a tipo transferencia sobreescribía el mismo registro dos veces.

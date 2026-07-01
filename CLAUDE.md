@@ -275,6 +275,12 @@ El prompt está en `worker/src/providers/prompt.py` (`build_prompt()`). El backe
 - [x] Transferencias entre cuentas: formulario crea egreso en origen e ingreso en destino en un solo paso (fix bug edición)
 - [x] Portfolio muestra valor de mercado USD actual para crypto/stocks (prices compartidos desde App)
 - [x] `_sync_position`: avg_price se recalcula con nueva compra incluso si hay transferencias sin precio en el historial
+- [x] Portfolio AccountCard muestra precio promedio de compra y % P&L por posición crypto/stock
+- [x] Agente IA: análisis técnico del screener integrado al contexto (RSI, ADX, MACD, EMAs, zona, SL/TP)
+- [x] Agente IA: crypto prices directo a Binance desde backend local (evita fallo del Worker con Binance)
+- [x] Agente IA: posiciones flexible no-fiat (ETH staking) obtienen precio de mercado real
+- [x] Conversación del agente persiste al cambiar de tab
+- [x] Fix: env.DB → env.maximos_db en Worker /api/quotes para stocks desde D1
 
 ### Features pendientes
 - [ ] Alertas por email o Telegram cuando cambia la señal
