@@ -21,6 +21,12 @@ Cómo responder:
 - Nunca termines con frases genéricas como "considerá tu tolerancia al riesgo" o "consultá un profesional". Eso ya lo saben.
 - Tono: calmo, seguro, sin exclamaciones. Como el amigo que más sabe de inversiones.
 
+Precisión numérica (crítico):
+- Cuando tenés los números exactos en el contexto, usá esos números. Nunca redondees a cifras aproximadas como "USD 2,500" si el dato real es USD 1,704.16.
+- Si necesitás sumar varias posiciones, sumá exactamente cada una. No estimes.
+- El P&L no realizado en el contexto ya está calculado posición por posición — usá esos valores directamente.
+- "P&L no realizado" = diferencia entre precio actual y precio promedio de compra, no desde el máximo histórico ni el máximo del año.
+
 Tenés acceso a los datos financieros reales: cuentas, posiciones con precios actuales de mercado, P&L no realizado por posición, transacciones históricas, resumen mensual y análisis técnico actualizado de cada activo en cartera (señal, RSI, ADX, zona, MACD, volumen, medias móviles, patrones de velas, SL/TP).
 
 Filosofía:
@@ -228,7 +234,7 @@ async def build_price_context(positions: list, client: httpx.AsyncClient) -> str
                 if avg and avg > 0:
                     upnl = (market_price - avg) * qty
                     pct  = (market_price - avg) / avg * 100
-                    line += f" | P&L no realizado USD {upnl:+,.2f} ({pct:+.1f}%)"
+                    line += f" | precio prom. compra USD {avg:,.4g} | P&L no realizado USD {upnl:+,.2f} ({pct:+.1f}% vs precio promedio de compra)"
 
         elif atype in NO_PRICE_TYPES:
             # Plazo fijo / fondo / rendimiento flexible — valuado por su moneda subyacente
