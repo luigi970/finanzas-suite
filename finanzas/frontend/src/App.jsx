@@ -1219,10 +1219,11 @@ function PortfolioTab({ accounts, positions, onAddPosition, onEditPosition, onDe
   )
 }
 
-function Chat() {
-  const [messages, setMessages] = useState([
-    { role: 'assistant', content: '¡Hola! Soy tu asesor financiero. Puedo analizar tus cuentas, posiciones y movimientos. ¿En qué te ayudo?' }
-  ])
+const INITIAL_MESSAGES = [
+  { role: 'assistant', content: '¡Hola! Soy tu asesor financiero. Puedo analizar tus cuentas, posiciones y movimientos. ¿En qué te ayudo?' }
+]
+
+function Chat({ messages, setMessages }) {
   const [input, setInput] = useState('')
   const [loading, setLoading] = useState(false)
   const bottomRef = useRef()
@@ -1572,6 +1573,7 @@ export default function App() {
   const [accounts, setAccounts] = useState([])
   const [positions, setPositions] = useState([])
   const [transactions, setTransactions] = useState([])
+  const [chatMessages, setChatMessages] = useState(INITIAL_MESSAGES)
   const [modal, setModal] = useState(null) // null | 'add-account' | 'add-position' | 'ingest' | 'help' | 'settings'
   const [editTarget, setEditTarget] = useState(null)
   const [maximosMode, setMaximosMode] = useState(() => localStorage.getItem('maximos_mode') || 'online')
@@ -1776,7 +1778,7 @@ export default function App() {
         {/* AGENTE */}
         {tab === 'agente' && (
           <div className="max-w-2xl mx-auto h-[calc(100vh-200px)] bg-white rounded-xl border border-gray-200 shadow-sm flex flex-col overflow-hidden">
-            <Chat />
+            <Chat messages={chatMessages} setMessages={setChatMessages} />
           </div>
         )}
 

@@ -1,4 +1,4 @@
-import os, json
+import os, json, asyncio
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 from typing import Optional
@@ -11,19 +11,27 @@ GROQ_API_KEY   = os.getenv("GROQ_API_KEY", "")
 GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY", "")
 MAXIMOS_URL    = os.getenv("MAXIMOS_URL", "https://maximos-worker.luchotour.workers.dev")
 
-SYSTEM_PROMPT = """Sos un asesor financiero personal de alto nivel. Hablás en español rioplatense, tono profesional y directo. Sin markdown, texto corrido.
+SYSTEM_PROMPT = """Sos el asesor financiero personal del usuario. Conocés su cartera en detalle, su historial de movimientos y los precios actuales de mercado. Hablás en español rioplatense, directo y sin rodeos, como alguien de confianza que sabe de lo que habla.
 
-Reglas de conducta:
-- Respondé exclusivamente lo que se te pregunta. Si te saludan, saludá brevemente y preguntá en qué podés ayudar.
-- Nunca vomites todos los datos de golpe. Usá solo la información relevante para la pregunta puntual.
-- Sé preciso: mencioná montos, activos y fechas concretos cuando aporten valor a la respuesta.
-- Si no hay suficiente contexto para dar una respuesta útil, pedí la información que falta.
-- Mantené un tono calmo y seguro. No uses signos de exclamación ni expresiones de entusiasmo exagerado.
-- Máximo 4 oraciones por respuesta, salvo que el usuario pida un análisis detallado.
+Cómo responder:
+- Máximo 3-4 oraciones. Si el usuario pide análisis detallado, podés extenderte.
+- Siempre arrancá desde los números reales del usuario: cuánto tiene, a qué precio promedio entró, cuánto lleva ganado o perdido. No hablés en abstracto.
+- Tomá posición. Recomendá una cosa concreta y justificala con 1-2 datos clave. No listes opciones sin comprometerte con ninguna.
+- Si hay datos técnicos disponibles (RSI, zona, tendencia), usalos como argumento dentro de la recomendación, no como una lista de indicadores.
+- Nunca termines con frases genéricas como "considerá tu tolerancia al riesgo" o "consultá un profesional". Eso ya lo saben.
+- Tono: calmo, seguro, sin exclamaciones. Como el amigo que más sabe de inversiones.
 
-Tenés acceso a los datos financieros reales del usuario: cuentas, posiciones con precios actuales de mercado, P&L no realizado, transacciones y resumen mensual. Usalos cuando sean pertinentes.
+Tenés acceso a los datos financieros reales: cuentas, posiciones con precios actuales de mercado, P&L no realizado por posición, transacciones históricas, resumen mensual y análisis técnico actualizado de cada activo en cartera (señal, RSI, ADX, zona, MACD, volumen, medias móviles, patrones de velas, SL/TP).
 
-Si el usuario tiene liquidez disponible y te consulta sobre dónde invertir, podés mencionar el screener de mercado (maximos) para ver señales técnicas actuales."""
+Filosofía:
+- La construcción de patrimonio es a largo plazo. El DCA es válido en activos con convicción real, no para tapar errores.
+- Un movimiento sin volumen es una trampa hasta que se confirme. Si el volumen es bajo y la señal es débil, decilo.
+- Los indicadores técnicos tienen prioridad sobre el ruido del mercado.
+
+Contexto Argentina:
+- El dólar blue y la brecha son variables clave para activos en ARS.
+- Los CEDEARs cubren contra devaluación: su valor en pesos sube cuando cae el peso.
+- Plazo fijo en ARS solo vale si la tasa real supera la inflación proyectada."""
 
 STABLECOINS = {'USDT', 'USDC', 'DAI', 'BUSD', 'FDUSD', 'TUSD', 'PYUSD'}
 FIAT_USD    = {'USD'}
@@ -158,7 +166,7 @@ async def build_price_context(positions: list, client: httpx.AsyncClient) -> str
         if p['asset'] not in STABLECOINS
         and p['asset'] not in FIAT_USD
         and p['asset'] not in FIAT_ARS
-        and p['asset_type'] not in NO_PRICE_TYPES
+        and p['asset_type'] not in ('fixed_term', 'fund')
     ]
 
     if needs_quote:
@@ -176,7 +184,7 @@ async def build_price_context(positions: list, client: httpx.AsyncClient) -> str
             return 1.0
         if asset in FIAT_ARS:
             return (1 / blue_rate) if blue_rate else None
-        if atype in NO_PRICE_TYPES:
+        if atype in ('fixed_term', 'fund'):
             return None
         q = quotes.get(to_yahoo_ticker(asset, atype))
         return q['price'] if q else None
@@ -241,6 +249,88 @@ async def build_price_context(positions: list, client: httpx.AsyncClient) -> str
 
     return ctx
 
+ASSET_TYPE_TO_LIST = {
+    'crypto':   'crypto',
+    'flexible': 'crypto',
+    'cedear':   'adrs_arg',
+    'stock':    'sp500',
+}
+
+async def build_technical_context(positions: list, client: httpx.AsyncClient) -> str:
+    """Fetches technical indicators from maximos screener for assets in portfolio."""
+    lists_needed = {}
+    for p in positions:
+        asset, atype = p['asset'], p['asset_type']
+        if asset in FIAT_USD or asset in FIAT_ARS or asset in STABLECOINS:
+            continue
+        list_id = ASSET_TYPE_TO_LIST.get(atype)
+        if list_id:
+            lists_needed.setdefault(list_id, set()).add(asset)
+
+    if not lists_needed:
+        return ""
+
+    all_data = {}
+    async def fetch_list(list_id):
+        try:
+            r = await client.get(f"{MAXIMOS_URL}/api/stocks?list_id={list_id}&signal=all", timeout=10)
+            if r.is_success:
+                for s in r.json().get('stocks', []):
+                    t = s.get('ticker', '')
+                    key = t[:-4] if t.endswith('-USD') else t
+                    all_data[key] = s
+        except Exception:
+            pass
+
+    await asyncio.gather(*[fetch_list(lid) for lid in lists_needed])
+
+    signal_label = {
+        'compra_fuerte': 'COMPRA FUERTE', 'compra': 'COMPRA',
+        'neutral': 'NEUTRAL', 'venta': 'VENTA', 'venta_fuerte': 'VENTA FUERTE',
+    }
+    zone_label = {'discount': 'descuento', 'fair': 'valor justo', 'premium': 'premium'}
+
+    lines = []
+    for p in positions:
+        asset = p['asset']
+        if asset not in all_data:
+            continue
+        d = all_data[asset]
+        line = f"\n{asset} — {signal_label.get(d.get('signal','neutral'), 'NEUTRAL')}"
+        line += f" | Score: {d.get('long_score',0)}L / {d.get('short_score',0)}S"
+        line += f" | Zona: {zone_label.get(d.get('zone','fair'), d.get('zone',''))}"
+        line += f" | RSI: {round(d['rsi'],1) if d.get('rsi') else '—'}"
+        line += f" | ADX: {round(d['adx'],1) if d.get('adx') else '—'}"
+        if d.get('macd_hist') is not None:
+            line += f" | MACD hist: {round(d['macd_hist'],4)}"
+        if d.get('vol_ratio') is not None:
+            line += f" | Volumen: {round(d['vol_ratio'],2)}x promedio"
+        if d.get('pulse_signal'):
+            line += f" | Pulse: {d.get('pulse_state','')} / {d.get('pulse_signal','')}"
+        if d.get('pct_from_high') is not None:
+            line += f" | Dist. máx 52s: {d['pct_from_high']:.1f}%"
+        # Medias móviles clave
+        ma_parts = []
+        for name, key in [('MA20','pct_vs_ma20'),('MA50','pct_vs_ma50'),('MA200','pct_vs_ma200')]:
+            v = d.get(key)
+            if v is not None:
+                ma_parts.append(f"{name}: {'+' if v >= 0 else ''}{v:.1f}%")
+        if ma_parts:
+            line += f"\n  Medias móviles: {' | '.join(ma_parts)}"
+        if d.get('candle_pattern') and isinstance(d['candle_pattern'], dict) and d['candle_pattern'].get('name'):
+            cp = d['candle_pattern']
+            type_map = {'bullish': 'alcista', 'bearish': 'bajista', 'neutral': 'indecisión'}
+            line += f"\n  Patrón velas: {cp['name']} ({type_map.get(cp.get('type',''), cp.get('type',''))})"
+        if d.get('sl'):
+            line += f"\n  SL: ${d['sl']} | TP1: ${d['tp1']} | TP2: ${d['tp2']}"
+        lines.append(line)
+
+    if not lines:
+        return ""
+
+    return "\nANÁLISIS TÉCNICO (último screener de maximos):\n" + "\n".join(lines) + "\n"
+
+
 class ChatMessage(BaseModel):
     role: str   # user | assistant
     content: str
@@ -255,8 +345,11 @@ async def chat(req: ChatRequest):
     conn.close()
 
     async with httpx.AsyncClient(timeout=30) as client:
-        price_context = await build_price_context(positions, client)
-        full_context  = db_context + price_context
+        price_context, tech_context = await asyncio.gather(
+            build_price_context(positions, client),
+            build_technical_context(positions, client),
+        )
+        full_context = db_context + price_context + tech_context
 
         messages = [
             {"role": "system", "content": SYSTEM_PROMPT + "\n\n" + full_context}
