@@ -155,12 +155,39 @@ async def build_price_context(positions: list, client: httpx.AsyncClient) -> str
         and p['asset_type'] not in ('fixed_term', 'fund')
     ]
 
-    if needs_quote:
-        tickers = ",".join({to_yahoo_ticker(p['asset'], p['asset_type']) for p in needs_quote})
+    crypto_assets = {
+        p['asset'] for p in needs_quote
+        if p['asset_type'] in ('crypto', 'flexible')
+        and p['asset'] not in STABLECOINS
+    }
+    stock_tickers = {
+        to_yahoo_ticker(p['asset'], p['asset_type']) for p in needs_quote
+        if p['asset_type'] not in ('crypto', 'flexible')
+    }
+
+    # Crypto: directo a Binance desde el backend local (evita problemas del Worker con Binance)
+    async def fetch_binance(symbol: str):
         try:
-            r = await client.get(f"{MAXIMOS_URL}/api/quotes?tickers={tickers}", timeout=10)
+            r = await client.get(
+                f"https://api.binance.com/api/v3/ticker/price?symbol={symbol}USDT",
+                timeout=5,
+            )
             if r.is_success:
-                quotes = r.json().get("quotes", {})
+                d = r.json()
+                if "price" in d:
+                    quotes[f"{symbol}-USD"] = {"price": round(float(d["price"]), 4)}
+        except Exception:
+            pass
+
+    await asyncio.gather(*[fetch_binance(s) for s in crypto_assets])
+
+    # Stocks / CEDEARs: via CF Worker (D1)
+    if stock_tickers:
+        try:
+            tickers_str = ",".join(stock_tickers)
+            r = await client.get(f"{MAXIMOS_URL}/api/quotes?tickers={tickers_str}", timeout=10)
+            if r.is_success:
+                quotes.update(r.json().get("quotes", {}))
         except Exception:
             pass
 

@@ -330,7 +330,7 @@ async def on_fetch(request, env):
         if stock_list:
             try:
                 placeholders = ",".join(["?"] * len(stock_list))
-                result = await env.DB.prepare(
+                result = await env.maximos_db.prepare(
                     f"SELECT ticker, price FROM screener_results WHERE ticker IN ({placeholders})"
                 ).bind(*stock_list).all()
                 for row in result.results.to_py():
