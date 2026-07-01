@@ -79,22 +79,6 @@ def build_context(conn) -> tuple[str, list]:
     for a in accounts:
         ctx += f"- {a['name']} ({a['type']})\n"
 
-    # Positions se devuelven por separado para enriquecer con precios
-    ctx += "\nPOSICIONES ACTUALES (ver valuación actualizada abajo):\n"
-    for p in positions:
-        line = f"- {p['account_name']}: {p['quantity']} {p['asset']} ({p['asset_type']})"
-        if p['avg_price']:
-            line += f" | precio promedio USD {p['avg_price']}"
-        if p['end_date']:
-            line += f" | vence {p['end_date']}"
-            if p['rate']:
-                line += f" | tasa {p['rate']}% anual"
-            if p['auto_renew']:
-                line += " | renovación automática"
-        if p['notes']:
-            line += f" | {p['notes']}"
-        ctx += line + "\n"
-
     ctx += "\nÚLTIMAS 50 TRANSACCIONES:\n"
     for t in recent_tx:
         sign = "+" if t['type'] == 'income' else ("-" if t['type'] == 'expense' else "↔")
@@ -235,9 +219,17 @@ async def build_price_context(positions: list, client: httpx.AsyncClient) -> str
                 line += f" = USD {value_usd:,.2f}"
             else:
                 line = f"- {p['account_name']} | {asset} ({atype}): {total_native:,.2f} (moneda sin conversión disponible)"
+            if p.get('end_date'):
+                line += f" | vence {p['end_date']}"
+                if p.get('rate'):
+                    line += f" | tasa {p['rate']}% anual"
+                if p.get('auto_renew'):
+                    line += " | renovación automática"
         else:
             line = f"- {p['account_name']} | {asset} ({atype}): {qty} (precio no disponible)"
 
+        if p.get('notes'):
+            line += f" | nota: {p['notes']}"
         ctx += line + "\n"
 
     ctx += f"TOTAL CARTERA: USD {total_usd:,.2f}"
