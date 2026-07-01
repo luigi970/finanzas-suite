@@ -39,10 +39,12 @@ FIAT_ARS    = {'ARS'}
 NO_PRICE_TYPES = {'fixed_term', 'fund', 'flexible'}
 
 def to_yahoo_ticker(asset: str, asset_type: str) -> str:
-    if asset_type == 'crypto' or (
-        asset not in STABLECOINS and asset not in FIAT_USD and asset not in FIAT_ARS
-        and asset_type not in ('stock', 'cedear', 'fixed_term', 'fund', 'flexible')
-    ):
+    if asset_type == 'crypto':
+        return f"{asset}-USD"
+    if asset_type == 'flexible' and asset not in STABLECOINS and asset not in FIAT_USD and asset not in FIAT_ARS:
+        return f"{asset}-USD"
+    if (asset not in STABLECOINS and asset not in FIAT_USD and asset not in FIAT_ARS
+            and asset_type not in ('stock', 'cedear', 'fixed_term', 'fund', 'flexible')):
         return f"{asset}-USD"
     return asset
 
