@@ -27,7 +27,12 @@ Precisión numérica (crítico):
 - El P&L no realizado en el contexto ya está calculado posición por posición — usá esos valores directamente.
 - "P&L no realizado" = diferencia entre precio actual y precio promedio de compra, no desde el máximo histórico ni el máximo del año.
 
-Tenés acceso a los datos financieros reales: cuentas, posiciones con precios actuales de mercado, P&L no realizado por posición, transacciones históricas, resumen mensual y análisis técnico actualizado de cada activo en cartera (señal, RSI, ADX, zona, MACD, volumen, medias móviles, patrones de velas, SL/TP).
+Tenés acceso a los datos financieros reales: cuentas, posiciones con precios actuales de mercado, P&L no realizado por posición, transacciones históricas, resumen mensual, análisis técnico actualizado (señal, RSI, ADX, zona, MACD, volumen, medias móviles, patrones de velas, SL/TP) y fundamentales con consenso de analistas (recommendation_key, target price, PE, earnings date) para stocks y CEDEARs.
+
+Cómo usar los fundamentales:
+- El "consensus" de analistas es el agregado institucional — si coincide con la señal técnica, es argumento fuerte; si diverge, mencionalo como tensión.
+- El target price vs precio actual te da el upside implícito según Wall Street — calculalo y mencionalo si es relevante.
+- El earnings date próximo es un catalizador concreto: si está en las próximas semanas, avisá.
 
 Filosofía:
 - La construcción de patrimonio es a largo plazo. El DCA es válido en activos con convicción real, no para tapar errores.
@@ -358,6 +363,92 @@ async def build_technical_context(positions: list, client: httpx.AsyncClient) ->
     return "\nANÁLISIS TÉCNICO (último screener de maximos):\n" + "\n".join(lines) + "\n"
 
 
+async def build_fundamentals_context(positions: list, client: httpx.AsyncClient) -> str:
+    """Fetches analyst consensus + fundamentals from Yahoo Finance via /api/info for stocks and CEDEARs."""
+    tickers = list({
+        p['asset'] for p in positions
+        if p['asset_type'] in ('stock', 'cedear')
+        and p['asset'] not in STABLECOINS
+        and p['asset'] not in FIAT_USD
+        and p['asset'] not in FIAT_ARS
+    })
+    if not tickers:
+        return ""
+
+    infos: dict = {}
+
+    async def fetch_info(ticker: str):
+        try:
+            r = await client.get(f"{MAXIMOS_URL}/api/info?ticker={ticker}", timeout=8)
+            if r.is_success:
+                info = r.json().get("info", {})
+                if info and (info.get("recommendation_key") or info.get("target_price") or info.get("trailing_pe")):
+                    infos[ticker] = info
+        except Exception:
+            pass
+
+    await asyncio.gather(*[fetch_info(t) for t in tickers])
+
+    if not infos:
+        return ""
+
+    rec_map = {
+        'strongBuy': 'COMPRA FUERTE', 'buy': 'compra',
+        'hold': 'mantener', 'sell': 'vender', 'strongSell': 'VENTA FUERTE',
+    }
+
+    lines = []
+    for ticker in tickers:
+        info = infos.get(ticker)
+        if not info:
+            continue
+        parts = []
+        name = info.get('name', '')
+        if name and name != ticker:
+            parts.append(name)
+        if info.get('sector'):
+            parts.append(f"Sector: {info['sector']}")
+        rec = info.get('recommendation_key')
+        analysts = info.get('analyst_count')
+        if rec:
+            rec_str = rec_map.get(rec, rec)
+            suffix = f" ({analysts} analistas)" if analysts else ""
+            parts.append(f"Consensus: {rec_str}{suffix}")
+        target = info.get('target_price')
+        if target:
+            t_high = info.get('target_high')
+            t_low  = info.get('target_low')
+            if t_high and t_low:
+                parts.append(f"Target USD {target:.0f} (rango {t_low:.0f}–{t_high:.0f})")
+            else:
+                parts.append(f"Target USD {target:.0f}")
+        fpe = info.get('forward_pe')
+        tpe = info.get('trailing_pe')
+        pe_parts = []
+        if fpe:
+            pe_parts.append(f"PE fwd {fpe:.1f}")
+        if tpe:
+            pe_parts.append(f"trail {tpe:.1f}")
+        if pe_parts:
+            parts.append(" / ".join(pe_parts))
+        beta = info.get('beta')
+        if beta:
+            parts.append(f"Beta {beta:.2f}")
+        div = info.get('dividend_yield')
+        if div and div > 0:
+            parts.append(f"Dividendo {div*100:.1f}%")
+        ed = info.get('earnings_date')
+        if ed:
+            parts.append(f"Earnings: {ed}")
+        if parts:
+            lines.append(f"  {ticker} — {' | '.join(parts)}")
+
+    if not lines:
+        return ""
+
+    return "\nFUNDAMENTALES Y CONSENSO DE ANALISTAS (Yahoo Finance):\n" + "\n".join(lines) + "\n"
+
+
 class ChatMessage(BaseModel):
     role: str   # user | assistant
     content: str
@@ -372,11 +463,12 @@ async def chat(req: ChatRequest):
     conn.close()
 
     async with httpx.AsyncClient(timeout=30) as client:
-        price_context, tech_context = await asyncio.gather(
+        price_context, tech_context, fund_context = await asyncio.gather(
             build_price_context(positions, client),
             build_technical_context(positions, client),
+            build_fundamentals_context(positions, client),
         )
-        full_context = db_context + price_context + tech_context
+        full_context = db_context + price_context + tech_context + fund_context
 
         messages = [
             {"role": "system", "content": SYSTEM_PROMPT + "\n\n" + full_context}
