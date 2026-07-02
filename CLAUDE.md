@@ -281,6 +281,10 @@ El prompt está en `worker/src/providers/prompt.py` (`build_prompt()`). El backe
 - [x] Agente IA: posiciones flexible no-fiat (ETH staking) obtienen precio de mercado real
 - [x] Conversación del agente persiste al cambiar de tab
 - [x] Fix: env.DB → env.maximos_db en Worker /api/quotes para stocks desde D1
+- [x] Agente IA: fundamentales y consenso de analistas (Yahoo Finance /api/info) para stocks y CEDEARs — recommendation_key, target price, PE, beta, earnings date
+- [x] Agente IA: sentimiento crypto — Fear & Greed (alternative.me) + CoinGecko global (BTC dominance, market cap) + datos por coin (rank, ATH, market cap) + Binance Futures (funding rate, OI, L/S ratio)
+- [x] Panel ⚙️ agrega CoinGecko API key (demo gratuita) con show/hide y badge de estado
+- [x] Fix: GET /api/config lee .env directo (dotenv_values) en vez de os.environ — evita que la key desaparezca al reabrir el panel
 
 ### Features pendientes
 - [ ] Alertas por email o Telegram cuando cambia la señal

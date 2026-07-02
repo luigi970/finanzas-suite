@@ -50,12 +50,13 @@ npm run dev  # corre en puerto 5174
 ## Variables de entorno (`finanzas/backend/.env`)
 
 ```
-GROQ_API_KEY=...       # primario para ingest (texto) y agente
-GOOGLE_API_KEY=...     # fallback para ingest (visión) y agente
-MAXIMOS_URL=...        # opcional; por defecto usa el Cloudflare Worker de maximos
+GROQ_API_KEY=...          # primario para ingest (texto) y agente
+GOOGLE_API_KEY=...        # fallback para ingest (visión) y agente
+MAXIMOS_URL=...           # opcional; por defecto usa el Cloudflare Worker de maximos
+COINGECKO_API_KEY=...     # demo key gratuita — sentimiento crypto en el agente
 ```
 
-Las keys también se pueden configurar desde la UI: ⚙️ → sección "API Keys". Se guardan automáticamente en `finanzas/backend/.env` y `backend/.env` (maximos) en simultáneo.
+Las keys también se pueden configurar desde la UI: ⚙️ → sección "API Keys". Se guardan automáticamente en `finanzas/backend/.env` y `backend/.env` (maximos) en simultáneo. `GET /api/config` lee directamente del archivo `.env` (no de `os.environ`) para reflejar siempre el estado real del disco.
 
 ## API endpoints
 
@@ -81,7 +82,7 @@ Las keys también se pueden configurar desde la UI: ⚙️ → sección "API Key
 | POST | `/api/ingest/text` | Extraer transacciones desde texto |
 | POST | `/api/ingest/file` | Extraer desde PDF/imagen/CSV |
 | POST | `/api/agent/chat` | Chat IA con contexto financiero completo |
-| GET | `/api/config` | Devuelve valores actuales de GROQ_API_KEY y GOOGLE_API_KEY |
+| GET | `/api/config` | Devuelve GROQ, GOOGLE y COINGECKO keys (lee del .env directo) |
 | POST | `/api/config` | Escribe keys en .env de finanzas y maximos |
 | GET | `/api/maximos/status` | Chequea si maximos local (puerto 8000) está corriendo |
 | POST | `/api/maximos/start` | Arranca maximos local (uvicorn en puerto 8000) |
@@ -145,9 +146,16 @@ Tanto `POST /api/transactions` como `POST /api/transactions/batch` crean automá
 - `to_yahoo_ticker`: maneja `flexible` no-fiat como crypto (devuelve `ASSET-USD`)
 - `build_price_context()`: valuación completa de cartera con precio actual × cantidad, P&L no realizado (vs precio promedio de compra) y precio promedio explícito en cada posición. End_date/tasa/notas incluidas para plazos fijos.
 - `build_technical_context()`: consulta `MAXIMOS_URL/api/stocks` para cada lista relevante (crypto, adrs_arg, sp500) y agrega señal, score, zona, RSI, ADX, MACD, volumen, EMAs MA20/50/200, patrón de velas y SL/TP de cada activo en cartera.
+- `build_fundamentals_context()`: consulta `MAXIMOS_URL/api/info` para cada stock/CEDEAR en cartera. Agrega nombre, sector, consensus de analistas (recommendation_key + cantidad), target price con rango, PE forward/trailing, beta, dividendo y próximo earnings date. Solo para asset_type `stock` y `cedear`. Corre en paralelo con los otros contextos.
+- `build_crypto_sentiment_context()`: solo si hay crypto/flexible no-fiat en cartera. Fuentes:
+  - **Fear & Greed** (alternative.me): índice 0-100 con clasificación
+  - **CoinGecko `/global`** (demo API, `COINGECKO_API_KEY`): BTC dominance, market cap total y cambio 24h
+  - **CoinGecko `/coins/markets`**: rank, ATH y % desde ATH, market cap y cambio 24h por coin en cartera. `COINGECKO_IDS` mapea symbols a IDs de CoinGecko (BTC→bitcoin, ETH→ethereum, etc.)
+  - **Binance Futures** (público, sin key): funding rate, open interest y L/S ratio para BTC/ETH/SOL/BNB/XRP
 - `_calc_accrued(p)`: replica el JS `calcAccruedInterest` — `quantity × (rate/100) × days/365`
-- Contexto enviado al modelo: cuentas, valuación con precios reales y P&L por posición, análisis técnico del screener, últimas 50 transacciones, resumen mensual, P&L realizado acumulado, totales en USD y ARS
-- SYSTEM_PROMPT: asesor directo que usa números exactos del usuario, toma posición concreta, no aproxima cuando tiene datos exactos, filosofía DCA + largo plazo, contexto argentino (blue, CEDEARs, plazo fijo vs inflación)
+- Los cuatro contextos corren en paralelo con `asyncio.gather()`
+- Contexto enviado al modelo: cuentas, valuación con precios reales y P&L por posición, análisis técnico del screener, fundamentales y consenso de analistas, sentimiento y datos de mercado crypto, últimas 50 transacciones, resumen mensual, P&L realizado acumulado, totales en USD y ARS
+- SYSTEM_PROMPT: asesor directo que usa números exactos del usuario, toma posición concreta, no aproxima cuando tiene datos exactos, cruza consensus institucional con señal técnica, calcula upside vs target de analistas, usa funding rate y Fear & Greed como contexto macro, filosofía DCA + largo plazo, contexto argentino (blue, CEDEARs, plazo fijo vs inflación)
 
 ### Configuración de API keys (`main.py`)
 - `GET /api/config`: devuelve los valores actuales de `GROQ_API_KEY` y `GOOGLE_API_KEY` (texto plano, app local)
@@ -171,6 +179,9 @@ Tanto `POST /api/transactions` como `POST /api/transactions/batch` crean automá
 - **Binance desde CF Worker**: el Worker puede tener problemas alcanzando `api.binance.com` desde datacenter. El agente fetchea crypto directo a Binance desde el backend local para evitarlo.
 - **`env.DB` vs `env.maximos_db`**: el binding D1 en el Worker se llama `maximos_db` (ver `wrangler.toml`). Usar siempre `env.maximos_db`, nunca `env.DB`.
 - **`flexible` no-fiat en `to_yahoo_ticker`**: posiciones con `asset_type='flexible'` y activo crypto (ej. ETH en Nexo staking) deben devolver `ETH-USD`, no `ETH`. El caso está manejado explícitamente.
+- **`GET /api/config` lee del .env directo**: usa `dotenv_values(ENV_PATH)` en cada request para reflejar el estado real del archivo, no `os.environ` que solo refleja lo que había al iniciar el servidor.
+- **CoinGecko keyless vs demo**: la API pública sin key tiene rate limits muy bajos (10-30/min, compartido por IP). Usar siempre la demo key gratuita via header `x-cg-demo-api-key`. Se configura en ⚙️ o directamente en `.env` como `COINGECKO_API_KEY`.
+- **Binance Futures público**: `fapi.binance.com` es accesible sin API key para datos de mercado (funding rate, OI, L/S ratio). Distinto de `api.binance.com` (spot) que también es público.
 
 ## UI
 
@@ -178,7 +189,7 @@ Tanto `POST /api/transactions` como `POST /api/transactions/batch` crean automá
 - Tailwind CSS, acento ámbar (`amber-500`)
 - Header oscuro (`bg-slate-900`) con borde top `3px solid #f59e0b`
 - Tabs sticky: Patrimonio · Portfolio · Movimientos · Cuentas · Agente
-- `SettingsModal`: abre con ⚙️; toggle Online/Local para precios; sección API Keys con inputs show/hide para configurar GROQ y Google sin tocar el .env
+- `SettingsModal`: abre con ⚙️; toggle Online/Local para precios; sección API Keys con inputs show/hide para configurar Groq, Google y CoinGecko sin tocar el .env. Las tres son gratuitas.
 - Portfolio: botón 🔄 por cuenta para disparar sync de posiciones
 - Portfolio AccountCard: CEDEARs muestran costo total en ARS + cantidad; crypto/stocks/flexible muestran valor de mercado USD actual + cantidad + línea de precio promedio de compra con % P&L en verde/rojo (`prom. USD X · ±Y%`). Fallback a costo histórico si no hay precio disponible.
 - `prices` y `blueRate` viven en `App` y se fetchean una vez al cargar posiciones — compartidos entre `PatrimonioTab` y `PortfolioTab`.
