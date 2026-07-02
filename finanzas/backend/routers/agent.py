@@ -7,9 +7,10 @@ from database import get_db
 
 router = APIRouter(prefix="/api/agent", tags=["agent"])
 
-GROQ_API_KEY   = os.getenv("GROQ_API_KEY", "")
-GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY", "")
-MAXIMOS_URL    = os.getenv("MAXIMOS_URL", "https://maximos-worker.luchotour.workers.dev")
+GROQ_API_KEY      = os.getenv("GROQ_API_KEY", "")
+GOOGLE_API_KEY    = os.getenv("GOOGLE_API_KEY", "")
+MAXIMOS_URL       = os.getenv("MAXIMOS_URL", "https://maximos-worker.luchotour.workers.dev")
+COINGECKO_API_KEY = os.getenv("COINGECKO_API_KEY", "")
 
 SYSTEM_PROMPT = """Sos el asesor financiero personal del usuario. Conocés su cartera en detalle, su historial de movimientos y los precios actuales de mercado. Hablás en español rioplatense, directo y sin rodeos, como alguien de confianza que sabe de lo que habla.
 
@@ -454,23 +455,39 @@ async def build_fundamentals_context(positions: list, client: httpx.AsyncClient)
     return "\nFUNDAMENTALES Y CONSENSO DE ANALISTAS (Yahoo Finance):\n" + "\n".join(lines) + "\n"
 
 
+COINGECKO_IDS: dict[str, str] = {
+    'BTC': 'bitcoin', 'ETH': 'ethereum', 'SOL': 'solana',
+    'BNB': 'binancecoin', 'XRP': 'ripple', 'ADA': 'cardano',
+    'AVAX': 'avalanche-2', 'MATIC': 'matic-network', 'DOT': 'polkadot',
+    'LINK': 'chainlink', 'UNI': 'uniswap', 'ATOM': 'cosmos',
+    'NEAR': 'near', 'LTC': 'litecoin', 'BCH': 'bitcoin-cash',
+    'DOGE': 'dogecoin', 'SHIB': 'shiba-inu', 'ALGO': 'algorand',
+    'XLM': 'stellar', 'VET': 'vechain', 'TRX': 'tron',
+    'TON': 'the-open-network', 'APT': 'aptos', 'ARB': 'arbitrum',
+    'OP': 'optimism', 'INJ': 'injective-protocol', 'SUI': 'sui',
+}
+
+
 async def build_crypto_sentiment_context(positions: list, client: httpx.AsyncClient) -> str:
-    """Fear & Greed + funding rates + OI + long/short desde fuentes públicas gratuitas.
-    Solo se ejecuta si hay crypto o flexible no-fiat en cartera."""
-    has_crypto = any(
-        p['asset_type'] in ('crypto', 'flexible')
+    """Fear & Greed + Binance Futures + CoinGecko global + datos por coin."""
+    crypto_assets = [
+        p['asset'] for p in positions
+        if p['asset_type'] in ('crypto', 'flexible')
         and p['asset'] not in STABLECOINS
         and p['asset'] not in FIAT_USD
         and p['asset'] not in FIAT_ARS
-        for p in positions
-    )
-    if not has_crypto:
+    ]
+    if not crypto_assets:
         return ""
 
-    fng        = None
-    funding    = {}
-    open_int   = {}
-    ls_ratio   = {}
+    fng       = None
+    funding   = {}
+    open_int  = {}
+    ls_ratio  = {}
+    cg_global = {}
+    cg_coins  = {}
+
+    cg_headers = {"x-cg-demo-api-key": COINGECKO_API_KEY} if COINGECKO_API_KEY else {}
 
     async def fetch_fng():
         nonlocal fng
@@ -484,83 +501,146 @@ async def build_crypto_sentiment_context(positions: list, client: httpx.AsyncCli
             pass
 
     async def fetch_binance_futures(symbol: str):
-        base = symbol  # e.g. "BTC"
-        pair = f"{base}USDT"
-        # Funding rate
+        pair = f"{symbol}USDT"
         try:
             r = await client.get(
-                f"https://fapi.binance.com/fapi/v1/fundingRate?symbol={pair}&limit=1",
-                timeout=5,
-            )
+                f"https://fapi.binance.com/fapi/v1/fundingRate?symbol={pair}&limit=1", timeout=5)
             if r.is_success:
                 data = r.json()
                 if data:
-                    funding[base] = float(data[0]["fundingRate"]) * 100  # en %
+                    funding[symbol] = float(data[0]["fundingRate"]) * 100
         except Exception:
             pass
-        # Open interest
         try:
             r = await client.get(
-                f"https://fapi.binance.com/fapi/v1/openInterest?symbol={pair}",
-                timeout=5,
-            )
+                f"https://fapi.binance.com/fapi/v1/openInterest?symbol={pair}", timeout=5)
             if r.is_success:
-                open_int[base] = float(r.json()["openInterest"])
+                open_int[symbol] = float(r.json()["openInterest"])
         except Exception:
             pass
-        # Long/Short ratio (últimas 5 min)
         try:
             r = await client.get(
                 f"https://fapi.binance.com/futures/data/globalLongShortAccountRatio?symbol={pair}&period=5m&limit=1",
-                timeout=5,
-            )
+                timeout=5)
             if r.is_success:
                 data = r.json()
                 if data:
-                    ls_ratio[base] = float(data[0]["longShortRatio"])
+                    ls_ratio[symbol] = float(data[0]["longShortRatio"])
         except Exception:
             pass
 
+    async def fetch_cg_global():
+        nonlocal cg_global
+        try:
+            r = await client.get(
+                "https://api.coingecko.com/api/v3/global",
+                headers=cg_headers, timeout=8)
+            if r.is_success:
+                cg_global = r.json().get("data", {})
+        except Exception:
+            pass
+
+    async def fetch_cg_coins():
+        ids = [COINGECKO_IDS[a] for a in crypto_assets if a in COINGECKO_IDS]
+        if not ids:
+            return
+        try:
+            ids_str = ",".join(ids)
+            r = await client.get(
+                f"https://api.coingecko.com/api/v3/coins/markets"
+                f"?vs_currency=usd&ids={ids_str}&price_change_percentage=24h",
+                headers=cg_headers, timeout=8)
+            if r.is_success:
+                for coin in r.json():
+                    cg_coins[coin["symbol"].upper()] = coin
+        except Exception:
+            pass
+
+    futures_symbols = [s for s in crypto_assets if s in ("BTC", "ETH", "SOL", "BNB", "XRP")]
     await asyncio.gather(
         fetch_fng(),
-        fetch_binance_futures("BTC"),
-        fetch_binance_futures("ETH"),
+        fetch_cg_global(),
+        fetch_cg_coins(),
+        *[fetch_binance_futures(s) for s in futures_symbols],
     )
 
     lines = []
 
+    # Fear & Greed
     if fng:
-        value      = fng.get("value", "—")
-        value_text = fng.get("value_classification", "")
-        fng_map    = {
+        fng_map = {
             "Extreme Fear": "Miedo extremo", "Fear": "Miedo",
             "Neutral": "Neutral",
             "Greed": "Codicia", "Extreme Greed": "Codicia extrema",
         }
-        label = fng_map.get(value_text, value_text)
-        lines.append(f"  Fear & Greed Index: {value}/100 — {label}")
+        label = fng_map.get(fng.get("value_classification", ""), fng.get("value_classification", ""))
+        lines.append(f"  Fear & Greed Index: {fng.get('value', '—')}/100 — {label}")
 
-    for sym in ("BTC", "ETH"):
+    # CoinGecko global
+    if cg_global:
+        btc_dom = cg_global.get("market_cap_percentage", {}).get("btc")
+        eth_dom = cg_global.get("market_cap_percentage", {}).get("eth")
+        cap_chg = (cg_global.get("market_cap_change_percentage_24h_usd") or 0)
+        total_cap = cg_global.get("total_market_cap", {}).get("usd")
+        parts = []
+        if total_cap:
+            parts.append(f"Market cap total: USD {total_cap/1e12:.2f}T ({cap_chg:+.1f}% 24h)")
+        if btc_dom:
+            parts.append(f"BTC dominance: {btc_dom:.1f}%")
+        if eth_dom:
+            parts.append(f"ETH dominance: {eth_dom:.1f}%")
+        if parts:
+            lines.append(f"  {' | '.join(parts)}")
+
+    # Binance Futures por symbol
+    for sym in futures_symbols:
         parts = []
         fr = funding.get(sym)
         if fr is not None:
-            sign  = "+" if fr >= 0 else ""
+            sign = "+" if fr >= 0 else ""
             parts.append(f"funding {sign}{fr:.4f}%")
             if abs(fr) > 0.05:
-                parts.append("⚠ apalancamiento elevado" if fr > 0 else "⚠ shorts dominantes")
+                parts.append("⚠ over-apalancado long" if fr > 0 else "⚠ shorts dominantes")
         oi = open_int.get(sym)
         if oi is not None:
             parts.append(f"OI {oi:,.0f} contratos")
         ls = ls_ratio.get(sym)
         if ls is not None:
-            parts.append(f"L/S ratio {ls:.2f}")
+            parts.append(f"L/S {ls:.2f}")
         if parts:
-            lines.append(f"  {sym}: {' | '.join(parts)}")
+            lines.append(f"  {sym} futures: {' | '.join(parts)}")
+
+    # CoinGecko por coin en cartera
+    coin_lines = []
+    for asset in crypto_assets:
+        coin = cg_coins.get(asset)
+        if not coin:
+            continue
+        parts = []
+        rank = coin.get("market_cap_rank")
+        if rank:
+            parts.append(f"rank #{rank}")
+        ath = coin.get("ath")
+        price = coin.get("current_price")
+        if ath and price:
+            ath_pct = (price - ath) / ath * 100
+            parts.append(f"ATH USD {ath:,.0f} ({ath_pct:.0f}% desde ATH)")
+        mcap = coin.get("market_cap")
+        if mcap:
+            parts.append(f"mkt cap USD {mcap/1e9:.1f}B")
+        chg = coin.get("price_change_percentage_24h")
+        if chg is not None:
+            parts.append(f"24h {chg:+.1f}%")
+        if parts:
+            coin_lines.append(f"  {asset}: {' | '.join(parts)}")
+    if coin_lines:
+        lines.append("  Datos de mercado por coin:")
+        lines.extend(coin_lines)
 
     if not lines:
         return ""
 
-    return "\nSENTIMIENTO DE MERCADO CRYPTO:\n" + "\n".join(lines) + "\n"
+    return "\nSENTIMIENTO Y CONTEXTO DE MERCADO CRYPTO:\n" + "\n".join(lines) + "\n"
 
 
 class ChatMessage(BaseModel):

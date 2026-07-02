@@ -38,13 +38,15 @@ ENV_PATH = os.path.join(os.path.dirname(__file__), ".env")
 @app.get("/api/config")
 def get_config():
     return {
-        "groq":   os.environ.get("GROQ_API_KEY") or "",
-        "google": os.environ.get("GOOGLE_API_KEY") or "",
+        "groq":       os.environ.get("GROQ_API_KEY") or "",
+        "google":     os.environ.get("GOOGLE_API_KEY") or "",
+        "coingecko":  os.environ.get("COINGECKO_API_KEY") or "",
     }
 
 class ConfigIn(BaseModel):
-    groq_key:   Optional[str] = None
-    google_key: Optional[str] = None
+    groq_key:       Optional[str] = None
+    google_key:     Optional[str] = None
+    coingecko_key:  Optional[str] = None
 
 MAXIMOS_ENV_PATH = os.path.abspath(
     os.path.join(os.path.dirname(__file__), "..", "..", "backend", ".env")
@@ -53,15 +55,18 @@ MAXIMOS_ENV_PATH = os.path.abspath(
 @app.post("/api/config")
 def save_config(data: ConfigIn):
     from dotenv import set_key
+    updates = {
+        "GROQ_API_KEY":      data.groq_key,
+        "GOOGLE_API_KEY":    data.google_key,
+        "COINGECKO_API_KEY": data.coingecko_key,
+    }
     for path in [ENV_PATH, MAXIMOS_ENV_PATH]:
-        if data.groq_key and data.groq_key.strip():
-            set_key(path, "GROQ_API_KEY", data.groq_key.strip())
-        if data.google_key and data.google_key.strip():
-            set_key(path, "GOOGLE_API_KEY", data.google_key.strip())
-    if data.groq_key and data.groq_key.strip():
-        os.environ["GROQ_API_KEY"] = data.groq_key.strip()
-    if data.google_key and data.google_key.strip():
-        os.environ["GOOGLE_API_KEY"] = data.google_key.strip()
+        for env_var, value in updates.items():
+            if value and value.strip():
+                set_key(path, env_var, value.strip())
+    for env_var, value in updates.items():
+        if value and value.strip():
+            os.environ[env_var] = value.strip()
     return {"ok": True}
 
 MAXIMOS_BACKEND = os.path.abspath(

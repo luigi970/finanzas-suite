@@ -1415,10 +1415,12 @@ function MovimientosTab({ transactions, accounts, onEdit, onDelete, onNewManual,
 function SettingsModal({ maximosMode, onMode, onClose }) {
   const [localStatus, setLocalStatus] = useState(null)
   const [starting, setStarting]       = useState(false)
-  const [groqKey, setGroqKey]         = useState('')
-  const [googleKey, setGoogleKey]     = useState('')
-  const [showGroq, setShowGroq]       = useState(false)
-  const [showGoogle, setShowGoogle]   = useState(false)
+  const [groqKey, setGroqKey]               = useState('')
+  const [googleKey, setGoogleKey]           = useState('')
+  const [coingeckoKey, setCoingeckoKey]     = useState('')
+  const [showGroq, setShowGroq]             = useState(false)
+  const [showGoogle, setShowGoogle]         = useState(false)
+  const [showCoingecko, setShowCoingecko]   = useState(false)
   const [saving, setSaving]           = useState(false)
   const [saved, setSaved]             = useState(false)
 
@@ -1430,8 +1432,9 @@ function SettingsModal({ maximosMode, onMode, onClose }) {
   async function loadKeys() {
     try {
       const d = await api('/api/config')
-      if (d.groq)   setGroqKey(d.groq)
-      if (d.google) setGoogleKey(d.google)
+      if (d.groq)       setGroqKey(d.groq)
+      if (d.google)     setGoogleKey(d.google)
+      if (d.coingecko)  setCoingeckoKey(d.coingecko)
     } catch {}
   }
 
@@ -1440,7 +1443,7 @@ function SettingsModal({ maximosMode, onMode, onClose }) {
     try {
       await api('/api/config', {
         method: 'POST',
-        body: JSON.stringify({ groq_key: groqKey || null, google_key: googleKey || null }),
+        body: JSON.stringify({ groq_key: groqKey || null, google_key: googleKey || null, coingecko_key: coingeckoKey || null }),
       })
       setSaved(true)
       setTimeout(() => setSaved(false), 3000)
@@ -1527,8 +1530,9 @@ function SettingsModal({ maximosMode, onMode, onClose }) {
           <p className="text-xs text-gray-500 mb-3">API Keys — IA (ingest y agente)</p>
           <div className="space-y-3">
             {[
-              { key: 'groq',   label: 'Groq',           val: groqKey,   set: setGroqKey,   show: showGroq,   setShow: setShowGroq,   url: 'https://console.groq.com/keys',          placeholder: 'gsk_...' },
-              { key: 'google', label: 'Google (Gemini)', val: googleKey, set: setGoogleKey, show: showGoogle, setShow: setShowGoogle, url: 'https://aistudio.google.com/app/apikey', placeholder: 'AIza...' },
+              { key: 'groq',       label: 'Groq',           val: groqKey,       set: setGroqKey,       show: showGroq,       setShow: setShowGroq,       url: 'https://console.groq.com/keys',          placeholder: 'gsk_...' },
+              { key: 'google',     label: 'Google (Gemini)', val: googleKey,     set: setGoogleKey,     show: showGoogle,     setShow: setShowGoogle,     url: 'https://aistudio.google.com/app/apikey', placeholder: 'AIza...' },
+              { key: 'coingecko', label: 'CoinGecko',      val: coingeckoKey,  set: setCoingeckoKey,  show: showCoingecko,  setShow: setShowCoingecko,  url: 'https://www.coingecko.com/es/api/pricing', placeholder: 'CG-...' },
             ].map(k => (
               <div key={k.key}>
                 <div className="flex items-center gap-2 mb-1">
@@ -1559,7 +1563,7 @@ function SettingsModal({ maximosMode, onMode, onClose }) {
             {saving ? 'Guardando...' : saved ? '✓ Guardado' : 'Guardar keys'}
           </button>
           <p className="text-[11px] text-gray-400 mt-2 text-center">
-            Se guardan en el archivo .env del backend. Ambas son gratuitas.
+            Se guardan en el archivo .env del backend. Las tres son gratuitas.
           </p>
         </div>
       </div>
