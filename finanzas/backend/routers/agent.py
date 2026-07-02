@@ -34,6 +34,11 @@ Cómo usar los fundamentales:
 - El target price vs precio actual te da el upside implícito según Wall Street — calculalo y mencionalo si es relevante.
 - El earnings date próximo es un catalizador concreto: si está en las próximas semanas, avisá.
 
+Cómo usar el sentimiento de mercado crypto:
+- Fear & Greed < 25 (Miedo extremo): históricamente zona de acumulación. Fear & Greed > 75 (Codicia extrema): zona de prudencia.
+- Funding rate > 0.05%: mercado sobre-apalancado long → riesgo de liquidación en cascada a la baja. Funding < -0.03%: shorts dominan → squeeze potencial al alza.
+- L/S ratio > 1 = más longs que shorts; < 1 = más shorts que longs.
+
 Filosofía:
 - La construcción de patrimonio es a largo plazo. El DCA es válido en activos con convicción real, no para tapar errores.
 - Un movimiento sin volumen es una trampa hasta que se confirme. Si el volumen es bajo y la señal es débil, decilo.
@@ -449,6 +454,115 @@ async def build_fundamentals_context(positions: list, client: httpx.AsyncClient)
     return "\nFUNDAMENTALES Y CONSENSO DE ANALISTAS (Yahoo Finance):\n" + "\n".join(lines) + "\n"
 
 
+async def build_crypto_sentiment_context(positions: list, client: httpx.AsyncClient) -> str:
+    """Fear & Greed + funding rates + OI + long/short desde fuentes públicas gratuitas.
+    Solo se ejecuta si hay crypto o flexible no-fiat en cartera."""
+    has_crypto = any(
+        p['asset_type'] in ('crypto', 'flexible')
+        and p['asset'] not in STABLECOINS
+        and p['asset'] not in FIAT_USD
+        and p['asset'] not in FIAT_ARS
+        for p in positions
+    )
+    if not has_crypto:
+        return ""
+
+    fng        = None
+    funding    = {}
+    open_int   = {}
+    ls_ratio   = {}
+
+    async def fetch_fng():
+        nonlocal fng
+        try:
+            r = await client.get("https://api.alternative.me/fng/?limit=1", timeout=5)
+            if r.is_success:
+                data = r.json().get("data", [])
+                if data:
+                    fng = data[0]
+        except Exception:
+            pass
+
+    async def fetch_binance_futures(symbol: str):
+        base = symbol  # e.g. "BTC"
+        pair = f"{base}USDT"
+        # Funding rate
+        try:
+            r = await client.get(
+                f"https://fapi.binance.com/fapi/v1/fundingRate?symbol={pair}&limit=1",
+                timeout=5,
+            )
+            if r.is_success:
+                data = r.json()
+                if data:
+                    funding[base] = float(data[0]["fundingRate"]) * 100  # en %
+        except Exception:
+            pass
+        # Open interest
+        try:
+            r = await client.get(
+                f"https://fapi.binance.com/fapi/v1/openInterest?symbol={pair}",
+                timeout=5,
+            )
+            if r.is_success:
+                open_int[base] = float(r.json()["openInterest"])
+        except Exception:
+            pass
+        # Long/Short ratio (últimas 5 min)
+        try:
+            r = await client.get(
+                f"https://fapi.binance.com/futures/data/globalLongShortAccountRatio?symbol={pair}&period=5m&limit=1",
+                timeout=5,
+            )
+            if r.is_success:
+                data = r.json()
+                if data:
+                    ls_ratio[base] = float(data[0]["longShortRatio"])
+        except Exception:
+            pass
+
+    await asyncio.gather(
+        fetch_fng(),
+        fetch_binance_futures("BTC"),
+        fetch_binance_futures("ETH"),
+    )
+
+    lines = []
+
+    if fng:
+        value      = fng.get("value", "—")
+        value_text = fng.get("value_classification", "")
+        fng_map    = {
+            "Extreme Fear": "Miedo extremo", "Fear": "Miedo",
+            "Neutral": "Neutral",
+            "Greed": "Codicia", "Extreme Greed": "Codicia extrema",
+        }
+        label = fng_map.get(value_text, value_text)
+        lines.append(f"  Fear & Greed Index: {value}/100 — {label}")
+
+    for sym in ("BTC", "ETH"):
+        parts = []
+        fr = funding.get(sym)
+        if fr is not None:
+            sign  = "+" if fr >= 0 else ""
+            parts.append(f"funding {sign}{fr:.4f}%")
+            if abs(fr) > 0.05:
+                parts.append("⚠ apalancamiento elevado" if fr > 0 else "⚠ shorts dominantes")
+        oi = open_int.get(sym)
+        if oi is not None:
+            parts.append(f"OI {oi:,.0f} contratos")
+        ls = ls_ratio.get(sym)
+        if ls is not None:
+            parts.append(f"L/S ratio {ls:.2f}")
+        if parts:
+            lines.append(f"  {sym}: {' | '.join(parts)}")
+
+    if not lines:
+        return ""
+
+    return "\nSENTIMIENTO DE MERCADO CRYPTO:\n" + "\n".join(lines) + "\n"
+
+
 class ChatMessage(BaseModel):
     role: str   # user | assistant
     content: str
@@ -463,12 +577,13 @@ async def chat(req: ChatRequest):
     conn.close()
 
     async with httpx.AsyncClient(timeout=30) as client:
-        price_context, tech_context, fund_context = await asyncio.gather(
+        price_context, tech_context, fund_context, sentiment_context = await asyncio.gather(
             build_price_context(positions, client),
             build_technical_context(positions, client),
             build_fundamentals_context(positions, client),
+            build_crypto_sentiment_context(positions, client),
         )
-        full_context = db_context + price_context + tech_context + fund_context
+        full_context = db_context + price_context + tech_context + fund_context + sentiment_context
 
         messages = [
             {"role": "system", "content": SYSTEM_PROMPT + "\n\n" + full_context}
