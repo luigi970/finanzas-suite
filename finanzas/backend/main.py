@@ -37,10 +37,12 @@ ENV_PATH = os.path.join(os.path.dirname(__file__), ".env")
 
 @app.get("/api/config")
 def get_config():
+    from dotenv import dotenv_values
+    env = dotenv_values(ENV_PATH)
     return {
-        "groq":       os.environ.get("GROQ_API_KEY") or "",
-        "google":     os.environ.get("GOOGLE_API_KEY") or "",
-        "coingecko":  os.environ.get("COINGECKO_API_KEY") or "",
+        "groq":       env.get("GROQ_API_KEY") or "",
+        "google":     env.get("GOOGLE_API_KEY") or "",
+        "coingecko":  env.get("COINGECKO_API_KEY") or "",
     }
 
 class ConfigIn(BaseModel):
@@ -60,12 +62,13 @@ def save_config(data: ConfigIn):
         "GOOGLE_API_KEY":    data.google_key,
         "COINGECKO_API_KEY": data.coingecko_key,
     }
-    for path in [ENV_PATH, MAXIMOS_ENV_PATH]:
-        for env_var, value in updates.items():
-            if value and value.strip():
-                set_key(path, env_var, value.strip())
     for env_var, value in updates.items():
         if value and value.strip():
+            set_key(ENV_PATH, env_var, value.strip())
+            try:
+                set_key(MAXIMOS_ENV_PATH, env_var, value.strip())
+            except Exception:
+                pass
             os.environ[env_var] = value.strip()
     return {"ok": True}
 
