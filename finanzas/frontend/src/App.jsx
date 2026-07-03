@@ -689,7 +689,7 @@ function PatrimonioTypeCard({ type, group, pct }) {
   )
 }
 
-function PatrimonioTab({ positions, transactions = [], maximosUrl = MAXIMOS_ONLINE, prices = {}, blueRate = null, dollarRates = [], onRefreshPrices }) {
+function PatrimonioTab({ positions, transactions = [], maximosUrl = MAXIMOS_ONLINE, prices = {}, blueRate = null, onRefreshPrices }) {
   const [loading,  setLoading]  = useState(true)
   const [error,    setError]    = useState(null)
   const [layout,   setLayout]   = useState(() => localStorage.getItem('patrimonio_layout') || 'grid')
@@ -854,24 +854,8 @@ function PatrimonioTab({ positions, transactions = [], maximosUrl = MAXIMOS_ONLI
               ≈ ARS {totalARS.toLocaleString('es-AR', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
             </div>
           )}
-          {dollarRates.length > 0 && (
-            <div className="mt-3 flex flex-wrap gap-x-4 gap-y-1">
-              {dollarRates
-                .filter(d => d.nombre && d.venta)
-                .map(d => {
-                  const name = d.nombre
-                    .replace(/dólar|dollar/gi, '').trim()
-                    || d.nombre
-                  return (
-                    <div key={d.nombre} className="flex items-baseline gap-1">
-                      <span className="text-[10px] text-slate-400 uppercase tracking-wide">{name}</span>
-                      <span className="text-xs font-semibold text-slate-200 tabular-nums">${d.venta.toLocaleString('es-AR')}</span>
-                    </div>
-                  )
-                })
-              }
-              <div className="text-[10px] text-slate-500 self-center">· dolarapi.com</div>
-            </div>
+          {blueRate && (
+            <div className="text-xs text-gray-600 mt-3">Dólar blue: ${blueRate} · Precios vía maximos</div>
           )}
         </div>
 
@@ -1599,19 +1583,16 @@ export default function App() {
   const [maximosMode, setMaximosMode] = useState(() => localStorage.getItem('maximos_mode') || 'online')
   const maximosUrl = maximosMode === 'local' ? MAXIMOS_LOCAL : MAXIMOS_ONLINE
   const saveMaximosMode = m => { setMaximosMode(m); localStorage.setItem('maximos_mode', m) }
-  const [prices,    setPrices]    = useState({})
-  const [blueRate,  setBlueRate]  = useState(null)
-  const [dollarRates, setDollarRates] = useState([])
+  const [prices,   setPrices]   = useState({})
+  const [blueRate, setBlueRate] = useState(null)
 
   const loadPrices = useCallback(async (pos) => {
     try {
       const dollarRes = await fetch(`${maximosUrl}/api/dollar`)
       if (dollarRes.ok) {
         const dd = await dollarRes.json()
-        const all = dd.dollar || []
-        const blue = all.find(d => d.nombre?.toLowerCase().includes('blue'))
+        const blue = (dd.dollar || []).find(d => d.nombre?.toLowerCase().includes('blue'))
         if (blue) setBlueRate(blue.venta)
-        setDollarRates(all)
       }
       const needsPrice = pos.filter(p =>
         !FIAT_ARS.has(p.asset) && !FIAT_USD.has(p.asset) && !STABLECOINS.has(p.asset) &&
@@ -1766,7 +1747,7 @@ export default function App() {
 
         {/* PATRIMONIO */}
         {tab === 'patrimonio' && (
-          <PatrimonioTab positions={positions} transactions={transactions} maximosUrl={maximosUrl} prices={prices} blueRate={blueRate} dollarRates={dollarRates} onRefreshPrices={loadPrices} />
+          <PatrimonioTab positions={positions} transactions={transactions} maximosUrl={maximosUrl} prices={prices} blueRate={blueRate} onRefreshPrices={loadPrices} />
         )}
 
         {/* PORTFOLIO */}
