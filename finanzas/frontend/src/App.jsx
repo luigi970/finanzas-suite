@@ -1325,7 +1325,7 @@ function MovimientosTab({ transactions, accounts, onEdit, onDelete, onNewManual,
   const inputCls = 'border border-gray-200 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-amber-400 text-gray-600 bg-white'
 
   return (
-    <div className="max-w-3xl mx-auto space-y-4">
+    <div className="max-w-6xl mx-auto space-y-4">
       <div className="flex items-center justify-between">
         <h2 className="text-sm font-semibold text-gray-700 uppercase tracking-wide">Movimientos</h2>
         <div className="flex items-center gap-3">
@@ -1373,31 +1373,61 @@ function MovimientosTab({ transactions, accounts, onEdit, onDelete, onNewManual,
               Mostrando {Math.min(visible.length, filtered.length)} de {filtered.length} movimientos filtrados (total: {transactions.length})
             </div>
           )}
-          <div className="divide-y divide-gray-50">
-            {visible.map(t => (
-              <div key={t.id} className="flex items-center gap-3 px-4 py-2.5 hover:bg-gray-50 group">
-                <div className={`w-1.5 h-1.5 rounded-full shrink-0 ${t.type === 'income' ? 'bg-green-500' : t.type === 'transfer' ? 'bg-blue-400' : 'bg-red-400'}`} />
-                <div className="flex-1 min-w-0">
-                  <div className="text-sm text-gray-700 truncate">{t.description || '—'}</div>
-                  <div className="text-xs text-gray-400">{t.account_name} · {t.date}{t.category && ` · ${t.category}`}</div>
-                </div>
-                <div className="text-right shrink-0">
-                  <div className={`font-semibold text-sm tabular-nums ${t.type === 'income' ? 'text-green-600' : t.type === 'transfer' ? 'text-blue-500' : 'text-red-600'}`}>
-                    {t.type === 'income' ? '+' : t.type === 'transfer' ? '↔' : '-'}{fmtAmount(t.amount)} {t.currency}
-                  </div>
-                  {t.realized_pnl != null && (
-                    <div className={`text-xs font-semibold tabular-nums ${t.realized_pnl >= 0 ? 'text-green-500' : 'text-red-500'}`}>
-                      {t.realized_pnl >= 0 ? '+' : ''}USD {t.realized_pnl.toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} realizado
-                    </div>
-                  )}
-                  {t.fee != null && t.fee > 0 && (
-                    <div className="text-xs text-orange-400 tabular-nums">comisión {fmtAmount(t.fee)} {t.fee_currency}</div>
-                  )}
-                </div>
-                <button onClick={() => onEdit(t)} className="text-gray-300 hover:text-amber-500 px-1 text-xs shrink-0">✏️</button>
-                <button onClick={() => onDelete(t.id)} className="text-gray-300 hover:text-red-500 px-1 text-xs shrink-0">🗑</button>
-              </div>
-            ))}
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-gray-100 bg-gray-50">
+                  {['Fecha','Cuenta','Descripción','Categoría','Tipo','Monto','Precio unit.','P&L realizado','Comisión',''].map(h => (
+                    <th key={h} className={`px-3 py-2 text-[10px] font-semibold text-gray-400 uppercase tracking-wide whitespace-nowrap ${h === '' || h === 'Monto' || h === 'Precio unit.' || h === 'P&L realizado' || h === 'Comisión' ? 'text-right' : 'text-left'}`}>{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-50">
+                {visible.map(t => (
+                  <tr key={t.id} className="hover:bg-gray-50 group">
+                    <td className="px-3 py-2.5 text-gray-500 tabular-nums whitespace-nowrap text-xs">{t.date}</td>
+                    <td className="px-3 py-2.5 text-gray-500 whitespace-nowrap text-xs max-w-[120px] truncate">{t.account_name}</td>
+                    <td className="px-3 py-2.5 text-gray-700 max-w-[200px]">
+                      <div className="truncate">{t.description || '—'}</div>
+                    </td>
+                    <td className="px-3 py-2.5 text-xs text-gray-400 whitespace-nowrap">{t.category || '—'}</td>
+                    <td className="px-3 py-2.5 whitespace-nowrap">
+                      <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ${
+                        t.type === 'income'   ? 'bg-green-100 text-green-700' :
+                        t.type === 'transfer' ? 'bg-blue-100 text-blue-600'  :
+                                                'bg-red-100 text-red-600'
+                      }`}>
+                        {t.type === 'income' ? 'Ingreso' : t.type === 'transfer' ? 'Transfer.' : 'Egreso'}
+                      </span>
+                    </td>
+                    <td className={`px-3 py-2.5 text-right tabular-nums font-semibold whitespace-nowrap ${
+                      t.type === 'income' ? 'text-green-600' : t.type === 'transfer' ? 'text-blue-500' : 'text-red-600'
+                    }`}>
+                      {t.type === 'income' ? '+' : t.type === 'transfer' ? '↔' : '-'}{fmtAmount(t.amount)} {t.currency}
+                    </td>
+                    <td className="px-3 py-2.5 text-right tabular-nums text-gray-400 whitespace-nowrap text-xs">
+                      {t.unit_price ? fmtAmount(t.unit_price) : <span className="text-gray-200">—</span>}
+                    </td>
+                    <td className={`px-3 py-2.5 text-right tabular-nums font-semibold whitespace-nowrap text-xs ${
+                      t.realized_pnl != null ? (t.realized_pnl >= 0 ? 'text-green-500' : 'text-red-500') : ''
+                    }`}>
+                      {t.realized_pnl != null
+                        ? `${t.realized_pnl >= 0 ? '+' : ''}USD ${t.realized_pnl.toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+                        : <span className="text-gray-200">—</span>}
+                    </td>
+                    <td className="px-3 py-2.5 text-right tabular-nums text-orange-400 whitespace-nowrap text-xs">
+                      {t.fee && t.fee > 0 ? `${fmtAmount(t.fee)} ${t.fee_currency || ''}` : <span className="text-gray-200">—</span>}
+                    </td>
+                    <td className="px-2 py-2.5 whitespace-nowrap">
+                      <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                        <button onClick={() => onEdit(t)} className="text-gray-300 hover:text-amber-500 px-1 text-xs">✏️</button>
+                        <button onClick={() => onDelete(t.id)} className="text-gray-300 hover:text-red-500 px-1 text-xs">🗑</button>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           </div>
           {filtered.length > displayLimit && (
             <button onClick={() => setDisplayLimit(l => l + 50)}
