@@ -1092,7 +1092,7 @@ function AccountCard({ acc, positions, onEdit, onDelete, onSync, prices = {}, bl
         <span className={`text-gray-400 text-[10px] transition-transform duration-200 ${open ? 'rotate-180' : ''}`}>▼</span>
       </button>
       {open && (
-        <div className="divide-y divide-gray-50 overflow-y-auto border-t border-gray-100" style={{ maxHeight: '205px' }}>
+        <div className={`divide-y divide-gray-50 border-t border-gray-100 ${positions.length > 10 ? 'overflow-y-auto' : ''}`} style={positions.length > 10 ? { maxHeight: '300px' } : {}}>
           {positions.map(p => (
             <div key={p.id} className="flex items-center gap-3 px-4 py-2.5 hover:bg-gray-50">
               <div className="flex-1 min-w-0">
