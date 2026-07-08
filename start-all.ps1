@@ -15,7 +15,7 @@ function Wait-Port($port, $label, $maxSecs = 40) {
 }
 
 Write-Host ""
-Write-Host "  maximos + finanzas" -ForegroundColor Cyan
+Write-Host "  maximos + finanzas + fiscal" -ForegroundColor Cyan
 Write-Host ""
 
 # Backends
@@ -32,16 +32,24 @@ Start-Process powershell -WindowStyle Hidden -ArgumentList `
 Start-Process powershell -WindowStyle Hidden -ArgumentList `
     "-Command", "cd '$Root\finanzas\frontend'; npm run dev > '$LogDir\finanzas-frontend.log' 2>&1"
 
+Start-Process powershell -WindowStyle Hidden -ArgumentList `
+    "-Command", "cd '$Root\fiscal\backend'; uvicorn main:app --port 8002 > '$LogDir\fiscal-backend.log' 2>&1"
+
+Start-Process powershell -WindowStyle Hidden -ArgumentList `
+    "-Command", "cd '$Root\fiscal\frontend'; npm run dev > '$LogDir\fiscal-frontend.log' 2>&1"
+
 # Esperar a que los puertos estén escuchando
 Wait-Port 8001 "finanzas backend"
 Wait-Port 8000 "maximos backend (opcional)"
 Wait-Port 5174 "finanzas frontend"
+Wait-Port 5175 "fiscal frontend (opcional)"
 
 # Abrir browser
 Write-Host ""
 Write-Host "  Abriendo apps..." -ForegroundColor Cyan
 Start-Process "http://localhost:5174"
 Start-Process "http://localhost:5173"
+Start-Process "http://localhost:5175"
 
 Write-Host ""
 Write-Host "  Todo corriendo. Logs en .\logs\" -ForegroundColor Green
