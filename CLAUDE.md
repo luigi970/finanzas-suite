@@ -7,8 +7,8 @@ App web que analiza acciones, ETFs y criptos. Aplica el sistema **Helper Prime +
 ```
 GitHub Actions
 ├── screener.yml — cron diario (2am UTC lun-vie) + repository_dispatch on-demand
-│   └── run_job.py → screener.py → escribe resultados en Cloudflare D1 vía HTTP API
-└── deploy.yml — push a main con cambios en worker/** o frontend/**
+│   └── maximos/backend/run_job.py → screener.py → escribe resultados en Cloudflare D1 vía HTTP API
+└── deploy.yml — push a main con cambios en maximos/worker/** o maximos/frontend/**
     ├── npx wrangler deploy (Worker)
     └── npm run build + wrangler pages deploy (Pages)
 
@@ -23,31 +23,37 @@ Cloudflare Pages
 └── React + Vite — consume la Worker API
 ```
 
-## Estructura
+## Estructura (monorepo finanzas-suite)
 
 ```
-maximos/
+finanzas-suite/           # repo raíz (github.com/luigi970/finanzas-suite)
 ├── .github/workflows/
-│   ├── deploy.yml       # CI/CD automático
-│   └── screener.yml     # Screener: cron + repository_dispatch + workflow_dispatch
-├── backend/
-│   ├── main.py          # FastAPI para desarrollo local (no se deploya)
-│   ├── screener.py      # Helper Prime + Pulse, get_tickers(), compute_all()
-│   ├── run_job.py       # Entry point para GitHub Actions: lee D1 vía CF HTTP API
-│   └── requirements.txt
-├── frontend/
-│   └── src/App.jsx      # UI completa en un solo archivo
-├── worker/
-│   ├── wrangler.toml    # compatibility_date="2025-01-15", [ai] binding, D1 binding
-│   └── src/
-│       ├── entry.py     # on_fetch: routing, CORS, endpoints
-│       ├── storage/db.py
-│       └── providers/
-│           ├── prompt.py   # build_prompt() compartido
-│           ├── cf_ai.py    # Cloudflare Workers AI (primario)
-│           ├── groq.py     # Groq API (fallback 1)
-│           └── gemini.py   # Gemini API (fallback 2)
-└── start.ps1 / start.sh
+│   ├── deploy.yml        # CI/CD automático
+│   └── screener.yml      # Screener: cron + repository_dispatch + workflow_dispatch
+├── maximos/              # app screener
+│   ├── backend/
+│   │   ├── main.py       # FastAPI para desarrollo local (no se deploya)
+│   │   ├── screener.py   # Helper Prime + Pulse, get_tickers(), compute_all()
+│   │   ├── run_job.py    # Entry point para GitHub Actions: lee D1 vía CF HTTP API
+│   │   └── requirements.txt
+│   ├── frontend/
+│   │   └── src/App.jsx   # UI completa en un solo archivo
+│   ├── worker/
+│   │   ├── wrangler.toml # compatibility_date="2025-01-15", [ai] binding, D1 binding
+│   │   └── src/
+│   │       ├── entry.py  # on_fetch: routing, CORS, endpoints
+│   │       ├── storage/db.py
+│   │       └── providers/
+│   │           ├── prompt.py   # build_prompt() compartido
+│   │           ├── cf_ai.py    # Cloudflare Workers AI (primario)
+│   │           ├── groq.py     # Groq API (fallback 1)
+│   │           └── gemini.py   # Gemini API (fallback 2)
+│   └── start.ps1 / start.sh
+├── finanzas/             # app patrimonio personal
+│   ├── backend/          # FastAPI puerto 8001
+│   └── frontend/         # Vite puerto 5174
+├── start-all.ps1         # arranca los 4 procesos
+└── stop-all.ps1
 ```
 
 ## Cómo arrancar (desarrollo local)
@@ -61,11 +67,11 @@ maximos/
 ### Solo maximos
 ```powershell
 # Backend FastAPI (puerto 8000)
-cd backend
+cd maximos/backend
 uvicorn main:app --reload --port 8000
 
 # Frontend Vite (puerto 5173)
-cd frontend
+cd maximos/frontend
 npm run dev
 ```
 

@@ -51,7 +51,7 @@ class ConfigIn(BaseModel):
     coingecko_key:  Optional[str] = None
 
 MAXIMOS_ENV_PATH = os.path.abspath(
-    os.path.join(os.path.dirname(__file__), "..", "..", "backend", ".env")
+    os.path.join(os.path.dirname(__file__), "..", "..", "maximos", "backend", ".env")
 )
 
 @app.post("/api/config")
@@ -73,7 +73,7 @@ def save_config(data: ConfigIn):
     return {"ok": True}
 
 MAXIMOS_BACKEND = os.path.abspath(
-    os.path.join(os.path.dirname(__file__), "..", "..", "backend")
+    os.path.join(os.path.dirname(__file__), "..", "..", "maximos", "backend")
 )
 
 @app.get("/api/maximos/status")

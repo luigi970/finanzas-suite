@@ -4,8 +4,8 @@ on:
   push:
     branches: [main]
     paths:
-      - "worker/**"
-      - "frontend/**"
+      - "maximos/worker/**"
+      - "maximos/frontend/**"
   workflow_dispatch:
 
 jobs:
@@ -21,7 +21,7 @@ jobs:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
         run: |
-          cd worker
+          cd maximos/worker
           npx wrangler deploy
 
   deploy-frontend:
@@ -32,12 +32,12 @@ jobs:
         with:
           node-version: 20
           cache: npm
-          cache-dependency-path: frontend/package-lock.json
+          cache-dependency-path: maximos/frontend/package-lock.json
       - name: Build frontend
         env:
           VITE_API_URL: ${{ secrets.VITE_API_URL }}
         run: |
-          cd frontend
+          cd maximos/frontend
           npm ci
           npm run build
       - name: Deploy to Cloudflare Pages
@@ -45,5 +45,5 @@ jobs:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
         run: |
-          cd frontend
+          cd maximos/frontend
           npx wrangler pages deploy dist --project-name=maximos

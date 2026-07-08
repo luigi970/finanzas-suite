@@ -20,14 +20,14 @@ Write-Host ""
 
 # Backends
 Start-Process powershell -WindowStyle Hidden -ArgumentList `
-    "-Command", "cd '$Root\backend'; uvicorn main:app --port 8000 > '$LogDir\maximos-backend.log' 2>&1"
+    "-Command", "cd '$Root\maximos\backend'; uvicorn main:app --port 8000 > '$LogDir\maximos-backend.log' 2>&1"
 
 Start-Process powershell -WindowStyle Hidden -ArgumentList `
     "-Command", "cd '$Root\finanzas\backend'; uvicorn main:app --port 8001 > '$LogDir\finanzas-backend.log' 2>&1"
 
 # Frontends
 Start-Process powershell -WindowStyle Hidden -ArgumentList `
-    "-Command", "cd '$Root\frontend'; npm run dev > '$LogDir\maximos-frontend.log' 2>&1"
+    "-Command", "cd '$Root\maximos\frontend'; npm run dev > '$LogDir\maximos-frontend.log' 2>&1"
 
 Start-Process powershell -WindowStyle Hidden -ArgumentList `
     "-Command", "cd '$Root\finanzas\frontend'; npm run dev > '$LogDir\finanzas-frontend.log' 2>&1"

@@ -1,5 +1,5 @@
 # Secrets
-backend/.env
+maximos/backend/.env
 finanzas/backend/.env
 finanzas/backend/*.db
 
@@ -11,10 +11,8 @@ __pycache__/
 venv/
 
 # Node
-frontend/node_modules/
-frontend/dist/
-finanzas/frontend/node_modules/
-finanzas/frontend/dist/
+node_modules/
+dist/
 
 # Logs del launcher
 logs/

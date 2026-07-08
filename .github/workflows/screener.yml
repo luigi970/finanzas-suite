@@ -37,7 +37,7 @@ jobs:
           cache: pip
 
       - name: Install dependencies
-        run: pip install -r backend/requirements.txt
+        run: pip install -r maximos/backend/requirements.txt
 
       - name: Determine params
         id: list
@@ -72,7 +72,7 @@ jobs:
           CF_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
           CF_D1_DB_ID: ${{ secrets.CF_D1_DB_ID }}
         run: |
-          cd backend
+          cd maximos/backend
           python run_job.py --list ${{ matrix.list_id }} --crypto-limit ${{ steps.list.outputs.crypto_limit }}
 
   screener-custom:
@@ -89,7 +89,7 @@ jobs:
           cache: pip
 
       - name: Install dependencies
-        run: pip install -r backend/requirements.txt
+        run: pip install -r maximos/backend/requirements.txt
 
       - name: Run screener (custom)
         env:
@@ -97,5 +97,5 @@ jobs:
           CF_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
           CF_D1_DB_ID: ${{ secrets.CF_D1_DB_ID }}
         run: |
-          cd backend
+          cd maximos/backend
           python run_job.py --list custom --custom-tickers "${{ github.event.client_payload.custom_tickers }}"
