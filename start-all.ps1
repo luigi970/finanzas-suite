@@ -4,14 +4,14 @@ $Root = $PSScriptRoot
 $LogDir = Join-Path $Root "logs"
 if (-not (Test-Path $LogDir)) { New-Item -ItemType Directory -Path $LogDir | Out-Null }
 
-# Liberar puertos antes de arrancar para evitar que vite se mueva a otro puerto
+# Liberar puertos antes de arrancar (filtra TimeWait que no tiene proceso asignado)
 foreach ($port in @(8099, 8000, 8001, 8002, 5172, 5173, 5174, 5175)) {
-    $conn = Get-NetTCPConnection -LocalPort $port -ErrorAction SilentlyContinue
-    if ($conn) {
-        Stop-Process -Id ($conn.OwningProcess | Select-Object -First 1) -Force -ErrorAction SilentlyContinue
-    }
+    Get-NetTCPConnection -LocalPort $port -ErrorAction SilentlyContinue |
+        Where-Object { $_.State -ne 'TimeWait' -and $_.OwningProcess -gt 0 } |
+        Select-Object -ExpandProperty OwningProcess -Unique |
+        ForEach-Object { Stop-Process -Id $_ -Force -ErrorAction SilentlyContinue }
 }
-Start-Sleep 1
+Start-Sleep 2
 
 function Wait-Port($port, $label, $maxSecs = 40) {
     Write-Host "  $label" -NoNewline
