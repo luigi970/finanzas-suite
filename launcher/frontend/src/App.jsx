@@ -254,7 +254,7 @@ function ConfigModal({ onClose }) {
 
           <div style={{ borderTop: '1px solid #334155', margin: '20px 0' }} />
           <Section title="Fiscal" color="#14b8a6" />
-          <Field id="afipsdk" label="AFIP SDK Access Token" placeholder="sdk_..." />
+          <Field id="afipsdk" label="AFIP SDK Access Token" placeholder="kdY..." />
         </div>
 
         <div style={{ padding: '16px 28px', borderTop: '1px solid #334155', display: 'flex', gap: 10, justifyContent: 'flex-end', alignItems: 'center', flexShrink: 0 }}>
