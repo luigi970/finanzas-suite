@@ -30,16 +30,26 @@ class SyncRequest(BaseModel):
 
 async def _call_afipsdk(automation: str, data: dict) -> dict:
     if not AFIPSDK_TOKEN:
-        raise HTTPException(503, "AFIPSDK_ACCESS_TOKEN no configurado")
-    async with httpx.AsyncClient(timeout=120) as client:
-        r = await client.post(
-            AFIPSDK_URL,
-            headers={"Authorization": f"Bearer {AFIPSDK_TOKEN}"},
-            json={"automation": automation, "data": data, "wait": True},
-        )
-        if r.status_code != 200:
-            raise HTTPException(502, f"AFIP SDK error {r.status_code}: {r.text[:300]}")
-        return r.json().get("data", r.json())
+        raise HTTPException(503, "AFIPSDK_ACCESS_TOKEN no configurado — configuralo en ⚙️")
+    try:
+        async with httpx.AsyncClient(timeout=120) as client:
+            r = await client.post(
+                AFIPSDK_URL,
+                headers={"Authorization": f"Bearer {AFIPSDK_TOKEN}"},
+                json={"automation": automation, "data": data, "wait": True},
+            )
+            if r.status_code == 401:
+                raise HTTPException(401, "AFIP SDK: token inválido o vencido")
+            if r.status_code != 200:
+                raise HTTPException(502, f"AFIP SDK error {r.status_code}: {r.text[:300]}")
+            body = r.json()
+            if body.get("error"):
+                raise HTTPException(502, f"AFIP SDK: {body['error']}")
+            return body.get("data", body)
+    except httpx.ConnectError:
+        raise HTTPException(503, "No se pudo conectar a api.afipsdk.com — verificá la conexión a internet")
+    except httpx.TimeoutException:
+        raise HTTPException(504, "AFIP SDK no respondió en 120s — la automatización tardó demasiado")
 
 def _get_cache(automation: str, periodo: Optional[str]) -> Optional[dict]:
     db = get_db()
