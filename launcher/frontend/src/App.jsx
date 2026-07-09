@@ -120,8 +120,10 @@ function ConfigModal({ onClose }) {
   const [saving, setSaving] = useState(false)
   const [saved, setSaved] = useState(false)
 
+  const [saveError, setSaveError] = useState(false)
+
   useEffect(() => {
-    fetch('/api/config')
+    fetch('/api/config', { cache: 'no-store' })
       .then(r => r.json())
       .then(d => setForm({
         groq: d.groq || '',
@@ -135,15 +137,22 @@ function ConfigModal({ onClose }) {
 
   const save = async () => {
     setSaving(true)
+    setSaveError(false)
     try {
-      await fetch('/api/config', {
+      const r = await fetch('/api/config', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ ...form, maximos_mode: form.maximosMode }),
       })
-      setSaved(true)
-      setTimeout(() => setSaved(false), 2000)
-    } catch {}
+      if (r.ok) {
+        setSaved(true)
+        setTimeout(() => setSaved(false), 2000)
+      } else {
+        setSaveError(true)
+      }
+    } catch {
+      setSaveError(true)
+    }
     setSaving(false)
   }
 
@@ -248,7 +257,8 @@ function ConfigModal({ onClose }) {
           <Field id="afipsdk" label="AFIP SDK Access Token" placeholder="sdk_..." />
         </div>
 
-        <div style={{ padding: '16px 28px', borderTop: '1px solid #334155', display: 'flex', gap: 10, justifyContent: 'flex-end', flexShrink: 0 }}>
+        <div style={{ padding: '16px 28px', borderTop: '1px solid #334155', display: 'flex', gap: 10, justifyContent: 'flex-end', alignItems: 'center', flexShrink: 0 }}>
+          {saveError && <span style={{ color: '#f87171', fontSize: 12, marginRight: 'auto' }}>Error al guardar — verificá que el backend esté corriendo</span>}
           <button onClick={onClose} style={{ padding: '9px 20px', borderRadius: 8, border: '1px solid #334155', background: 'transparent', color: '#94a3b8', cursor: 'pointer', fontSize: 14 }}>
             Cancelar
           </button>
