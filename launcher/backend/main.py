@@ -21,7 +21,7 @@ app.add_middleware(
 
 ROOT = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))
 
-# JSON config propio del launcher — fuente de verdad para maximos_mode
+# Fuente de verdad única para toda la configuración del launcher
 LAUNCHER_CONFIG = os.path.join(os.path.dirname(os.path.abspath(__file__)), "launcher_config.json")
 
 ENV_PATHS = {
@@ -36,15 +36,17 @@ APPS = {
     "fiscal":   {"backend": 8002, "frontend": 5175, "backend_dir": os.path.join(ROOT, "fiscal", "backend"),   "frontend_dir": os.path.join(ROOT, "fiscal", "frontend")},
 }
 
+# Qué env var va a cada app .env (para distribución)
 KEYS_MAP = {
     "GROQ_API_KEY":         ["maximos", "finanzas", "fiscal"],
     "GOOGLE_API_KEY":       ["maximos", "finanzas", "fiscal"],
     "COINGECKO_API_KEY":    ["finanzas"],
     "AFIPSDK_ACCESS_TOKEN": ["fiscal"],
+    "MAXIMOS_MODE":         ["finanzas"],
 }
 
 
-def _load_launcher_cfg() -> dict:
+def _load_cfg() -> dict:
     try:
         with open(LAUNCHER_CONFIG, 'r', encoding='utf-8') as f:
             return json.load(f)
@@ -52,8 +54,8 @@ def _load_launcher_cfg() -> dict:
         return {}
 
 
-def _save_launcher_cfg(updates: dict):
-    cfg = _load_launcher_cfg()
+def _save_cfg(updates: dict):
+    cfg = _load_cfg()
     cfg.update(updates)
     with open(LAUNCHER_CONFIG, 'w', encoding='utf-8') as f:
         json.dump(cfg, f, ensure_ascii=False, indent=2)
@@ -90,28 +92,32 @@ def health():
 
 @app.get("/api/config")
 def get_config():
-    from dotenv import dotenv_values
+    cfg = _load_cfg()
 
-    # API keys: leer de los .env de cada app
-    result = {}
-    for app_id, path in ENV_PATHS.items():
-        if os.path.exists(path):
+    # Si el launcher_config.json no tiene las keys todavía, leerlas de los .env de cada app
+    # (migración única: después del primer save quedan en el JSON)
+    if not any(cfg.get(k) for k in ("groq", "google", "coingecko", "afipsdk")):
+        from dotenv import dotenv_values
+        for path in ENV_PATHS.values():
+            if not os.path.exists(path):
+                continue
             env = dotenv_values(path)
-            for key in ["GROQ_API_KEY", "GOOGLE_API_KEY", "COINGECKO_API_KEY", "AFIPSDK_ACCESS_TOKEN"]:
-                if key in env and env[key]:
-                    result[key] = env[key]
-
-    # maximos_mode: leer del JSON propio del launcher (fuente de verdad)
-    launcher_cfg = _load_launcher_cfg()
-    maximos_mode = launcher_cfg.get("maximos_mode", "online")
+            if not cfg.get("groq") and env.get("GROQ_API_KEY"):
+                cfg["groq"] = env["GROQ_API_KEY"]
+            if not cfg.get("google") and env.get("GOOGLE_API_KEY"):
+                cfg["google"] = env["GOOGLE_API_KEY"]
+            if not cfg.get("coingecko") and env.get("COINGECKO_API_KEY"):
+                cfg["coingecko"] = env["COINGECKO_API_KEY"]
+            if not cfg.get("afipsdk") and env.get("AFIPSDK_ACCESS_TOKEN"):
+                cfg["afipsdk"] = env["AFIPSDK_ACCESS_TOKEN"]
 
     return JSONResponse(
         content={
-            "groq":         result.get("GROQ_API_KEY", ""),
-            "google":       result.get("GOOGLE_API_KEY", ""),
-            "coingecko":    result.get("COINGECKO_API_KEY", ""),
-            "afipsdk":      result.get("AFIPSDK_ACCESS_TOKEN", ""),
-            "maximos_mode": maximos_mode,
+            "groq":         cfg.get("groq", ""),
+            "google":       cfg.get("google", ""),
+            "coingecko":    cfg.get("coingecko", ""),
+            "afipsdk":      cfg.get("afipsdk", ""),
+            "maximos_mode": cfg.get("maximos_mode", "online"),
         },
         headers={"Cache-Control": "no-store"},
     )
@@ -127,37 +133,33 @@ class ConfigIn(BaseModel):
 
 @app.post("/api/config")
 def save_config(data: ConfigIn):
-    from dotenv import set_key
+    # 1. Guardar todo en launcher_config.json (fuente de verdad)
+    updates = {
+        "groq":         data.groq         or "",
+        "google":       data.google       or "",
+        "coingecko":    data.coingecko    or "",
+        "afipsdk":      data.afipsdk      or "",
+        "maximos_mode": data.maximos_mode or "online",
+    }
+    _save_cfg(updates)
 
-    # Guardar API keys en los .env de cada app
-    api_updates = {
+    # 2. Distribuir a los .env de cada app
+    env_map = {
         "GROQ_API_KEY":         data.groq,
         "GOOGLE_API_KEY":       data.google,
         "COINGECKO_API_KEY":    data.coingecko,
         "AFIPSDK_ACCESS_TOKEN": data.afipsdk,
+        "MAXIMOS_MODE":         data.maximos_mode,
     }
-    for env_var, value in api_updates.items():
+    for env_var, value in env_map.items():
         if not value or not value.strip():
             continue
         for app_id in KEYS_MAP.get(env_var, []):
-            path = ENV_PATHS[app_id]
             try:
-                _write_env_key(path, env_var, value.strip())
+                _write_env_key(ENV_PATHS[app_id], env_var, value.strip())
             except Exception:
-                try:
-                    set_key(path, env_var, value.strip())
-                except Exception:
-                    pass
+                pass
         os.environ[env_var] = value.strip()
-
-    # Guardar maximos_mode en el JSON del launcher (primario)
-    # y también en finanzas/.env para que el backend de finanzas lo lea
-    if data.maximos_mode in ("online", "local"):
-        _save_launcher_cfg({"maximos_mode": data.maximos_mode})
-        try:
-            _write_env_key(ENV_PATHS["finanzas"], "MAXIMOS_MODE", data.maximos_mode)
-        except Exception:
-            pass
 
     return {"ok": True}
 
