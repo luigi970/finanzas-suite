@@ -58,6 +58,11 @@ def _refresh_cache(list_id: str, custom: list[str], crypto_limit: int = 20):
     _cache["status"] = "ready"
 
 
+@app.get("/api/health")
+def health():
+    return {"status": "ok"}
+
+
 @app.get("/api/status")
 def get_status():
     return {
