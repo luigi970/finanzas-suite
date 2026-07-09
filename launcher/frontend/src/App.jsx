@@ -207,7 +207,7 @@ function ConfigModal({ onClose }) {
           <button onClick={onClose} style={{ background: 'none', border: 'none', color: '#64748b', cursor: 'pointer', fontSize: 20, lineHeight: 1 }}>×</button>
         </div>
 
-        <div style={{ overflowY: 'auto', padding: '20px 28px', flex: 1 }}>
+        <div className="modal-scroll" style={{ overflowY: 'auto', padding: '20px 28px', flex: 1 }}>
           <Section title="Inteligencia Artificial" color="#f59e0b" />
           <Field id="groq" label="Groq API Key" placeholder="gsk_..." />
           <Field id="google" label="Google (Gemini) API Key" placeholder="AIza..." />
