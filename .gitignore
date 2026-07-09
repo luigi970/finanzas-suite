@@ -1,7 +1,11 @@
 # Secrets
 maximos/backend/.env
 finanzas/backend/.env
+fiscal/backend/.env
+launcher/backend/.env
+launcher/backend/launcher_config.json
 finanzas/backend/*.db
+fiscal/backend/*.db
 
 # Python
 __pycache__/

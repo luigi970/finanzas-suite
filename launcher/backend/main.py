@@ -1,7 +1,7 @@
-from dotenv import load_dotenv
+from dotenv import load_dotenv, dotenv_values
 load_dotenv()
 
-import os, subprocess, json
+import os, subprocess
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
@@ -19,10 +19,8 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-ROOT = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))
-
-# Fuente de verdad única para toda la configuración del launcher
-LAUNCHER_CONFIG = os.path.join(os.path.dirname(os.path.abspath(__file__)), "launcher_config.json")
+ROOT     = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))
+SELF_ENV = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env")  # launcher/backend/.env
 
 ENV_PATHS = {
     "maximos":  os.path.join(ROOT, "maximos", "backend", ".env"),
@@ -36,7 +34,7 @@ APPS = {
     "fiscal":   {"backend": 8002, "frontend": 5175, "backend_dir": os.path.join(ROOT, "fiscal", "backend"),   "frontend_dir": os.path.join(ROOT, "fiscal", "frontend")},
 }
 
-# Qué env var va a cada app .env (para distribución)
+# A qué app .env va cada variable (para distribución al guardar)
 KEYS_MAP = {
     "GROQ_API_KEY":         ["maximos", "finanzas", "fiscal"],
     "GOOGLE_API_KEY":       ["maximos", "finanzas", "fiscal"],
@@ -46,23 +44,8 @@ KEYS_MAP = {
 }
 
 
-def _load_cfg() -> dict:
-    try:
-        with open(LAUNCHER_CONFIG, 'r', encoding='utf-8') as f:
-            return json.load(f)
-    except Exception:
-        return {}
-
-
-def _save_cfg(updates: dict):
-    cfg = _load_cfg()
-    cfg.update(updates)
-    with open(LAUNCHER_CONFIG, 'w', encoding='utf-8') as f:
-        json.dump(cfg, f, ensure_ascii=False, indent=2)
-
-
 def _write_env_key(path: str, key: str, value: str):
-    """Escribe/actualiza un key en un .env usando file I/O directo."""
+    """Escribe/actualiza un key en un .env con file I/O directo."""
     os.makedirs(os.path.dirname(path), exist_ok=True)
     lines = []
     if os.path.exists(path):
@@ -92,32 +75,15 @@ def health():
 
 @app.get("/api/config")
 def get_config():
-    cfg = _load_cfg()
-
-    # Si el launcher_config.json no tiene las keys todavía, leerlas de los .env de cada app
-    # (migración única: después del primer save quedan en el JSON)
-    if not any(cfg.get(k) for k in ("groq", "google", "coingecko", "afipsdk")):
-        from dotenv import dotenv_values
-        for path in ENV_PATHS.values():
-            if not os.path.exists(path):
-                continue
-            env = dotenv_values(path)
-            if not cfg.get("groq") and env.get("GROQ_API_KEY"):
-                cfg["groq"] = env["GROQ_API_KEY"]
-            if not cfg.get("google") and env.get("GOOGLE_API_KEY"):
-                cfg["google"] = env["GOOGLE_API_KEY"]
-            if not cfg.get("coingecko") and env.get("COINGECKO_API_KEY"):
-                cfg["coingecko"] = env["COINGECKO_API_KEY"]
-            if not cfg.get("afipsdk") and env.get("AFIPSDK_ACCESS_TOKEN"):
-                cfg["afipsdk"] = env["AFIPSDK_ACCESS_TOKEN"]
-
+    # Leer siempre del .env propio del launcher (fuente de verdad)
+    env = dotenv_values(SELF_ENV)
     return JSONResponse(
         content={
-            "groq":         cfg.get("groq", ""),
-            "google":       cfg.get("google", ""),
-            "coingecko":    cfg.get("coingecko", ""),
-            "afipsdk":      cfg.get("afipsdk", ""),
-            "maximos_mode": cfg.get("maximos_mode", "online"),
+            "groq":         env.get("GROQ_API_KEY", ""),
+            "google":       env.get("GOOGLE_API_KEY", ""),
+            "coingecko":    env.get("COINGECKO_API_KEY", ""),
+            "afipsdk":      env.get("AFIPSDK_ACCESS_TOKEN", ""),
+            "maximos_mode": env.get("MAXIMOS_MODE", "online"),
         },
         headers={"Cache-Control": "no-store"},
     )
@@ -133,17 +99,6 @@ class ConfigIn(BaseModel):
 
 @app.post("/api/config")
 def save_config(data: ConfigIn):
-    # 1. Guardar todo en launcher_config.json (fuente de verdad)
-    updates = {
-        "groq":         data.groq         or "",
-        "google":       data.google       or "",
-        "coingecko":    data.coingecko    or "",
-        "afipsdk":      data.afipsdk      or "",
-        "maximos_mode": data.maximos_mode or "online",
-    }
-    _save_cfg(updates)
-
-    # 2. Distribuir a los .env de cada app
     env_map = {
         "GROQ_API_KEY":         data.groq,
         "GOOGLE_API_KEY":       data.google,
@@ -151,15 +106,19 @@ def save_config(data: ConfigIn):
         "AFIPSDK_ACCESS_TOKEN": data.afipsdk,
         "MAXIMOS_MODE":         data.maximos_mode,
     }
+
     for env_var, value in env_map.items():
-        if not value or not value.strip():
-            continue
-        for app_id in KEYS_MAP.get(env_var, []):
-            try:
-                _write_env_key(ENV_PATHS[app_id], env_var, value.strip())
-            except Exception:
-                pass
-        os.environ[env_var] = value.strip()
+        # Siempre escribir en el .env del launcher (vacío = borra el valor)
+        _write_env_key(SELF_ENV, env_var, (value or "").strip())
+
+        # Distribuir a los .env de cada app solo si tiene valor
+        if value and value.strip():
+            for app_id in KEYS_MAP.get(env_var, []):
+                try:
+                    _write_env_key(ENV_PATHS[app_id], env_var, value.strip())
+                except Exception:
+                    pass
+            os.environ[env_var] = value.strip()
 
     return {"ok": True}
 
