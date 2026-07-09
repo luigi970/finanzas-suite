@@ -190,59 +190,65 @@ function ConfigModal({ onClose }) {
       style={{
         position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.7)',
         display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 100,
+        padding: '24px 16px',
       }}
       onClick={e => e.target === e.currentTarget && onClose()}
     >
       <div style={{
         background: '#1e293b', border: '1px solid #334155',
-        borderRadius: 14, width: '100%', maxWidth: 460, padding: '28px 32px',
+        borderRadius: 14, width: '100%', maxWidth: 460,
         boxShadow: '0 24px 60px rgba(0,0,0,0.5)',
+        display: 'flex', flexDirection: 'column',
+        maxHeight: 'calc(100vh - 48px)',
+        overflow: 'hidden',
       }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24 }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '24px 28px 20px', borderBottom: '1px solid #334155', flexShrink: 0 }}>
           <h3 style={{ color: '#f8fafc', fontSize: 18, fontWeight: 700, margin: 0 }}>Configuración</h3>
           <button onClick={onClose} style={{ background: 'none', border: 'none', color: '#64748b', cursor: 'pointer', fontSize: 20, lineHeight: 1 }}>×</button>
         </div>
 
-        <Section title="Inteligencia Artificial" color="#f59e0b" />
-        <Field id="groq" label="Groq API Key" placeholder="gsk_..." />
-        <Field id="google" label="Google (Gemini) API Key" placeholder="AIza..." />
+        <div style={{ overflowY: 'auto', padding: '20px 28px', flex: 1 }}>
+          <Section title="Inteligencia Artificial" color="#f59e0b" />
+          <Field id="groq" label="Groq API Key" placeholder="gsk_..." />
+          <Field id="google" label="Google (Gemini) API Key" placeholder="AIza..." />
 
-        <div style={{ borderTop: '1px solid #334155', margin: '20px 0' }} />
-        <Section title="Mercado" color="#60a5fa" />
+          <div style={{ borderTop: '1px solid #334155', margin: '20px 0' }} />
+          <Section title="Mercado" color="#60a5fa" />
 
-        <div style={{ marginBottom: 14 }}>
-          <label style={{ display: 'block', color: '#94a3b8', fontSize: 12, marginBottom: 8, fontWeight: 500 }}>
-            Fuente de precios (finanzas)
-          </label>
-          <div style={{ display: 'flex', gap: 8 }}>
-            {[
-              { id: 'online', label: 'Online', sub: 'Cloudflare Worker' },
-              { id: 'local',  label: 'Local',  sub: 'localhost:8000' },
-            ].map(opt => (
-              <button
-                key={opt.id}
-                onClick={() => setForm(f => ({ ...f, maximosMode: opt.id }))}
-                style={{
-                  flex: 1, padding: '8px 12px', borderRadius: 8, cursor: 'pointer',
-                  border: `1px solid ${form.maximosMode === opt.id ? '#60a5fa' : '#334155'}`,
-                  background: form.maximosMode === opt.id ? 'rgba(96,165,250,0.12)' : 'transparent',
-                  textAlign: 'left', transition: 'all 0.15s',
-                }}
-              >
-                <div style={{ color: form.maximosMode === opt.id ? '#93c5fd' : '#f8fafc', fontSize: 13, fontWeight: 600 }}>{opt.label}</div>
-                <div style={{ color: '#64748b', fontSize: 11, marginTop: 2 }}>{opt.sub}</div>
-              </button>
-            ))}
+          <div style={{ marginBottom: 14 }}>
+            <label style={{ display: 'block', color: '#94a3b8', fontSize: 12, marginBottom: 8, fontWeight: 500 }}>
+              Fuente de precios (finanzas)
+            </label>
+            <div style={{ display: 'flex', gap: 8 }}>
+              {[
+                { id: 'online', label: 'Online', sub: 'Cloudflare Worker' },
+                { id: 'local',  label: 'Local',  sub: 'localhost:8000' },
+              ].map(opt => (
+                <button
+                  key={opt.id}
+                  onClick={() => setForm(f => ({ ...f, maximosMode: opt.id }))}
+                  style={{
+                    flex: 1, padding: '8px 12px', borderRadius: 8, cursor: 'pointer',
+                    border: `1px solid ${form.maximosMode === opt.id ? '#60a5fa' : '#334155'}`,
+                    background: form.maximosMode === opt.id ? 'rgba(96,165,250,0.12)' : 'transparent',
+                    textAlign: 'left', transition: 'all 0.15s',
+                  }}
+                >
+                  <div style={{ color: form.maximosMode === opt.id ? '#93c5fd' : '#f8fafc', fontSize: 13, fontWeight: 600 }}>{opt.label}</div>
+                  <div style={{ color: '#64748b', fontSize: 11, marginTop: 2 }}>{opt.sub}</div>
+                </button>
+              ))}
+            </div>
           </div>
+
+          <Field id="coingecko" label="CoinGecko API Key (demo)" placeholder="CG-..." />
+
+          <div style={{ borderTop: '1px solid #334155', margin: '20px 0' }} />
+          <Section title="Fiscal" color="#14b8a6" />
+          <Field id="afipsdk" label="AFIP SDK Access Token" placeholder="sdk_..." />
         </div>
 
-        <Field id="coingecko" label="CoinGecko API Key (demo)" placeholder="CG-..." />
-
-        <div style={{ borderTop: '1px solid #334155', margin: '20px 0' }} />
-        <Section title="Fiscal" color="#14b8a6" />
-        <Field id="afipsdk" label="AFIP SDK Access Token" placeholder="sdk_..." />
-
-        <div style={{ marginTop: 24, display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
+        <div style={{ padding: '16px 28px', borderTop: '1px solid #334155', display: 'flex', gap: 10, justifyContent: 'flex-end', flexShrink: 0 }}>
           <button onClick={onClose} style={{ padding: '9px 20px', borderRadius: 8, border: '1px solid #334155', background: 'transparent', color: '#94a3b8', cursor: 'pointer', fontSize: 14 }}>
             Cancelar
           </button>
