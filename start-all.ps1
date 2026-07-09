@@ -1,61 +1,45 @@
-# start-all.ps1 — arranca toda la suite (launcher + maximos + finanzas + fiscal)
+# start-all.ps1
 
 $Root = $PSScriptRoot
-$LogDir = "$Root\logs"
-if (-not (Test-Path $LogDir)) { New-Item -ItemType Directory $LogDir | Out-Null }
+$LogDir = Join-Path $Root "logs"
+if (-not (Test-Path $LogDir)) { New-Item -ItemType Directory -Path $LogDir | Out-Null }
 
 function Wait-Port($port, $label, $maxSecs = 40) {
-    Write-Host "  Esperando $label..." -NoNewline
+    Write-Host "  $label" -NoNewline
     for ($i = 0; $i -lt $maxSecs; $i++) {
         $ok = Test-NetConnection -ComputerName localhost -Port $port -InformationLevel Quiet -WarningAction SilentlyContinue
         if ($ok) { Write-Host " OK" -ForegroundColor Green; return }
         Start-Sleep 1; Write-Host -NoNewline "."
     }
-    Write-Host " timeout (ver logs\)" -ForegroundColor Yellow
+    Write-Host " timeout" -ForegroundColor Yellow
 }
 
-Write-Host ""
-Write-Host "  finanzas suite — iniciando todos los procesos" -ForegroundColor Cyan
-Write-Host ""
+function Start-App($dir, $cmd, $logName) {
+    $logOut = Join-Path $LogDir $logName
+    $logErr = Join-Path $LogDir ($logName -replace '\.log$', '-err.log')
+    Start-Process powershell `
+        -ArgumentList "-NoProfile", "-NonInteractive", "-Command", "Set-Location '$dir'; $cmd" `
+        -WindowStyle Hidden `
+        -RedirectStandardOutput $logOut `
+        -RedirectStandardError $logErr
+}
 
-# Launcher (hub de configuración)
-Start-Process powershell -WindowStyle Hidden -ArgumentList `
-    "-Command", "cd '$Root\launcher\backend'; uvicorn main:app --port 8099 > '$LogDir\launcher-backend.log' 2>&1"
+Write-Host "finanzas suite - iniciando" -ForegroundColor Cyan
 
-Start-Process powershell -WindowStyle Hidden -ArgumentList `
-    "-Command", "cd '$Root\launcher\frontend'; npm run dev > '$LogDir\launcher-frontend.log' 2>&1"
+Start-App "$Root\launcher\backend"  "uvicorn main:app --port 8099" "launcher-backend.log"
+Start-App "$Root\launcher\frontend" "npm run dev"                  "launcher-frontend.log"
+Start-App "$Root\maximos\backend"   "uvicorn main:app --port 8000" "maximos-backend.log"
+Start-App "$Root\maximos\frontend"  "npm run dev"                  "maximos-frontend.log"
+Start-App "$Root\finanzas\backend"  "uvicorn main:app --port 8001" "finanzas-backend.log"
+Start-App "$Root\finanzas\frontend" "npm run dev"                  "finanzas-frontend.log"
+Start-App "$Root\fiscal\backend"    "uvicorn main:app --port 8002" "fiscal-backend.log"
+Start-App "$Root\fiscal\frontend"   "npm run dev"                  "fiscal-frontend.log"
 
-# maximos
-Start-Process powershell -WindowStyle Hidden -ArgumentList `
-    "-Command", "cd '$Root\maximos\backend'; uvicorn main:app --port 8000 > '$LogDir\maximos-backend.log' 2>&1"
-
-Start-Process powershell -WindowStyle Hidden -ArgumentList `
-    "-Command", "cd '$Root\maximos\frontend'; npm run dev > '$LogDir\maximos-frontend.log' 2>&1"
-
-# finanzas
-Start-Process powershell -WindowStyle Hidden -ArgumentList `
-    "-Command", "cd '$Root\finanzas\backend'; uvicorn main:app --port 8001 > '$LogDir\finanzas-backend.log' 2>&1"
-
-Start-Process powershell -WindowStyle Hidden -ArgumentList `
-    "-Command", "cd '$Root\finanzas\frontend'; npm run dev > '$LogDir\finanzas-frontend.log' 2>&1"
-
-# fiscal
-Start-Process powershell -WindowStyle Hidden -ArgumentList `
-    "-Command", "cd '$Root\fiscal\backend'; uvicorn main:app --port 8002 > '$LogDir\fiscal-backend.log' 2>&1"
-
-Start-Process powershell -WindowStyle Hidden -ArgumentList `
-    "-Command", "cd '$Root\fiscal\frontend'; npm run dev > '$LogDir\fiscal-frontend.log' 2>&1"
-
-# Esperar al launcher (entrada principal)
 Wait-Port 8099 "launcher backend"
 Wait-Port 5172 "launcher frontend"
 
-# Abrir solo el launcher — desde ahí se accede a todo
 Write-Host ""
-Write-Host "  Abriendo launcher..." -ForegroundColor Cyan
 Start-Process "http://localhost:5172"
-
-Write-Host ""
-Write-Host "  Todo iniciado. Launcher en http://localhost:5172" -ForegroundColor Green
-Write-Host "  Logs en .\logs\  |  Para detener: .\stop-all.ps1" -ForegroundColor Yellow
+Write-Host "  Launcher en http://localhost:5172" -ForegroundColor Green
+Write-Host "  Logs en .\logs\  |  Detener: .\stop-all.ps1" -ForegroundColor Yellow
 Write-Host ""
