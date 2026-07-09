@@ -1441,166 +1441,6 @@ function MovimientosTab({ transactions, accounts, onEdit, onDelete, onNewManual,
   )
 }
 
-// ── SettingsModal ─────────────────────────────────────────────────────────────
-function SettingsModal({ maximosMode, onMode, onClose }) {
-  const [localStatus, setLocalStatus] = useState(null)
-  const [starting, setStarting]       = useState(false)
-  const [groqKey, setGroqKey]               = useState('')
-  const [googleKey, setGoogleKey]           = useState('')
-  const [coingeckoKey, setCoingeckoKey]     = useState('')
-  const [showGroq, setShowGroq]             = useState(false)
-  const [showGoogle, setShowGoogle]         = useState(false)
-  const [showCoingecko, setShowCoingecko]   = useState(false)
-  const [saving, setSaving]           = useState(false)
-  const [saved, setSaved]             = useState(false)
-
-  useEffect(() => {
-    if (maximosMode === 'local') checkLocal()
-    loadKeys()
-  }, [maximosMode])
-
-  async function loadKeys() {
-    try {
-      const d = await api('/api/config')
-      if (d.groq)       setGroqKey(d.groq)
-      if (d.google)     setGoogleKey(d.google)
-      if (d.coingecko)  setCoingeckoKey(d.coingecko)
-    } catch {}
-  }
-
-  async function saveKeys() {
-    setSaving(true)
-    try {
-      await api('/api/config', {
-        method: 'POST',
-        body: JSON.stringify({ groq_key: groqKey || null, google_key: googleKey || null, coingecko_key: coingeckoKey || null }),
-      })
-      setSaved(true)
-      setTimeout(() => setSaved(false), 3000)
-    } catch {}
-    setSaving(false)
-  }
-
-  async function checkLocal() {
-    setLocalStatus(null)
-    try {
-      const r = await fetch('/api/maximos/status')
-      const d = await r.json()
-      setLocalStatus(d.running)
-    } catch { setLocalStatus(false) }
-  }
-
-  async function startLocal() {
-    setStarting(true)
-    try {
-      await fetch('/api/maximos/start', { method: 'POST' })
-      // Polling hasta que arranque (max 15s)
-      for (let i = 0; i < 15; i++) {
-        await new Promise(r => setTimeout(r, 1000))
-        const r = await fetch('/api/maximos/status')
-        const d = await r.json()
-        if (d.running) { setLocalStatus(true); break }
-      }
-    } catch {}
-    setStarting(false)
-  }
-
-  return (
-    <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4" onClick={onClose}>
-      <div className="bg-white rounded-2xl shadow-xl w-full max-w-sm p-6" onClick={e => e.stopPropagation()}>
-        <div className="flex items-center justify-between mb-5">
-          <h2 className="text-base font-semibold text-gray-900">Configuración</h2>
-          <button onClick={onClose} className="text-gray-400 hover:text-gray-600 text-xl leading-none">×</button>
-        </div>
-
-        <p className="text-xs text-gray-500 mb-3">Fuente de precios de mercado</p>
-        <div className="flex flex-col gap-2">
-          {[
-            { id: 'online', label: 'Online', sub: 'maximos en Cloudflare', icon: '☁️' },
-            { id: 'local',  label: 'Local',  sub: 'maximos en localhost:8000', icon: '💻' },
-          ].map(opt => (
-            <button key={opt.id} onClick={() => { onMode(opt.id); if (opt.id === 'local') setLocalStatus(null) }}
-              className={`flex items-center gap-3 p-3 rounded-xl border-2 text-left transition-colors ${
-                maximosMode === opt.id ? 'border-amber-500 bg-amber-50' : 'border-gray-200 hover:border-gray-300'
-              }`}>
-              <span className="text-xl">{opt.icon}</span>
-              <div>
-                <div className="text-sm font-medium text-gray-900">{opt.label}</div>
-                <div className="text-xs text-gray-500">{opt.sub}</div>
-              </div>
-              {maximosMode === opt.id && <span className="ml-auto text-amber-500 text-sm">✓</span>}
-            </button>
-          ))}
-        </div>
-
-        {maximosMode === 'local' && (
-          <div className="mt-4 p-3 rounded-xl bg-gray-50 border border-gray-200">
-            <div className="flex items-center gap-2 mb-2">
-              {localStatus === null && <span className="text-xs text-gray-400">Verificando...</span>}
-              {localStatus === true  && <><span className="w-2 h-2 rounded-full bg-green-500 shrink-0" /><span className="text-xs text-green-700 font-medium">maximos corriendo</span></>}
-              {localStatus === false && <><span className="w-2 h-2 rounded-full bg-red-500 shrink-0" /><span className="text-xs text-red-600 font-medium">maximos no está corriendo</span></>}
-              <button onClick={checkLocal} className="ml-auto text-xs text-gray-400 hover:text-gray-600">↻</button>
-            </div>
-            {localStatus === false && (
-              <button onClick={startLocal} disabled={starting}
-                className="w-full py-1.5 rounded-lg bg-amber-500 hover:bg-amber-600 text-white text-xs font-medium disabled:opacity-50 transition-colors">
-                {starting ? 'Arrancando...' : 'Arrancar maximos'}
-              </button>
-            )}
-          </div>
-        )}
-
-        <p className="text-xs text-gray-400 mt-4">
-          Usá <strong>Online</strong> si no tenés maximos local.
-          Usá <strong>Local</strong> para precios de acciones más actualizados.
-        </p>
-
-        {/* API Keys */}
-        <div className="mt-5 pt-5 border-t border-gray-100">
-          <p className="text-xs text-gray-500 mb-3">API Keys — IA (ingest y agente)</p>
-          <div className="space-y-3">
-            {[
-              { key: 'groq',       label: 'Groq',           val: groqKey,       set: setGroqKey,       show: showGroq,       setShow: setShowGroq,       url: 'https://console.groq.com/keys',          placeholder: 'gsk_...' },
-              { key: 'google',     label: 'Google (Gemini)', val: googleKey,     set: setGoogleKey,     show: showGoogle,     setShow: setShowGoogle,     url: 'https://aistudio.google.com/app/apikey', placeholder: 'AIza...' },
-              { key: 'coingecko', label: 'CoinGecko',      val: coingeckoKey,  set: setCoingeckoKey,  show: showCoingecko,  setShow: setShowCoingecko,  url: 'https://www.coingecko.com/es/api/pricing', placeholder: 'CG-...' },
-            ].map(k => (
-              <div key={k.key}>
-                <div className="flex items-center gap-2 mb-1">
-                  <span className="text-xs font-medium text-gray-600">{k.label}</span>
-                  <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded-full ${k.val ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-600'}`}>
-                    {k.val ? '✓ configurada' : '✗ no configurada'}
-                  </span>
-                  <a href={k.url} target="_blank" rel="noopener noreferrer"
-                    className="ml-auto text-[10px] text-amber-500 hover:underline">obtener key ↗</a>
-                </div>
-                <div className="flex gap-1">
-                  <input
-                    type={k.show ? 'text' : 'password'}
-                    value={k.val} onChange={e => k.set(e.target.value)}
-                    placeholder={k.placeholder}
-                    className="flex-1 border border-gray-200 rounded-lg px-3 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-amber-400 font-mono"
-                  />
-                  <button onClick={() => k.setShow(s => !s)}
-                    className="px-2 text-gray-400 hover:text-gray-600 text-xs border border-gray-200 rounded-lg">
-                    {k.show ? '🙈' : '👁'}
-                  </button>
-                </div>
-              </div>
-            ))}
-          </div>
-          <button onClick={saveKeys} disabled={saving}
-            className="mt-3 w-full py-1.5 rounded-lg bg-amber-500 hover:bg-amber-600 text-white text-xs font-medium disabled:opacity-40 transition-colors">
-            {saving ? 'Guardando...' : saved ? '✓ Guardado' : 'Guardar keys'}
-          </button>
-          <p className="text-[11px] text-gray-400 mt-2 text-center">
-            Se guardan en el archivo .env del backend. Las tres son gratuitas.
-          </p>
-        </div>
-      </div>
-    </div>
-  )
-}
-
 // ── App ───────────────────────────────────────────────────────────────────────
 export default function App() {
   const [tab, setTab] = useState('patrimonio')
@@ -1608,11 +1448,19 @@ export default function App() {
   const [positions, setPositions] = useState([])
   const [transactions, setTransactions] = useState([])
   const [chatMessages, setChatMessages] = useState(INITIAL_MESSAGES)
-  const [modal, setModal] = useState(null) // null | 'add-account' | 'add-position' | 'ingest' | 'help' | 'settings'
+  const [modal, setModal] = useState(null) // null | 'add-account' | 'add-position' | 'ingest' | 'help'
   const [editTarget, setEditTarget] = useState(null)
   const [maximosMode, setMaximosMode] = useState(() => localStorage.getItem('maximos_mode') || 'online')
   const maximosUrl = maximosMode === 'local' ? MAXIMOS_LOCAL : MAXIMOS_ONLINE
-  const saveMaximosMode = m => { setMaximosMode(m); localStorage.setItem('maximos_mode', m) }
+
+  useEffect(() => {
+    fetch('/api/config').then(r => r.json()).then(d => {
+      if (d.maximos_mode) {
+        setMaximosMode(d.maximos_mode)
+        localStorage.setItem('maximos_mode', d.maximos_mode)
+      }
+    }).catch(() => {})
+  }, [])
   const [prices,   setPrices]   = useState({})
   const [blueRate, setBlueRate] = useState(null)
 
@@ -1740,11 +1588,6 @@ export default function App() {
           <span className="text-xs text-gray-400 ml-2">personal</span>
         </div>
         <div className="flex items-center gap-2">
-          <button onClick={() => setModal('settings')}
-            title="Configuración"
-            className="text-gray-400 hover:text-white text-base px-2 py-1.5 rounded-lg border border-gray-700 hover:border-gray-500 transition-colors">
-            ⚙️
-          </button>
           <button onClick={() => setModal('help')}
             className="text-gray-400 hover:text-white text-xs font-medium px-2.5 py-1.5 rounded-lg border border-gray-700 hover:border-gray-500 transition-colors">
             ? Ayuda
@@ -1906,13 +1749,6 @@ export default function App() {
 
       {modal === 'help' && <HelpModal onClose={() => setModal(null)} />}
 
-      {modal === 'settings' && (
-        <SettingsModal
-          maximosMode={maximosMode}
-          onMode={saveMaximosMode}
-          onClose={() => setModal(null)}
-        />
-      )}
     </div>
   )
 }

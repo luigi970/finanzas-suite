@@ -40,9 +40,10 @@ def get_config():
     from dotenv import dotenv_values
     env = dotenv_values(ENV_PATH)
     return {
-        "groq":       env.get("GROQ_API_KEY") or "",
-        "google":     env.get("GOOGLE_API_KEY") or "",
-        "coingecko":  env.get("COINGECKO_API_KEY") or "",
+        "groq":         env.get("GROQ_API_KEY") or "",
+        "google":       env.get("GOOGLE_API_KEY") or "",
+        "coingecko":    env.get("COINGECKO_API_KEY") or "",
+        "maximos_mode": env.get("MAXIMOS_MODE") or "online",
     }
 
 class ConfigIn(BaseModel):

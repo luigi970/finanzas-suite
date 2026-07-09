@@ -28,59 +28,6 @@ const AUTOMATIONS = [
   { id: 'mis-facilidades',            label: 'Facilidades de Pago',        desc: 'Planes de pago activos' },
 ]
 
-// ── SettingsModal ──────────────────────────────────────────────────────────────
-function SettingsModal({ onClose }) {
-  const [groq, setGroq]     = useState('')
-  const [google, setGoogle] = useState('')
-  const [sdk, setSdk]       = useState('')
-  const [saved, setSaved]   = useState(false)
-
-  useEffect(() => {
-    fetch('/api/config').then(r => r.json()).then(d => {
-      setGroq(d.groq || '')
-      setGoogle(d.google || '')
-      setSdk(d.afipsdk || '')
-    })
-  }, [])
-
-  const save = async () => {
-    await fetch('/api/config', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ groq_key: groq, google_key: google, afipsdk_key: sdk }),
-    })
-    setSaved(true)
-    setTimeout(() => setSaved(false), 2000)
-  }
-
-  return (
-    <div className="fixed inset-0 bg-black/50 z-50 flex items-end sm:items-center justify-center" onClick={onClose}>
-      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md mx-4 p-6" onClick={e => e.stopPropagation()}>
-        <h2 className="text-base font-semibold text-gray-800 mb-4">Configuración</h2>
-        <div className="space-y-3">
-          {[
-            { label: 'Groq API Key', val: groq, set: setGroq, ph: 'gsk_...' },
-            { label: 'Google API Key', val: google, set: setGoogle, ph: 'AIza...' },
-            { label: 'AFIP SDK Token', val: sdk, set: setSdk, ph: 'Tu access_token de afipsdk.com' },
-          ].map(({ label, val, set, ph }) => (
-            <div key={label}>
-              <label className="text-xs text-gray-500 font-medium">{label}</label>
-              <input type="password" value={val} onChange={e => set(e.target.value)}
-                placeholder={ph}
-                className="mt-1 w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-teal-400" />
-            </div>
-          ))}
-        </div>
-        <button onClick={save}
-          className="mt-4 w-full py-2.5 rounded-xl text-sm font-semibold text-white transition-colors"
-          style={{ background: TEAL }}>
-          {saved ? '¡Guardado!' : 'Guardar'}
-        </button>
-      </div>
-    </div>
-  )
-}
-
 // ── DashboardTab ───────────────────────────────────────────────────────────────
 function DashboardTab({ profile, cacheList }) {
   if (!profile?.cuit) {
@@ -623,7 +570,6 @@ function VencimientosTab({ profile }) {
 // ── App ────────────────────────────────────────────────────────────────────────
 export default function App() {
   const [tab, setTab]         = useState('dashboard')
-  const [showSettings, setShowSettings] = useState(false)
   const [profile, setProfile] = useState({})
   const [cacheList, setCacheList] = useState([])
   const [chatMessages, setChatMessages] = useState([])
@@ -640,7 +586,6 @@ export default function App() {
         <div className="max-w-6xl mx-auto px-4">
           <div className="flex items-center justify-between h-12">
             <span className="font-bold tracking-wide text-base">fiscal</span>
-            <button onClick={() => setShowSettings(true)} className="text-slate-400 hover:text-white text-lg">⚙️</button>
           </div>
           <div className="flex gap-1 overflow-x-auto pb-0 -mb-px scrollbar-none">
             {TABS.map(t => (
@@ -664,7 +609,6 @@ export default function App() {
         {tab === 'vencimientos' && <VencimientosTab profile={profile} />}
       </main>
 
-      {showSettings && <SettingsModal onClose={() => setShowSettings(false)} />}
     </div>
   )
 }

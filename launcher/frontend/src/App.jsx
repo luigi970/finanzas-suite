@@ -115,7 +115,7 @@ function AppCard({ app, status, onOpen, onStart, starting }) {
 }
 
 function ConfigModal({ onClose }) {
-  const [form, setForm] = useState({ groq: '', google: '', coingecko: '', afipsdk: '' })
+  const [form, setForm] = useState({ groq: '', google: '', coingecko: '', afipsdk: '', maximosMode: 'online' })
   const [show, setShow] = useState({ groq: false, google: false, coingecko: false, afipsdk: false })
   const [saving, setSaving] = useState(false)
   const [saved, setSaved] = useState(false)
@@ -123,7 +123,13 @@ function ConfigModal({ onClose }) {
   useEffect(() => {
     fetch('/api/config')
       .then(r => r.json())
-      .then(d => setForm({ groq: d.groq || '', google: d.google || '', coingecko: d.coingecko || '', afipsdk: d.afipsdk || '' }))
+      .then(d => setForm({
+        groq: d.groq || '',
+        google: d.google || '',
+        coingecko: d.coingecko || '',
+        afipsdk: d.afipsdk || '',
+        maximosMode: d.maximos_mode || 'online',
+      }))
       .catch(() => {})
   }, [])
 
@@ -133,7 +139,7 @@ function ConfigModal({ onClose }) {
       await fetch('/api/config', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(form),
+        body: JSON.stringify({ ...form, maximos_mode: form.maximosMode }),
       })
       setSaved(true)
       setTimeout(() => setSaved(false), 2000)
@@ -203,6 +209,33 @@ function ConfigModal({ onClose }) {
 
         <div style={{ borderTop: '1px solid #334155', margin: '20px 0' }} />
         <Section title="Mercado" color="#60a5fa" />
+
+        <div style={{ marginBottom: 14 }}>
+          <label style={{ display: 'block', color: '#94a3b8', fontSize: 12, marginBottom: 8, fontWeight: 500 }}>
+            Fuente de precios (finanzas)
+          </label>
+          <div style={{ display: 'flex', gap: 8 }}>
+            {[
+              { id: 'online', label: 'Online', sub: 'Cloudflare Worker' },
+              { id: 'local',  label: 'Local',  sub: 'localhost:8000' },
+            ].map(opt => (
+              <button
+                key={opt.id}
+                onClick={() => setForm(f => ({ ...f, maximosMode: opt.id }))}
+                style={{
+                  flex: 1, padding: '8px 12px', borderRadius: 8, cursor: 'pointer',
+                  border: `1px solid ${form.maximosMode === opt.id ? '#60a5fa' : '#334155'}`,
+                  background: form.maximosMode === opt.id ? 'rgba(96,165,250,0.12)' : 'transparent',
+                  textAlign: 'left', transition: 'all 0.15s',
+                }}
+              >
+                <div style={{ color: form.maximosMode === opt.id ? '#93c5fd' : '#f8fafc', fontSize: 13, fontWeight: 600 }}>{opt.label}</div>
+                <div style={{ color: '#64748b', fontSize: 11, marginTop: 2 }}>{opt.sub}</div>
+              </button>
+            ))}
+          </div>
+        </div>
+
         <Field id="coingecko" label="CoinGecko API Key (demo)" placeholder="CG-..." />
 
         <div style={{ borderTop: '1px solid #334155', margin: '20px 0' }} />

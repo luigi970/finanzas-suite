@@ -37,6 +37,7 @@ KEYS_MAP = {
     "GOOGLE_API_KEY":       ["maximos", "finanzas", "fiscal"],
     "COINGECKO_API_KEY":    ["finanzas"],
     "AFIPSDK_ACCESS_TOKEN": ["fiscal"],
+    "MAXIMOS_MODE":         ["finanzas"],
 }
 
 @app.get("/api/health")
@@ -50,21 +51,23 @@ def get_config():
     for app_id, path in ENV_PATHS.items():
         if os.path.exists(path):
             env = dotenv_values(path)
-            for key in ["GROQ_API_KEY", "GOOGLE_API_KEY", "COINGECKO_API_KEY", "AFIPSDK_ACCESS_TOKEN"]:
+            for key in ["GROQ_API_KEY", "GOOGLE_API_KEY", "COINGECKO_API_KEY", "AFIPSDK_ACCESS_TOKEN", "MAXIMOS_MODE"]:
                 if key in env and env[key]:
                     result[key] = env[key]
     return {
-        "groq":      result.get("GROQ_API_KEY", ""),
-        "google":    result.get("GOOGLE_API_KEY", ""),
-        "coingecko": result.get("COINGECKO_API_KEY", ""),
-        "afipsdk":   result.get("AFIPSDK_ACCESS_TOKEN", ""),
+        "groq":         result.get("GROQ_API_KEY", ""),
+        "google":       result.get("GOOGLE_API_KEY", ""),
+        "coingecko":    result.get("COINGECKO_API_KEY", ""),
+        "afipsdk":      result.get("AFIPSDK_ACCESS_TOKEN", ""),
+        "maximos_mode": result.get("MAXIMOS_MODE", "online"),
     }
 
 class ConfigIn(BaseModel):
-    groq:      Optional[str] = None
-    google:    Optional[str] = None
-    coingecko: Optional[str] = None
-    afipsdk:   Optional[str] = None
+    groq:         Optional[str] = None
+    google:       Optional[str] = None
+    coingecko:    Optional[str] = None
+    afipsdk:      Optional[str] = None
+    maximos_mode: Optional[str] = None
 
 @app.post("/api/config")
 def save_config(data: ConfigIn):
@@ -74,6 +77,7 @@ def save_config(data: ConfigIn):
         "GOOGLE_API_KEY":       data.google,
         "COINGECKO_API_KEY":    data.coingecko,
         "AFIPSDK_ACCESS_TOKEN": data.afipsdk,
+        "MAXIMOS_MODE":         data.maximos_mode,
     }
     for env_var, value in updates.items():
         if not value or not value.strip():
