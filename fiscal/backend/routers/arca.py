@@ -3,53 +3,38 @@ from datetime import datetime, timedelta
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 from typing import Optional
-import httpx
 from database import get_db
 
 router = APIRouter()
 
 AFIPSDK_TOKEN = os.getenv("AFIPSDK_ACCESS_TOKEN", "")
-AFIPSDK_URL   = "https://api.afipsdk.com/v1/automations"
 
 TTL_DAYS = {
-    "nuestra-parte":              7,
-    "monotributo-info":           7,
-    "mis-retenciones":           30,
+    "nuestra-parte":               7,
+    "monotributo-info":            7,
+    "mis-retenciones":            30,
     "domicilio-fiscal-electronico": 7,
-    "ccma":                      30,
-    "mis-comprobantes":          30,
-    "mis-facilidades":           30,
+    "ccma":                       30,
+    "mis-comprobantes":           30,
+    "mis-facilidades":            30,
 }
+
 
 class SyncRequest(BaseModel):
     automation: str
     cuit: str
     password: str
-    periodo: Optional[str] = None   # año "2025" o MM/YYYY según automation
-    force: Optional[bool] = False   # ignorar cache
+    periodo: Optional[str] = None
+    force:    Optional[bool] = False
 
-async def _call_afipsdk(automation: str, data: dict) -> dict:
-    if not AFIPSDK_TOKEN:
-        raise HTTPException(503, "AFIPSDK_ACCESS_TOKEN no configurado — configuralo en ⚙️")
-    try:
-        async with httpx.AsyncClient(timeout=120) as client:
-            r = await client.post(
-                AFIPSDK_URL,
-                headers={"Authorization": f"Bearer {AFIPSDK_TOKEN}"},
-                json={"automation": automation, "data": data, "wait": True},
-            )
-            if r.status_code == 401:
-                raise HTTPException(401, "AFIP SDK: token inválido o vencido")
-            if r.status_code != 200:
-                raise HTTPException(502, f"AFIP SDK error {r.status_code}: {r.text[:300]}")
-            body = r.json()
-            if body.get("error"):
-                raise HTTPException(502, f"AFIP SDK: {body['error']}")
-            return body.get("data", body)
-    except httpx.ConnectError:
-        raise HTTPException(503, "No se pudo conectar a api.afipsdk.com — verificá la conexión a internet")
-    except httpx.TimeoutException:
-        raise HTTPException(504, "AFIP SDK no respondió en 120s — la automatización tardó demasiado")
+
+def _get_afip():
+    token = os.getenv("AFIPSDK_ACCESS_TOKEN", "") or AFIPSDK_TOKEN
+    if not token:
+        raise HTTPException(503, "AFIPSDK_ACCESS_TOKEN no configurado — ingresalo en ⚙️ del launcher")
+    from afip import Afip
+    return Afip({"access_token": token})
+
 
 def _get_cache(automation: str, periodo: Optional[str]) -> Optional[dict]:
     db = get_db()
@@ -64,38 +49,60 @@ def _get_cache(automation: str, periodo: Optional[str]) -> Optional[dict]:
         return None
     return json.loads(row["data"])
 
+
 def _set_cache(automation: str, periodo: Optional[str], data: dict):
     ttl = TTL_DAYS.get(automation, 7)
     expires = (datetime.now() + timedelta(days=ttl)).isoformat()
     db = get_db()
-    db.execute("DELETE FROM arca_cache WHERE automation=? AND (periodo=? OR (periodo IS NULL AND ? IS NULL))",
-               (automation, periodo, periodo))
-    db.execute("INSERT INTO arca_cache (automation, periodo, data, expires_at) VALUES (?,?,?,?)",
-               (automation, periodo, json.dumps(data, ensure_ascii=False), expires))
+    db.execute(
+        "DELETE FROM arca_cache WHERE automation=? AND (periodo=? OR (periodo IS NULL AND ? IS NULL))",
+        (automation, periodo, periodo)
+    )
+    db.execute(
+        "INSERT INTO arca_cache (automation, periodo, data, expires_at) VALUES (?,?,?,?)",
+        (automation, periodo, json.dumps(data, ensure_ascii=False), expires)
+    )
     db.commit()
     db.close()
 
+
 @router.post("/api/arca/sync")
-async def sync_arca(req: SyncRequest):
+def sync_arca(req: SyncRequest):
     if not req.force:
         cached = _get_cache(req.automation, req.periodo)
         if cached:
             return {"source": "cache", "data": cached}
 
+    afip = _get_afip()
+
     payload = {"cuit": req.cuit, "username": req.cuit, "password": req.password}
     if req.periodo:
         payload["periodo"] = req.periodo
 
-    data = await _call_afipsdk(req.automation, payload)
+    try:
+        result = afip.createAutomation(req.automation, payload, True)
+    except Exception as e:
+        msg = str(e)
+        if "401" in msg or "unauthorized" in msg.lower():
+            raise HTTPException(401, "AFIP SDK: token inválido o vencido")
+        if "timeout" in msg.lower():
+            raise HTTPException(504, "AFIP SDK no respondió — la automatización tardó demasiado")
+        raise HTTPException(502, f"AFIP SDK: {msg}")
+
+    data = result.get("data", result) if isinstance(result, dict) else result
     _set_cache(req.automation, req.periodo, data)
     return {"source": "arca", "data": data}
+
 
 @router.get("/api/arca/cache")
 def list_cache():
     db = get_db()
-    rows = db.execute("SELECT automation, periodo, fetched_at, expires_at FROM arca_cache ORDER BY fetched_at DESC").fetchall()
+    rows = db.execute(
+        "SELECT automation, periodo, fetched_at, expires_at FROM arca_cache ORDER BY fetched_at DESC"
+    ).fetchall()
     db.close()
     return [dict(r) for r in rows]
+
 
 @router.get("/api/arca/cache/{automation}")
 def get_cache(automation: str, periodo: Optional[str] = None):
@@ -103,6 +110,7 @@ def get_cache(automation: str, periodo: Optional[str] = None):
     if data is None:
         raise HTTPException(404, "No hay datos en cache para esta automatización")
     return {"automation": automation, "periodo": periodo, "data": data}
+
 
 @router.delete("/api/arca/cache/{automation}")
 def clear_cache(automation: str):
