@@ -1,4 +1,4 @@
-# start-all.ps1 — arranca maximos + finanzas sin ventanas visibles
+# start-all.ps1 — arranca toda la suite (launcher + maximos + finanzas + fiscal)
 
 $Root = $PSScriptRoot
 $LogDir = "$Root\logs"
@@ -15,43 +15,47 @@ function Wait-Port($port, $label, $maxSecs = 40) {
 }
 
 Write-Host ""
-Write-Host "  maximos + finanzas + fiscal" -ForegroundColor Cyan
+Write-Host "  finanzas suite — iniciando todos los procesos" -ForegroundColor Cyan
 Write-Host ""
 
-# Backends
+# Launcher (hub de configuración)
+Start-Process powershell -WindowStyle Hidden -ArgumentList `
+    "-Command", "cd '$Root\launcher\backend'; uvicorn main:app --port 8099 > '$LogDir\launcher-backend.log' 2>&1"
+
+Start-Process powershell -WindowStyle Hidden -ArgumentList `
+    "-Command", "cd '$Root\launcher\frontend'; npm run dev > '$LogDir\launcher-frontend.log' 2>&1"
+
+# maximos
 Start-Process powershell -WindowStyle Hidden -ArgumentList `
     "-Command", "cd '$Root\maximos\backend'; uvicorn main:app --port 8000 > '$LogDir\maximos-backend.log' 2>&1"
 
 Start-Process powershell -WindowStyle Hidden -ArgumentList `
-    "-Command", "cd '$Root\finanzas\backend'; uvicorn main:app --port 8001 > '$LogDir\finanzas-backend.log' 2>&1"
-
-# Frontends
-Start-Process powershell -WindowStyle Hidden -ArgumentList `
     "-Command", "cd '$Root\maximos\frontend'; npm run dev > '$LogDir\maximos-frontend.log' 2>&1"
+
+# finanzas
+Start-Process powershell -WindowStyle Hidden -ArgumentList `
+    "-Command", "cd '$Root\finanzas\backend'; uvicorn main:app --port 8001 > '$LogDir\finanzas-backend.log' 2>&1"
 
 Start-Process powershell -WindowStyle Hidden -ArgumentList `
     "-Command", "cd '$Root\finanzas\frontend'; npm run dev > '$LogDir\finanzas-frontend.log' 2>&1"
 
+# fiscal
 Start-Process powershell -WindowStyle Hidden -ArgumentList `
     "-Command", "cd '$Root\fiscal\backend'; uvicorn main:app --port 8002 > '$LogDir\fiscal-backend.log' 2>&1"
 
 Start-Process powershell -WindowStyle Hidden -ArgumentList `
     "-Command", "cd '$Root\fiscal\frontend'; npm run dev > '$LogDir\fiscal-frontend.log' 2>&1"
 
-# Esperar a que los puertos estén escuchando
-Wait-Port 8001 "finanzas backend"
-Wait-Port 8000 "maximos backend (opcional)"
-Wait-Port 5174 "finanzas frontend"
-Wait-Port 5175 "fiscal frontend (opcional)"
+# Esperar al launcher (entrada principal)
+Wait-Port 8099 "launcher backend"
+Wait-Port 5172 "launcher frontend"
 
-# Abrir browser
+# Abrir solo el launcher — desde ahí se accede a todo
 Write-Host ""
-Write-Host "  Abriendo apps..." -ForegroundColor Cyan
-Start-Process "http://localhost:5174"
-Start-Process "http://localhost:5173"
-Start-Process "http://localhost:5175"
+Write-Host "  Abriendo launcher..." -ForegroundColor Cyan
+Start-Process "http://localhost:5172"
 
 Write-Host ""
-Write-Host "  Todo corriendo. Logs en .\logs\" -ForegroundColor Green
-Write-Host "  Para detener: .\stop-all.ps1" -ForegroundColor Yellow
+Write-Host "  Todo iniciado. Launcher en http://localhost:5172" -ForegroundColor Green
+Write-Host "  Logs en .\logs\  |  Para detener: .\stop-all.ps1" -ForegroundColor Yellow
 Write-Host ""

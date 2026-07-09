@@ -1,6 +1,6 @@
 # stop-all.ps1 — detiene todos los procesos de maximos + finanzas
 
-$ports = @(8000, 8001, 8002, 5173, 5174, 5175)
+$ports = @(8099, 8000, 8001, 8002, 5172, 5173, 5174, 5175)
 
 Write-Host ""
 foreach ($port in $ports) {
