@@ -52,17 +52,27 @@ finanzas-suite/           # repo raíz (github.com/luigi970/finanzas-suite)
 ├── finanzas/             # app patrimonio personal
 │   ├── backend/          # FastAPI puerto 8001
 │   └── frontend/         # Vite puerto 5174
-├── start-all.ps1         # arranca los 4 procesos
-└── stop-all.ps1
+├── fiscal/               # asistente fiscal IA (AFIP/ARCA)
+│   ├── backend/          # FastAPI puerto 8002
+│   └── frontend/         # Vite puerto 5175
+├── launcher/             # home page unificado de la suite
+│   ├── backend/          # FastAPI puerto 8099 — config unificado + status de apps
+│   │   ├── main.py
+│   │   └── requirements.txt
+│   └── frontend/         # Vite puerto 5172 — cards + botones + settings
+│       └── src/App.jsx
+├── start-all.ps1         # arranca los 8 procesos; auto-libera puertos; abre solo el launcher
+└── stop-all.ps1          # detiene puertos 8099, 8000-8002, 5172-5175
 ```
 
 ## Cómo arrancar (desarrollo local)
 
-### Todo junto (maximos + finanzas)
+### Todo junto (launcher + maximos + finanzas + fiscal)
 ```powershell
-.\start-all.ps1   # arranca los 4 procesos sin ventanas de terminal; logs en logs/
-.\stop-all.ps1    # detiene todo por puerto (8000, 8001, 5173, 5174)
+.\start-all.ps1   # arranca los 8 procesos; auto-libera puertos; abre launcher en browser
+.\stop-all.ps1    # detiene todo (puertos 8099, 8000-8002, 5172-5175)
 ```
+El launcher abre en `http://localhost:5172` y desde ahí se accede a las tres apps y se configuran todas las API keys.
 
 ### Solo maximos
 ```powershell
@@ -84,6 +94,7 @@ El `.env` del backend necesita:
 GROQ_API_KEY=...
 GOOGLE_API_KEY=...
 ```
+Las keys también se pueden configurar desde el launcher (⚙️ Configuración) sin tocar el .env manualmente.
 
 ## API endpoints
 
@@ -91,6 +102,7 @@ Todos expuestos tanto en el Worker (producción) como en FastAPI (local):
 
 | Método | Ruta | Descripción |
 |---|---|---|
+| GET | `/api/health` | Health check (usado por el launcher para status) |
 | GET | `/api/status?list_id=sp500` | Estado del último run y progreso |
 | GET | `/api/stocks?list_id=sp500&signal=all` | Resultados, filtrable por señal |
 | GET | `/api/lists` | Listas disponibles con conteo |
@@ -291,11 +303,44 @@ El prompt está en `worker/src/providers/prompt.py` (`build_prompt()`). El backe
 - [x] Agente IA: sentimiento crypto — Fear & Greed (alternative.me) + CoinGecko global (BTC dominance, market cap) + datos por coin (rank, ATH, market cap) + Binance Futures (funding rate, OI, L/S ratio)
 - [x] Panel ⚙️ agrega CoinGecko API key (demo gratuita) con show/hide y badge de estado
 - [x] Fix: GET /api/config lee .env directo (dotenv_values) en vez de os.environ — evita que la key desaparezca al reabrir el panel
+- [x] Monorepo restructurado: archivos movidos a `maximos/`, GitHub repo renombrado a `finanzas-suite`
+- [x] Asistente fiscal `fiscal/` — scaffold completo (FastAPI 8002, Vite 5175, AFIP SDK, teal accent)
+- [x] Launcher `launcher/` — home page unificado (FastAPI 8099, Vite 5172) con cards de status, botones Abrir/Iniciar y config unificado de API keys
+- [x] `start-all.ps1` arranca los 8 procesos, auto-libera puertos y abre solo el launcher
+- [x] `strictPort: true` en todos los vite.config.js — evita que vite cambie puertos silenciosamente
+- [x] `/api/health` en maximos backend — necesario para el status check del launcher
 
 ### Features pendientes
 - [ ] Alertas por email o Telegram cuando cambia la señal
 - [ ] MTF real con descarga intraday para 15m/1h/4h
 - [ ] Lista personalizada (custom tickers) en la UI
+
+## Launcher — home page de la suite
+
+Panel de control unificado en `launcher/`. Punto de entrada único para toda la suite.
+
+### Puertos
+- Backend: `8099` (FastAPI)
+- Frontend: `5172` (Vite, `strictPort: true`)
+
+### Funciones
+- **Cards de apps**: maximos (amber), finanzas (amber), fiscal (teal). Cada card muestra estado en tiempo real (dot verde/gris para backend y frontend), botón **Abrir** (abre en nueva pestaña) y botón **Iniciar** (lanza backend + frontend via subprocess si no están corriendo).
+- **Status polling**: `GET /api/apps/status` cada 3s — health check a los 6 puertos de backends y frontends.
+- **Config unificado**: modal ⚙️ con secciones IA (Groq, Google), Mercado (CoinGecko) y Fiscal (AFIP SDK). Las keys se escriben en los `.env` de cada app según `KEYS_MAP`.
+
+### KEYS_MAP (launcher/backend/main.py)
+| Key | Destino |
+|---|---|
+| `GROQ_API_KEY` | maximos · finanzas · fiscal |
+| `GOOGLE_API_KEY` | maximos · finanzas · fiscal |
+| `COINGECKO_API_KEY` | finanzas |
+| `AFIPSDK_ACCESS_TOKEN` | fiscal |
+
+### Gotchas — puertos
+- Todos los frontends tienen `strictPort: true` en `vite.config.js` — si el puerto está ocupado vite falla en lugar de moverse silenciosamente a otro puerto.
+- El puerto de cada frontend se define **solo** en `vite.config.js`, no en el script `"dev"` de `package.json`. Si se hardcodea `--port` en `package.json`, ese flag overridea el config pero no hereda `strictPort`.
+- `start-all.ps1` libera los puertos al inicio filtrando conexiones `TimeWait` (estado TCP del kernel, PID 0, no matables). Si el kill filtrara esas conexiones, vite vería el puerto como ocupado y shiftearía.
+- El kill en `start-all.ps1` usa `Where-Object { $_.State -ne 'TimeWait' -and $_.OwningProcess -gt 0 }` para matar solo procesos reales.
 
 ## Proyecto relacionado — Finanzas Personales
 
