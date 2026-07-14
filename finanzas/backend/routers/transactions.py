@@ -13,14 +13,14 @@ class TransactionIn(BaseModel):
     description: Optional[str] = None
     amount: float
     currency: str
-    type: str           # income | expense | transfer
+    type: str           # income | buy | expense | sell | transfer
     category: Optional[str] = None
     source: Optional[str] = "manual"
     unit_price: Optional[float] = None
     fee: Optional[float] = None
     fee_currency: Optional[str] = None
 
-VALID_TYPES = {'income', 'expense', 'transfer'}
+VALID_TYPES = {'income', 'buy', 'expense', 'sell', 'transfer'}
 
 class TransactionItem(BaseModel):
     date: str
@@ -68,7 +68,7 @@ def _sync_position(conn, account_id: int, asset: str):
     from routers.positions import guess_asset_type
 
     qty_row = conn.execute("""
-        SELECT SUM(CASE WHEN type='income' THEN amount ELSE -amount END) as qty
+        SELECT SUM(CASE WHEN type IN ('income','buy') THEN amount ELSE -amount END) as qty
         FROM transactions WHERE account_id = ? AND currency = ?
     """, (account_id, asset)).fetchone()
     qty = round(qty_row['qty'] or 0, 8)
@@ -89,7 +89,7 @@ def _sync_position(conn, account_id: int, asset: str):
     # Si no hay ninguna compra con precio, preservar el avg_price actual (puede ser manual).
     buys_row = conn.execute("""
         SELECT COUNT(*) as cnt FROM transactions
-        WHERE account_id = ? AND currency = ? AND type = 'income'
+        WHERE account_id = ? AND currency = ? AND type IN ('income','buy')
           AND unit_price IS NOT NULL AND unit_price > 0
     """, (account_id, asset)).fetchone()
 
@@ -97,7 +97,7 @@ def _sync_position(conn, account_id: int, asset: str):
         avg_row = conn.execute("""
             SELECT SUM(amount * unit_price) / NULLIF(SUM(amount), 0) as avg_price
             FROM transactions
-            WHERE account_id = ? AND currency = ? AND type = 'income'
+            WHERE account_id = ? AND currency = ? AND type IN ('income','buy')
               AND unit_price IS NOT NULL AND unit_price > 0
         """, (account_id, asset)).fetchone()
         avg_price = round(float(avg_row['avg_price']), 8) if avg_row and avg_row['avg_price'] else None
@@ -171,7 +171,7 @@ def create_transaction(data: TransactionIn):
     conn = get_db()
     asset = data.currency.upper()
     realized_pnl = None
-    if data.unit_price and data.type == 'expense':
+    if data.unit_price and data.type in ('expense', 'sell'):
         realized_pnl = _calc_realized_pnl(conn, data.account_id, asset, data.unit_price, data.amount)
     fee_currency = data.fee_currency.upper() if data.fee_currency else None
     cur = conn.execute(
@@ -204,7 +204,7 @@ def create_transactions_batch(data: TransactionBatch):
         fee_currency = t.fee_currency.upper() if t.fee_currency else None
         tx_date = _sanitize_date(t.date)
         realized_pnl = None
-        if t.unit_price and tx_type == 'expense':
+        if t.unit_price and tx_type in ('expense', 'sell'):
             realized_pnl = _calc_realized_pnl(conn, data.account_id, currency, t.unit_price, t.amount)
         cur = conn.execute(
             "INSERT INTO transactions (account_id, date, description, amount, currency, type, category, source, unit_price, realized_pnl, fee, fee_currency) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
@@ -274,7 +274,8 @@ def summary(account_id: Optional[int] = None):
         SELECT strftime('%Y-%m', date) as month,
                currency,
                SUM(CASE WHEN type='income' THEN amount ELSE 0 END) as income,
-               SUM(CASE WHEN type='expense' THEN amount ELSE 0 END) as expense
+               SUM(CASE WHEN type='expense' THEN amount ELSE 0 END) as expense,
+               SUM(CASE WHEN type='sell' THEN amount ELSE 0 END) as sold
         FROM transactions {base}
         GROUP BY month, currency
         ORDER BY month DESC
@@ -284,7 +285,7 @@ def summary(account_id: Optional[int] = None):
         SELECT category, currency,
                SUM(amount) as total,
                COUNT(*) as count
-        FROM transactions {base} AND type='expense' AND category IS NOT NULL
+        FROM transactions {base} AND type IN ('expense','sell') AND category IS NOT NULL
         GROUP BY category, currency
         ORDER BY total DESC
     """, params).fetchall()

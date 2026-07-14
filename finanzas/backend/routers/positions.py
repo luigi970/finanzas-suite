@@ -43,6 +43,38 @@ def list_positions(account_id: Optional[int] = None):
     conn.close()
     return [dict(r) for r in rows]
 
+def _update_opening_balance(conn, account_id: int, asset: str, target_qty: float):
+    """Crea o ajusta la transacción 'opening_balance' de forma que _sync_position
+    produzca exactamente target_qty para este account/asset."""
+    income_excl = conn.execute(
+        "SELECT COALESCE(SUM(amount),0) as t FROM transactions WHERE account_id=? AND currency=? AND type IN ('income','buy') AND source!='opening_balance'",
+        (account_id, asset)
+    ).fetchone()['t']
+    expense_total = conn.execute(
+        "SELECT COALESCE(SUM(amount),0) as t FROM transactions WHERE account_id=? AND currency=? AND type NOT IN ('income','buy')",
+        (account_id, asset)
+    ).fetchone()['t']
+    opening_amount = round(target_qty - (income_excl - expense_total), 8)
+
+    existing = conn.execute(
+        "SELECT id FROM transactions WHERE account_id=? AND currency=? AND source='opening_balance'",
+        (account_id, asset)
+    ).fetchone()
+
+    from datetime import date as _date
+    today = _date.today().isoformat()
+    if existing:
+        if opening_amount > 0:
+            conn.execute("UPDATE transactions SET amount=? WHERE id=?", (opening_amount, existing['id']))
+        else:
+            conn.execute("DELETE FROM transactions WHERE id=?", (existing['id'],))
+    elif opening_amount > 0:
+        conn.execute(
+            "INSERT INTO transactions (account_id, date, description, amount, currency, type, source) VALUES (?,?,?,?,?,?,?)",
+            (account_id, today, 'Saldo inicial', opening_amount, asset, 'income', 'opening_balance')
+        )
+
+
 @router.post("", status_code=201)
 def create_position(data: PositionIn):
     conn = get_db()
@@ -52,6 +84,8 @@ def create_position(data: PositionIn):
         (data.account_id, data.asset.upper(), data.asset_type, data.quantity, data.avg_price,
          data.start_date, data.end_date, data.rate, data.auto_renew, data.notes)
     )
+    if data.asset_type not in ('fixed_term', 'fund') and data.quantity > 0:
+        _update_opening_balance(conn, data.account_id, data.asset.upper(), data.quantity)
     conn.commit()
     row = conn.execute("SELECT * FROM positions WHERE id = ?", (cur.lastrowid,)).fetchone()
     conn.close()
@@ -60,21 +94,28 @@ def create_position(data: PositionIn):
 @router.patch("/{position_id}")
 def update_position(position_id: int, data: PositionUpdate):
     conn = get_db()
+    current = conn.execute("SELECT * FROM positions WHERE id = ?", (position_id,)).fetchone()
+    if not current:
+        conn.close()
+        raise HTTPException(404, "Position not found")
     fields = {k: v for k, v in data.model_dump().items() if v is not None}
     if not fields:
         raise HTTPException(400, "No fields to update")
     if "asset" in fields:
         fields["asset"] = fields["asset"].upper()
-    fields["updated_at"] = "datetime('now')"
-    sets = ", ".join(f"{k} = ?" for k in fields if k != "updated_at")
+    sets = ", ".join(f"{k} = ?" for k in fields)
     sets += ", updated_at = datetime('now')"
-    values = [v for k, v in fields.items() if k != "updated_at"]
+    values = list(fields.values())
     conn.execute(f"UPDATE positions SET {sets} WHERE id = ?", (*values, position_id))
+    # Si cambió la quantity, ajustar el saldo inicial
+    new_qty = fields.get('quantity')
+    asset_type = fields.get('asset_type', current['asset_type'])
+    if new_qty is not None and asset_type not in ('fixed_term', 'fund'):
+        asset = fields.get('asset', current['asset']).upper()
+        _update_opening_balance(conn, current['account_id'], asset, new_qty)
     conn.commit()
     row = conn.execute("SELECT * FROM positions WHERE id = ?", (position_id,)).fetchone()
     conn.close()
-    if not row:
-        raise HTTPException(404, "Position not found")
     return dict(row)
 
 @router.delete("/{position_id}", status_code=204)

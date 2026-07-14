@@ -69,10 +69,16 @@ const ACCOUNT_COLORS = [
 function fmtAmount(amount) {
   if (amount === null || amount === undefined) return '—'
   const str = amount.toString()
-  if (str.includes('e') || str.includes('E')) return amount.toFixed(8).replace(/\.?0+$/, '')
+  if (str.includes('e') || str.includes('E')) {
+    return parseFloat(amount.toFixed(8).replace(/\.?0+$/, ''))
+      .toLocaleString('es-AR', { maximumFractionDigits: 8 })
+  }
+  // Montos >= 1000 son siempre fiat/stable — 2 decimales, con separadores de miles
+  if (Math.abs(amount) >= 1000)
+    return amount.toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
   const decimals = str.includes('.') ? str.split('.')[1].replace(/0+$/, '').length : 0
-  if (decimals > 4) return amount.toFixed(Math.min(decimals, 8))
-  if (decimals > 2) return amount.toFixed(decimals)
+  if (decimals > 4) return amount.toLocaleString('es-AR', { maximumFractionDigits: Math.min(decimals, 8) })
+  if (decimals > 2) return amount.toLocaleString('es-AR', { minimumFractionDigits: decimals, maximumFractionDigits: decimals })
   return amount.toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 }
 
@@ -508,7 +514,9 @@ function IngestPanel({ accounts, onDone }) {
                       <select value={t.type} onChange={e => updatePreviewRow(i,'type',e.target.value)}
                         className="border border-gray-200 rounded px-2 py-1 text-xs bg-white">
                         <option value="income">Ingreso</option>
-                        <option value="expense">Egreso</option>
+                        <option value="buy">Compra</option>
+                        <option value="expense">Gasto</option>
+                        <option value="sell">Venta</option>
                         <option value="transfer">Transferencia</option>
                       </select>
                       <input type="number" step="any" value={t.amount} onChange={e => updatePreviewRow(i,'amount',parseFloat(e.target.value)||0)}
@@ -534,8 +542,8 @@ function IngestPanel({ accounts, onDone }) {
                 ) : (
                   <button onClick={() => setEditingIdx(i)} className="w-full text-left px-3 py-2 hover:bg-amber-50 transition-colors">
                     <div className="flex items-center gap-2">
-                      <span className={`font-bold shrink-0 ${t.type === 'income' ? 'text-green-600' : t.type === 'transfer' ? 'text-blue-500' : 'text-red-600'}`}>
-                        {t.type === 'income' ? '+' : t.type === 'transfer' ? '↔' : '-'}
+                      <span className={`font-bold shrink-0 ${t.source === 'swap' ? 'text-purple-600' : t.source === 'transfer' ? 'text-blue-500' : t.type === 'income' || t.type === 'buy' ? 'text-green-600' : t.type === 'transfer' ? 'text-blue-500' : t.type === 'sell' ? 'text-amber-600' : 'text-red-600'}`}>
+                        {t.source === 'swap' || t.source === 'transfer' ? '↔' : t.type === 'income' || t.type === 'buy' ? '+' : t.type === 'transfer' ? '↔' : '-'}
                       </span>
                       <span className="text-gray-400 shrink-0">{t.date}</span>
                       <span className="flex-1 text-gray-600 truncate">{t.description}</span>
@@ -589,6 +597,17 @@ const TYPE_COLORS = {
   cedear: 'bg-pink-100 text-pink-700', fixed_term: 'bg-amber-100 text-amber-700',
   fund: 'bg-teal-100 text-teal-700', flexible: 'bg-lime-100 text-lime-700',
 }
+// Paleta categórica validada — orden fijo CVD-safe (ΔE adyacente ≥24.2 en deuteranopia)
+const DONUT_COLORS = {
+  fiat:       '#2a78d6',
+  stablecoin: '#1baf7a',
+  crypto:     '#eda100',
+  stock:      '#008300',
+  cedear:     '#4a3aa7',
+  fixed_term: '#e34948',
+  fund:       '#e87ba4',
+  flexible:   '#eb6834',
+}
 
 function LayoutToggle({ value, onChange }) {
   return (
@@ -617,6 +636,187 @@ function LayoutToggle({ value, onChange }) {
           <rect x="8" y="7" width="6" height="7" rx="1" fill="currentColor"/>
         </svg>
       </button>
+    </div>
+  )
+}
+
+// Paleta para el gráfico por clase de activo (slots 1-5 de la paleta validada)
+const ASSET_GROUP_COLORS = {
+  pesos:       '#2a78d6',  // slot 1 blue
+  dolares:     '#1baf7a',  // slot 2 aqua
+  stablecoins: '#008300',  // slot 4 green
+  crypto:      '#eda100',  // slot 3 yellow
+  acciones:    '#4a3aa7',  // slot 5 violet
+  cedears:     '#eb6834',  // slot 8 orange
+}
+
+// ── DonutChart (genérico) ────────────────────────────────────────────────────
+// segments: [{key, label, value, color}] — ya calculados por el llamador
+function DonutChart({ title, segments: rawSegments, totalUSD }) {
+  const [hovered, setHovered] = useState(null)
+  const [showTable, setShowTable] = useState(false)
+  const [mouse, setMouse] = useState({ x: 0, y: 0 })
+
+  const total = rawSegments.reduce((s, x) => s + x.value, 0)
+  const slices = rawSegments.map(x => ({ ...x, pct: total > 0 ? x.value / total : 0 }))
+
+  // Geometría SVG
+  const SIZE = 220, CX = 110, CY = 110, R_OUT = 85, R_IN = 50, GAP = 1.2
+
+  function polar(r, deg) {
+    const a = (deg - 90) * Math.PI / 180
+    return [CX + r * Math.cos(a), CY + r * Math.sin(a)]
+  }
+
+  let cursor = 0
+  const paths = slices.map(seg => {
+    const span = seg.pct * 360
+    const a0 = cursor + GAP / 2
+    const a1 = cursor + span - GAP / 2
+    cursor += span
+    if (a1 <= a0) return { ...seg, d: '' }
+    const large = (a1 - a0) > 180 ? 1 : 0
+    const [x1, y1] = polar(R_OUT, a0), [x2, y2] = polar(R_OUT, a1)
+    const [x3, y3] = polar(R_IN, a1),  [x4, y4] = polar(R_IN, a0)
+    return {
+      ...seg,
+      d: `M${x1} ${y1} A${R_OUT} ${R_OUT} 0 ${large} 1 ${x2} ${y2} L${x3} ${y3} A${R_IN} ${R_IN} 0 ${large} 0 ${x4} ${y4}Z`,
+    }
+  })
+
+  const hovSeg = hovered != null ? slices[hovered] : null
+  const totalLabel = totalUSD >= 1000
+    ? `$${(totalUSD / 1000).toFixed(1)}K`
+    : `$${Math.round(totalUSD)}`
+
+  return (
+    <div className="bg-white rounded-2xl border border-gray-200 shadow-sm p-5">
+      <div className="flex items-center justify-between mb-4">
+        <h3 className="text-sm font-semibold text-gray-700">{title}</h3>
+        <button
+          onClick={() => setShowTable(v => !v)}
+          className="text-[11px] text-gray-400 hover:text-amber-600 transition-colors"
+        >
+          {showTable ? 'Ver gráfico' : 'Ver tabla'}
+        </button>
+      </div>
+
+      {showTable ? (
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="text-[11px] text-gray-400 uppercase tracking-wide border-b border-gray-100">
+                <th className="text-left pb-2 font-medium">Tipo</th>
+                <th className="text-right pb-2 font-medium">USD</th>
+                <th className="text-right pb-2 font-medium">%</th>
+              </tr>
+            </thead>
+            <tbody>
+              {slices.map(seg => (
+                <tr key={seg.key} className="border-b border-gray-50 last:border-0">
+                  <td className="py-2">
+                    <div className="flex items-center gap-2">
+                      <span className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ background: seg.color }} />
+                      <span className="text-gray-700">{seg.label}</span>
+                    </div>
+                  </td>
+                  <td className="py-2 text-right tabular-nums text-gray-700">
+                    {seg.value.toLocaleString('es-AR', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
+                  </td>
+                  <td className="py-2 text-right tabular-nums text-gray-500">
+                    {(seg.pct * 100).toFixed(1)}%
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+            <tfoot>
+              <tr className="border-t border-gray-200">
+                <td className="pt-2 font-semibold text-gray-700">Total</td>
+                <td className="pt-2 text-right tabular-nums font-semibold text-gray-700">
+                  {total.toLocaleString('es-AR', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
+                </td>
+                <td className="pt-2 text-right text-gray-500 font-semibold">100%</td>
+              </tr>
+            </tfoot>
+          </table>
+        </div>
+      ) : (
+        <div className="flex flex-col sm:flex-row items-center gap-6">
+          {/* Donut SVG */}
+          <div
+            className="relative flex-shrink-0"
+            style={{ width: SIZE, height: SIZE }}
+            onMouseMove={e => {
+              const r = e.currentTarget.getBoundingClientRect()
+              setMouse({ x: e.clientX - r.left, y: e.clientY - r.top })
+            }}
+            onMouseLeave={() => setHovered(null)}
+          >
+            <svg width={SIZE} height={SIZE} aria-label={title}>
+              {paths.map((p, i) => p.d && (
+                <path
+                  key={p.key}
+                  d={p.d}
+                  fill={p.color}
+                  stroke="#ffffff"
+                  strokeWidth="2"
+                  opacity={hovered != null && hovered !== i ? 0.35 : 1}
+                  style={{ cursor: 'pointer', transition: 'opacity 0.12s ease' }}
+                  onMouseEnter={() => setHovered(i)}
+                />
+              ))}
+              <text x={CX} y={CY - 6} textAnchor="middle" fill="#898781" fontSize="10"
+                fontFamily="system-ui,-apple-system,sans-serif">Total</text>
+              <text x={CX} y={CY + 12} textAnchor="middle" fill="#0b0b0b" fontSize="17" fontWeight="700"
+                fontFamily="system-ui,-apple-system,sans-serif">{totalLabel}</text>
+            </svg>
+
+            {/* Tooltip flotante */}
+            {hovSeg && (
+              <div
+                className="absolute pointer-events-none rounded-lg bg-gray-900 text-white text-xs px-3 py-2 shadow-lg z-20 whitespace-nowrap"
+                style={{ left: mouse.x, top: mouse.y - 8, transform: 'translate(-50%, -100%)' }}
+              >
+                <div className="flex items-center gap-1.5 font-semibold mb-0.5">
+                  <span className="w-2 h-2 rounded-full flex-shrink-0" style={{ background: hovSeg.color }} />
+                  {hovSeg.label}
+                </div>
+                <div className="text-gray-300 tabular-nums">
+                  USD {hovSeg.value.toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                </div>
+                <div className="text-amber-400 font-semibold">{(hovSeg.pct * 100).toFixed(1)}%</div>
+              </div>
+            )}
+          </div>
+
+          {/* Leyenda (requerida para ≥ 2 series) */}
+          <div className="flex flex-col gap-2.5 min-w-0 flex-1 w-full sm:w-auto">
+            {slices.map((seg, i) => (
+              <div
+                key={seg.key}
+                className="flex items-center gap-2.5"
+                onMouseEnter={() => setHovered(i)}
+                onMouseLeave={() => setHovered(null)}
+              >
+                <span
+                  className="w-3 h-3 rounded-full flex-shrink-0"
+                  style={{
+                    background: seg.color,
+                    opacity: hovered != null && hovered !== i ? 0.35 : 1,
+                    transition: 'opacity 0.12s ease',
+                  }}
+                />
+                <span className={`text-xs flex-1 transition-colors ${hovered === i ? 'font-semibold text-gray-900' : 'text-gray-600'}`}>
+                  {seg.label}
+                </span>
+                <span className="text-xs tabular-nums text-gray-400 ml-auto pl-4">
+                  {(seg.pct * 100).toFixed(1)}%
+                </span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
     </div>
   )
 }
@@ -662,7 +862,11 @@ function PatrimonioTypeCard({ type, group, pct }) {
                 )}
               </div>
               <div className="text-right shrink-0">
-                {p.priceUSD != null ? (
+                {FIAT_ARS.has(p.asset) ? (
+                  <div className="font-semibold text-sm text-gray-800 tabular-nums">
+                    ARS {(p.quantity + (p.accrued ?? 0)).toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                  </div>
+                ) : p.priceUSD != null ? (
                   <>
                     <div className="font-semibold text-sm text-gray-800 tabular-nums">
                       USD {(p.valueUSD).toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
@@ -689,18 +893,16 @@ function PatrimonioTypeCard({ type, group, pct }) {
   )
 }
 
-function PatrimonioTab({ positions, transactions = [], maximosUrl = MAXIMOS_ONLINE, prices = {}, blueRate = null, onRefreshPrices }) {
+function PatrimonioTab({ positions, accounts = [], transactions = [], maximosUrl = MAXIMOS_ONLINE, prices = {}, blueRate = null, onRefreshPrices }) {
   const [loading,  setLoading]  = useState(true)
   const [error,    setError]    = useState(null)
-  const [layout,   setLayout]   = useState(() => localStorage.getItem('patrimonio_layout') || 'grid')
-  const onLayout = v => { setLayout(v); localStorage.setItem('patrimonio_layout', v) }
   const MAXIMOS_API = maximosUrl
 
   // Resumen de movimientos del mes actual
   const thisMonth = new Date().toISOString().slice(0, 7)
   const monthTx = transactions.filter(t => t.date?.startsWith(thisMonth))
-  const monthIncome  = monthTx.filter(t => t.type === 'income').reduce((s, t) => s + t.amount, 0)
-  const monthExpense = monthTx.filter(t => t.type === 'expense').reduce((s, t) => s + t.amount, 0)
+  const monthIncome  = monthTx.filter(t => t.type === 'income'  && t.source !== 'swap').reduce((s, t) => s + t.amount, 0)
+  const monthExpense = monthTx.filter(t => t.type === 'expense' && t.source !== 'swap').reduce((s, t) => s + t.amount, 0)
   const currencies = [...new Set(monthTx.map(t => t.currency))].slice(0, 2).join(' / ') || '—'
 
   useEffect(() => {
@@ -784,12 +986,52 @@ function PatrimonioTab({ positions, transactions = [], maximosUrl = MAXIMOS_ONLI
     (t.fee != null && t.fee > 0) || (t.type === 'expense' && t.category === 'comisión')
   )
 
-  // Agrupar por tipo
+  // Agrupar por tipo de activo
   const byType = {}
   for (const p of enriched) {
     if (!byType[p.asset_type]) byType[p.asset_type] = []
     byType[p.asset_type].push(p)
   }
+
+  // Segmentos por clase de activo (Pesos / Dólares / Crypto / Acciones / CEDEARs)
+  const assetSegs = useMemo(() => {
+    const grp = { pesos: 0, dolares: 0, stablecoins: 0, crypto: 0, acciones: 0, cedears: 0 }
+    for (const p of enriched) {
+      const v = p.valueUSD ?? 0
+      if (!v) continue
+      const a = (p.asset || '').toUpperCase()
+      if (FIAT_ARS.has(a))          grp.pesos       += v
+      else if (FIAT_USD.has(a))     grp.dolares     += v
+      else if (STABLECOINS.has(a))  grp.stablecoins += v
+      else if (p.asset_type === 'cedear') grp.cedears  += v
+      else if (p.asset_type === 'stock')  grp.acciones += v
+      else                                grp.crypto   += v
+    }
+    const LABELS = { pesos: 'Pesos', dolares: 'Dólares', stablecoins: 'Stablecoins', crypto: 'Crypto', acciones: 'Acciones', cedears: 'CEDEARs' }
+    return ['pesos','dolares','stablecoins','crypto','acciones','cedears']
+      .filter(k => grp[k] > 0)
+      .map(k => ({ key: k, label: LABELS[k], value: grp[k], color: ASSET_GROUP_COLORS[k] }))
+  }, [enriched])
+
+  // Segmentos por tipo de posición (fiat / stablecoin / crypto / etc.)
+  const typeSegs = useMemo(() => {
+    const grp = {}
+    for (const p of enriched) {
+      grp[p.asset_type] = (grp[p.asset_type] || 0) + (p.valueUSD ?? 0)
+    }
+    let segs = TYPE_ORDER
+      .filter(t => grp[t] > 0)
+      .map(t => ({ key: t, label: TYPE_LABELS[t] || t, value: grp[t], color: DONUT_COLORS[t] || '#898781' }))
+    if (segs.length > 7) {
+      const rest = segs.slice(6)
+      segs = [...segs.slice(0, 6), {
+        key: 'otros', label: 'Otros',
+        value: rest.reduce((s, x) => s + x.value, 0),
+        color: '#898781',
+      }]
+    }
+    return segs
+  }, [enriched])
 
   if (loading) return (
     <div className="flex items-center justify-center py-20 text-gray-400 text-sm">
@@ -890,20 +1132,92 @@ function PatrimonioTab({ positions, transactions = [], maximosUrl = MAXIMOS_ONLI
         )}
       </div>
 
-      {/* Desglose por tipo */}
-      <div>
-        <div className="flex items-center justify-end mb-3">
-          <LayoutToggle value={layout} onChange={onLayout} />
+      {/* Gráficos de distribución */}
+      {totalUSD > 0 && (
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <DonutChart title="Por clase de activo" segments={assetSegs} totalUSD={totalUSD} />
+          <DonutChart title="Por tipo de posición" segments={typeSegs} totalUSD={totalUSD} />
         </div>
-        <div className={layout === 'masonry'
-          ? 'columns-1 sm:columns-2 lg:columns-3 gap-4'
-          : 'grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 items-start'}>
-          {TYPE_ORDER.filter(t => byType[t]).map(type => (
-            <div key={type} className={layout === 'masonry' ? 'break-inside-avoid mb-4' : ''}>
-              <PatrimonioTypeCard type={type} group={byType[type]} pct={totalUSD > 0 ? (byType[type].reduce((s, p) => s + (p.valueUSD ?? 0), 0) / totalUSD) * 100 : 0} />
-            </div>
-          ))}
-        </div>
+      )}
+
+      {/* Desglose por tipo de activo (tabla) */}
+      <div className="bg-white rounded-xl border border-gray-200 shadow-sm">
+          <table className="w-full text-sm min-w-[600px]">
+            <thead className="sticky top-[41px] z-10">
+              <tr className="border-b border-gray-200 bg-gray-50">
+                <th className="px-4 py-2.5 text-left text-xs font-medium text-gray-400 uppercase tracking-wide">Activo</th>
+                <th className="px-3 py-2.5 text-left text-xs font-medium text-gray-400 uppercase tracking-wide">Cuenta</th>
+                <th className="px-3 py-2.5 text-right text-xs font-medium text-gray-400 uppercase tracking-wide">Cantidad</th>
+                <th className="px-3 py-2.5 text-right text-xs font-medium text-gray-400 uppercase tracking-wide">Precio</th>
+                <th className="px-3 py-2.5 text-right text-xs font-medium text-gray-400 uppercase tracking-wide">Valor USD</th>
+                <th className="px-3 py-2.5 text-right text-xs font-medium text-gray-400 uppercase tracking-wide">P&L</th>
+              </tr>
+            </thead>
+            {TYPE_ORDER.filter(t => byType[t]).map(type => {
+              const group = byType[type]
+              const groupTotal = group.reduce((s, p) => s + (p.valueUSD ?? 0), 0)
+              const pct = totalUSD > 0 ? groupTotal / totalUSD * 100 : 0
+              return (
+                <tbody key={type}>
+                  <tr className="bg-gray-100/70" style={{ borderTop: '2px solid #e5e7eb' }}>
+                    <td colSpan={6} className="px-4 py-2">
+                      <div className="flex items-center gap-2">
+                        <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${TYPE_COLORS[type] || 'bg-gray-100 text-gray-600'}`}>
+                          {TYPE_LABELS[type]}
+                        </span>
+                        <div className="h-1.5 w-14 bg-gray-200 rounded-full overflow-hidden">
+                          <div className="h-1.5 bg-amber-400 rounded-full" style={{ width: `${Math.min(pct, 100)}%` }} />
+                        </div>
+                        <span className="text-xs text-gray-400">{pct.toFixed(1)}%</span>
+                        {groupTotal > 0 && (
+                          <span className="ml-auto font-semibold text-sm text-gray-700 tabular-nums">
+                            USD {groupTotal.toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                          </span>
+                        )}
+                      </div>
+                    </td>
+                  </tr>
+                  {group.map(p => (
+                    <tr key={p.id} className="border-t border-gray-200 hover:bg-amber-50/40 transition-colors">
+                      <td className="px-4 py-2.5">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className="font-semibold text-sm text-gray-800">{p.asset}</span>
+                          {p.end_date && <span className="text-[10px] bg-amber-100 text-amber-700 rounded px-1.5 py-0.5">vence {p.end_date}</span>}
+                          {p.rate && <span className="text-[10px] bg-green-100 text-green-700 rounded px-1.5 py-0.5">{p.asset_type === 'cedear' ? `ratio ${p.rate}` : `${p.rate}% anual`}</span>}
+                        </div>
+                      </td>
+                      <td className="px-3 py-2.5 text-xs text-gray-400 whitespace-nowrap">{p.account_name}</td>
+                      <td className="px-3 py-2.5 text-right tabular-nums text-gray-600 text-sm whitespace-nowrap">
+                        {fmtAmount(p.quantity)}
+                        {p.accrued > 0 && (
+                          <div className="text-[10px] text-green-600 tabular-nums">+{fmtAmount(p.accrued)} int.</div>
+                        )}
+                      </td>
+                      <td className="px-3 py-2.5 text-right tabular-nums text-gray-400 text-xs whitespace-nowrap">
+                        {p.priceUSD != null && !FIAT_ARS.has(p.asset) ? `USD ${fmtAmount(p.priceUSD)}` : '—'}
+                      </td>
+                      <td className="px-3 py-2.5 text-right tabular-nums font-semibold text-gray-800 text-sm whitespace-nowrap">
+                        {FIAT_ARS.has(p.asset)
+                          ? `ARS ${(p.quantity + (p.accrued ?? 0)).toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+                          : p.valueUSD != null
+                            ? `USD ${p.valueUSD.toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+                            : <span className="text-gray-300 font-normal text-xs">sin precio</span>
+                        }
+                      </td>
+                      <td className="px-3 py-2.5 text-right tabular-nums text-xs whitespace-nowrap">
+                        {p.pnlUSD != null && !['fixed_term','fund'].includes(p.asset_type) ? (
+                          <div className={`font-semibold ${p.pnlUSD >= 0 ? 'text-green-600' : 'text-red-500'}`}>
+                            {p.pnlUSD >= 0 ? '+' : ''}USD {p.pnlUSD.toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                            <div className="font-normal">{p.pnlPct >= 0 ? '+' : ''}{p.pnlPct?.toFixed(2)}%</div>
+                          </div>
+                        ) : <span className="text-gray-200">—</span>}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              )
+            })}
+          </table>
       </div>
 
       <button onClick={() => onRefreshPrices?.(positions)} className="text-xs text-amber-600 hover:underline w-full text-center py-2">
@@ -929,11 +1243,23 @@ function TransactionForm({ initial, accounts, onSave, onClose }) {
     unit_price:    initial?.unit_price ?? '',
     fee:           initial?.fee ?? '',
     fee_currency:  initial?.fee_currency ?? '',
+    to_asset:      '',
+    to_amount:     '',
   })
   const set = k => e => setForm(f => ({ ...f, [k]: e.target.value }))
 
-  const isTransfer  = form.type === 'transfer'
-  const showUnitPrice = ['income','expense'].includes(form.type) && !FIAT_CURRENCIES.has(form.currency.toUpperCase())
+  const isTransfer    = form.type === 'transfer'
+  const isSwap        = form.type === 'swap'
+  const showUnitPrice = !isTransfer && !isSwap &&
+    ['income','buy','expense','sell'].includes(form.type) &&
+    !FIAT_CURRENCIES.has(form.currency.toUpperCase())
+
+  // Tasa implícita para mostrar en swap
+  const fromAmt = parseFloat(form.amount)  || 0
+  const toAmt   = parseFloat(form.to_amount) || 0
+  const impliedRate = isSwap && fromAmt && toAmt
+    ? (fromAmt / toAmt).toLocaleString('es-AR', { maximumFractionDigits: 4 })
+    : null
 
   async function submit(e) {
     e.preventDefault()
@@ -943,12 +1269,23 @@ function TransactionForm({ initial, accounts, onSave, onClose }) {
     if (form.fee !== '' && form.fee_currency) { base.fee = parseFloat(form.fee); base.fee_currency = form.fee_currency.toUpperCase() }
     else { delete base.fee; delete base.fee_currency }
 
-    if (isTransfer && form.to_account_id) {
-      await onSave({ ...base, _transfer_to: parseInt(form.to_account_id), description: base.description || 'Transferencia' })
-    } else {
-      await onSave(base)
+    try {
+      if (isTransfer && form.to_account_id) {
+        await onSave({ ...base, _transfer_to: parseInt(form.to_account_id), description: base.description || 'Transferencia' })
+      } else if (isSwap && form.to_asset && form.to_amount) {
+        const toAccountId = form.to_account_id ? parseInt(form.to_account_id) : parseInt(form.account_id)
+        await onSave({ ...base, _swap_to: {
+          asset: form.to_asset.toUpperCase(),
+          amount: parseFloat(form.to_amount),
+          account_id: toAccountId,
+        }, description: base.description || `Swap ${form.currency.toUpperCase()} → ${form.to_asset.toUpperCase()}` })
+      } else {
+        await onSave(base)
+      }
+      onClose()
+    } catch (err) {
+      alert(`Error al guardar: ${err.message}`)
     }
-    onClose()
   }
 
   const inputCls = "mt-1 w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-amber-400"
@@ -963,9 +1300,12 @@ function TransactionForm({ initial, accounts, onSave, onClose }) {
         <div>
           <label className="text-xs font-medium text-gray-500 uppercase tracking-wide">Tipo</label>
           <select value={form.type} onChange={set('type')} className={inputCls}>
-            <option value="income">Ingreso / Compra</option>
-            <option value="expense">Egreso / Venta / Gasto</option>
+            <option value="income">Ingreso</option>
+            <option value="buy">Compra</option>
+            <option value="expense">Gasto</option>
+            <option value="sell">Venta</option>
             <option value="transfer">Transferencia</option>
+            <option value="swap">Swap / Cambio</option>
           </select>
         </div>
       </div>
@@ -996,18 +1336,49 @@ function TransactionForm({ initial, accounts, onSave, onClose }) {
       </div>
       <div className="grid grid-cols-2 gap-3">
         <div>
-          <label className="text-xs font-medium text-gray-500 uppercase tracking-wide">Monto / Cantidad</label>
+          <label className="text-xs font-medium text-gray-500 uppercase tracking-wide">
+            {isSwap ? 'Cantidad entregada' : 'Monto / Cantidad'}
+          </label>
           <input type="number" step="any" min="0" value={form.amount} onChange={set('amount')} required className={inputCls} />
-          <p className="mt-0.5 text-[10px] text-gray-400">CEDEARs: cantidad de láminas</p>
+          {!isSwap && <p className="mt-0.5 text-[10px] text-gray-400">CEDEARs: cantidad de láminas</p>}
         </div>
         <div>
-          <label className="text-xs font-medium text-gray-500 uppercase tracking-wide">Moneda / Activo</label>
+          <label className="text-xs font-medium text-gray-500 uppercase tracking-wide">
+            {isSwap ? 'Activo entregado' : 'Moneda / Activo'}
+          </label>
           <input value={form.currency} onChange={set('currency')} required
             className={inputCls} placeholder="ARS, BTC, NVDA..." />
-          <p className="mt-0.5 text-[10px] text-gray-400">CEDEARs: ticker (ej: NVDA)</p>
+          {!isSwap && <p className="mt-0.5 text-[10px] text-gray-400">CEDEARs: ticker (ej: NVDA)</p>}
         </div>
       </div>
-      {!isTransfer && (
+      {isSwap && (
+        <>
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="text-xs font-medium text-gray-500 uppercase tracking-wide">Cantidad recibida</label>
+              <input type="number" step="any" min="0" value={form.to_amount} onChange={set('to_amount')} required className={inputCls} />
+            </div>
+            <div>
+              <label className="text-xs font-medium text-gray-500 uppercase tracking-wide">Activo recibido</label>
+              <input value={form.to_asset} onChange={set('to_asset')} required
+                className={inputCls} placeholder="USD, ETH, USDT..." />
+            </div>
+          </div>
+          <div>
+            <label className="text-xs font-medium text-gray-500 uppercase tracking-wide">Cuenta destino <span className="text-gray-400 normal-case font-normal">(opcional — por defecto la misma)</span></label>
+            <select value={form.to_account_id} onChange={set('to_account_id')} className={inputCls}>
+              <option value="">— Misma cuenta —</option>
+              {accounts.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
+            </select>
+          </div>
+          {impliedRate && (
+            <p className="text-[11px] text-gray-400 text-center">
+              Tipo de cambio implícito: 1 {form.to_asset.toUpperCase() || '?'} = {impliedRate} {form.currency.toUpperCase() || '?'}
+            </p>
+          )}
+        </>
+      )}
+      {!isTransfer && !isSwap && (
         <div>
           <label className="text-xs font-medium text-gray-500 uppercase tracking-wide">Categoría</label>
           <select value={form.category} onChange={set('category')} className={inputCls}>
@@ -1016,7 +1387,7 @@ function TransactionForm({ initial, accounts, onSave, onClose }) {
           </select>
         </div>
       )}
-      {showUnitPrice && !isTransfer && (
+      {showUnitPrice && (
         <div>
           <label className="text-xs font-medium text-gray-500 uppercase tracking-wide">
             Precio por unidad <span className="text-gray-400 normal-case font-normal">(opcional)</span>
@@ -1024,24 +1395,26 @@ function TransactionForm({ initial, accounts, onSave, onClose }) {
           <input type="number" step="any" min="0" value={form.unit_price} onChange={set('unit_price')}
             className={inputCls} placeholder="ej: 97500" />
           <p className="mt-1 text-[11px] text-gray-400 leading-snug">
-            {form.type === 'income'
+            {form.type === 'income' || form.type === 'buy'
               ? 'Actualiza el precio promedio de tu posición. USD para crypto/acciones, ARS para CEDEARs.'
               : 'Calcula la ganancia o pérdida realizada. USD para crypto/acciones, ARS para CEDEARs.'}
           </p>
         </div>
       )}
-      <div>
-        <label className="text-xs font-medium text-gray-500 uppercase tracking-wide">
-          Comisión <span className="text-gray-400 normal-case font-normal">(opcional)</span>
-        </label>
-        <div className="flex gap-2 mt-1">
-          <input type="number" step="any" min="0" value={form.fee} onChange={set('fee')}
-            className={`${inputCls} flex-1`} placeholder="0.001" />
-          <input type="text" value={form.fee_currency} onChange={set('fee_currency')}
-            className="w-24 border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-amber-400 shrink-0" placeholder="BNB" maxLength={10} />
+      {!isSwap && (
+        <div>
+          <label className="text-xs font-medium text-gray-500 uppercase tracking-wide">
+            Comisión <span className="text-gray-400 normal-case font-normal">(opcional)</span>
+          </label>
+          <div className="flex gap-2 mt-1">
+            <input type="number" step="any" min="0" value={form.fee} onChange={set('fee')}
+              className={`${inputCls} flex-1`} placeholder="0.001" />
+            <input type="text" value={form.fee_currency} onChange={set('fee_currency')}
+              className="w-24 border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-amber-400 shrink-0" placeholder="BNB" maxLength={10} />
+          </div>
+          {isTransfer && <p className="mt-1 text-[11px] text-gray-400">Si la comisión es en la misma moneda, se resta del monto recibido en destino.</p>}
         </div>
-        {isTransfer && <p className="mt-1 text-[11px] text-gray-400">Si la comisión es en la misma moneda, se resta del monto recibido en destino.</p>}
-      </div>
+      )}
       <div className="flex gap-2 pt-1">
         <button type="button" onClick={onClose}
           className="flex-1 py-2 rounded-lg border border-gray-200 text-sm text-gray-600 hover:bg-gray-50">
@@ -1056,165 +1429,191 @@ function TransactionForm({ initial, accounts, onSave, onClose }) {
   )
 }
 
-// ── AccountCard ───────────────────────────────────────────────────────────────
-function AccountCard({ acc, positions, onEdit, onDelete, onSync, prices = {}, blueRate = null }) {
+// ── PortfolioTab ──────────────────────────────────────────────────────────────
+function PositionRow({ p, blueRate, onEdit, onDelete }) {
+  const [hov, setHov] = useState(false)
+  const isFiat  = FIAT_ARS.has(p.asset) || FIAT_USD.has(p.asset) || STABLECOINS.has(p.asset)
+  const isFixed = p.asset_type === 'fixed_term' || p.asset_type === 'fund' || p.asset_type === 'flexible'
+
+  // valor principal
+  let valueMain = null, valueSub = null
+  if (FIAT_ARS.has(p.asset)) {
+    valueMain = `ARS ${fmtAmount(p.quantity)}`
+    if (blueRate) valueSub = `≈ USD ${fmtAmount(p.quantity / blueRate)}`
+  } else if (p.valueUSD != null) {
+    valueMain = `USD ${fmtAmount(p.valueUSD)}`
+  } else if (p.asset_type === 'cedear' && p.avg_price) {
+    valueMain = `ARS ${fmtAmount(p.quantity * p.avg_price)}`
+  }
+
+  // precio promedio
+  let avgText = null
+  if (isFixed && p.rate) {
+    avgText = <span className="text-green-600">{p.rate}% anual</span>
+  } else if (p.avg_price && !isFiat) {
+    const label = p.asset_type === 'cedear' ? `ARS ${fmtAmount(p.avg_price)}` : `USD ${fmtAmount(p.avg_price)}`
+    avgText = <span className="text-gray-500">{label}</span>
+  }
+
+  // P&L
+  let pnlEl = null
+  if (p.pnlPct != null) {
+    const pos = p.pnlPct >= 0
+    pnlEl = (
+      <span className={`font-medium tabular-nums ${pos ? 'text-green-600' : 'text-red-500'}`}>
+        {pos ? '+' : ''}{p.pnlPct.toFixed(1)}%
+      </span>
+    )
+  }
+
+  return (
+    <tr onMouseEnter={() => setHov(true)} onMouseLeave={() => setHov(false)}
+      className="border-t border-gray-200 hover:bg-amber-50/40 transition-colors">
+      {/* Activo */}
+      <td className="px-4 py-2.5">
+        <div className="flex items-center gap-1.5 flex-wrap">
+          <span className="font-semibold text-gray-800 text-sm">{p.asset}</span>
+          <span className="text-[10px] bg-gray-100 text-gray-500 rounded px-1.5 py-0.5 leading-4">{assetTypeLabel(p.asset_type)}</span>
+          {p.end_date && <span className="text-[10px] bg-amber-100 text-amber-700 rounded px-1.5 py-0.5 leading-4">vence {p.end_date}</span>}
+        </div>
+        {p.notes && <div className="text-[10px] text-gray-400 mt-0.5 truncate max-w-[200px]">{p.notes}</div>}
+        {p.asset_type === 'cedear' && p.rate && <div className="text-[10px] text-indigo-500 mt-0.5">ratio {p.rate}</div>}
+      </td>
+      {/* Cantidad */}
+      <td className="px-3 py-2.5 text-right tabular-nums text-gray-600 text-sm whitespace-nowrap">
+        {fmtAmount(p.quantity)}
+        {p.accrued > 0 && (
+          <div className="text-[10px] text-green-600 tabular-nums">+{fmtAmount(p.accrued)} int.</div>
+        )}
+      </td>
+      {/* Valor */}
+      <td className="px-3 py-2.5 text-right whitespace-nowrap">
+        {valueMain
+          ? <><div className="font-medium text-gray-800 text-sm tabular-nums">{valueMain}</div>
+              {valueSub && <div className="text-[10px] text-gray-400 tabular-nums">{valueSub}</div>}</>
+          : <span className="text-gray-300 text-sm">—</span>}
+      </td>
+      {/* Precio prom. */}
+      <td className="px-3 py-2.5 text-right text-xs whitespace-nowrap">
+        {avgText ?? <span className="text-gray-300">—</span>}
+      </td>
+      {/* P&L */}
+      <td className="px-3 py-2.5 text-right text-sm whitespace-nowrap">
+        {pnlEl ?? <span className="text-gray-300">—</span>}
+      </td>
+      {/* Acciones */}
+      <td className="px-3 py-2.5 text-right">
+        <div className={`flex gap-0.5 justify-end transition-opacity ${hov ? 'opacity-100' : 'opacity-0'}`}>
+          <button onClick={() => onEdit(p)} className="p-1 text-gray-400 hover:text-amber-500 rounded transition-colors">✏️</button>
+          <button onClick={() => onDelete(p.id)} className="p-1 text-gray-400 hover:text-red-500 rounded transition-colors">🗑</button>
+        </div>
+      </td>
+    </tr>
+  )
+}
+
+function PortfolioTab({ accounts, positions, onAddPosition, onEditPosition, onDeletePosition, onSyncAccount, prices = {}, blueRate = null }) {
+  const [sortBy, setSortBy]     = useState('value')
+  const [syncingId, setSyncingId] = useState(null)
+  const activeAccounts = accounts.filter(a => a.active)
+
   function mktPriceUSD(p) {
     if (FIAT_USD.has(p.asset) || STABLECOINS.has(p.asset)) return 1
     if (FIAT_ARS.has(p.asset)) return blueRate ? 1 / blueRate : null
     const ticker = toYahooTicker(p.asset, p.asset_type)
     const raw = prices[ticker]?.price ?? null
     if (raw == null) return null
-    if (p.asset_type === 'cedear' && p.rate > 0) return raw / p.rate
-    return raw
-  }
-  const [open, setOpen] = useState(true)
-  const [syncing, setSyncing] = useState(false)
-
-  async function handleSync(e) {
-    e.stopPropagation()
-    setSyncing(true)
-    await onSync(acc.id)
-    setSyncing(false)
+    return p.asset_type === 'cedear' && p.rate > 0 ? raw / p.rate : raw
   }
 
-  return (
-    <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden flex flex-col"
-      style={{ borderTop: `3px solid ${acc.color}` }}>
-      <button onClick={() => setOpen(o => !o)}
-        className="flex items-center gap-2 px-4 py-3 hover:bg-gray-50 transition-colors text-left w-full">
-        <span className="text-base">{typeIcon(acc.type)}</span>
-        <span className="font-semibold text-gray-800 text-sm flex-1">{acc.name}</span>
-        <span className="text-xs text-gray-400">{positions.length} pos.</span>
-        <span onClick={handleSync} title="Sincronizar cantidades desde movimientos"
-          className="text-gray-300 hover:text-amber-500 text-xs px-1 transition-colors">
-          {syncing ? '⏳' : '🔄'}
-        </span>
-        <span className={`text-gray-400 text-[10px] transition-transform duration-200 ${open ? 'rotate-180' : ''}`}>▼</span>
-      </button>
-      {open && (
-        <div className={`divide-y divide-gray-50 border-t border-gray-100 ${positions.length > 10 ? 'overflow-y-auto' : ''}`} style={positions.length > 10 ? { maxHeight: '300px' } : {}}>
-          {positions.map(p => (
-            <div key={p.id} className="flex items-center gap-3 px-4 py-2.5 hover:bg-gray-50">
-              <div className="flex-1 min-w-0">
-                <div className="flex items-center gap-1.5 flex-wrap">
-                  <span className="font-semibold text-sm text-gray-800">{p.asset}</span>
-                  <span className="text-[10px] bg-gray-100 text-gray-500 rounded px-1.5 py-0.5">{assetTypeLabel(p.asset_type)}</span>
-                  {p.end_date && (
-                    <span className="text-[10px] bg-amber-100 text-amber-700 rounded px-1.5 py-0.5">vence {p.end_date}</span>
-                  )}
-                </div>
-                {p.asset_type === 'cedear' && p.rate
-                  ? <div className="text-[10px] text-green-600 mt-0.5">ratio {p.rate}</div>
-                  : p.notes && <div className="text-xs text-gray-400 mt-0.5 truncate">{p.notes}</div>
-                }
-              </div>
-              <div className="text-right shrink-0">
-                {p.asset_type === 'cedear' ? (
-                  <>
-                    {p.avg_price && (
-                      <div className="font-semibold text-sm text-gray-800 tabular-nums">
-                        ARS {(p.quantity * p.avg_price).toLocaleString('es-AR', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
-                      </div>
-                    )}
-                    <div className="text-[10px] text-gray-500 tabular-nums">{fmtAmount(p.quantity)} {p.asset}</div>
-                  </>
-                ) : ['crypto','stablecoin','stock','flexible'].includes(p.asset_type) ? (
-                  <>
-                    {(() => {
-                      const mkt = mktPriceUSD(p)
-                      const usdVal = mkt != null ? p.quantity * mkt : (p.avg_price ? p.quantity * p.avg_price : null)
-                      return usdVal != null ? (
-                        <div className="font-semibold text-sm text-gray-800 tabular-nums">
-                          USD {usdVal.toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                        </div>
-                      ) : null
-                    })()}
-                    <div className="text-[10px] text-gray-500 tabular-nums">{fmtAmount(p.quantity)} {p.asset}</div>
-                    {(() => {
-                      try {
-                        const mkt = mktPriceUSD(p)
-                        if (mkt == null || !p.avg_price || STABLECOINS.has(p.asset) || FIAT_USD.has(p.asset)) return null
-                        const avgUSD = p.asset_type === 'cedear'
-                          ? (blueRate ? p.avg_price / blueRate : null)
-                          : p.avg_price
-                        if (!avgUSD || avgUSD <= 0) return null
-                        const pct = (mkt - avgUSD) / avgUSD * 100
-                        const fmtAvg = v => v >= 100
-                          ? v.toLocaleString('es-AR', { minimumFractionDigits: 0, maximumFractionDigits: 0 })
-                          : v >= 1 ? v.toFixed(2) : fmtAmount(v)
-                        return (
-                          <div className={`text-[10px] tabular-nums ${pct >= 0 ? 'text-green-600' : 'text-red-500'}`}>
-                            prom. USD {fmtAvg(avgUSD)} · {pct >= 0 ? '+' : ''}{pct.toFixed(1)}%
-                          </div>
-                        )
-                      } catch { return null }
-                    })()}
-                  </>
-                ) : (
-                  <>
-                    <div className="font-semibold text-sm text-gray-800 tabular-nums">{fmtAmount(p.quantity)}</div>
-                    {p.rate && <div className="text-[10px] text-green-600">{p.rate}% anual</div>}
-                  </>
-                )}
-              </div>
-              <div className="flex gap-1 shrink-0">
-                <button onClick={() => onEdit(p)} className="text-xs text-gray-300 hover:text-amber-500 px-1">✏️</button>
-                <button onClick={() => onDelete(p.id)} className="text-xs text-gray-300 hover:text-red-500 px-1">🗑</button>
-              </div>
-            </div>
-          ))}
-        </div>
-      )}
+  function enrich(p) {
+    const accrued = calcAccruedInterest(p) ?? 0
+    const effectiveQty = p.quantity + accrued
+    const mkt = mktPriceUSD(p)
+    const valueUSD = mkt != null ? effectiveQty * mkt : null
+    let pnlPct = null
+    if (mkt != null && p.avg_price && !STABLECOINS.has(p.asset) && !FIAT_USD.has(p.asset) && !FIAT_ARS.has(p.asset)) {
+      const avgUSD = p.asset_type === 'cedear' ? (blueRate ? p.avg_price / blueRate : null) : p.avg_price
+      if (avgUSD && avgUSD > 0) pnlPct = (mkt - avgUSD) / avgUSD * 100
+    }
+    return { ...p, valueUSD, pnlPct, accrued }
+  }
+
+  function sorted(ps) {
+    return [...ps].sort((a, b) => {
+      if (sortBy === 'pnl')  return (b.pnlPct ?? -Infinity) - (a.pnlPct ?? -Infinity)
+      if (sortBy === 'name') return a.asset.localeCompare(b.asset)
+      return (b.valueUSD ?? -Infinity) - (a.valueUSD ?? -Infinity)
+    })
+  }
+
+  async function handleSync(accId) {
+    setSyncingId(accId)
+    await onSyncAccount(accId)
+    setSyncingId(null)
+  }
+
+  function Th({ label, field }) {
+    const active = sortBy === field
+    return (
+      <th onClick={() => setSortBy(field)}
+        className={`px-3 py-2.5 text-right text-xs font-medium uppercase tracking-wide cursor-pointer select-none whitespace-nowrap transition-colors
+          ${active ? 'text-amber-600' : 'text-gray-400 hover:text-gray-600'}`}>
+        {label}{active && ' ↓'}
+      </th>
+    )
+  }
+
+  if (!positions.length) return (
+    <div className="text-center py-16 text-gray-400 text-sm">
+      <div className="text-4xl mb-3">📊</div>
+      <div>No tenés posiciones cargadas</div>
+      <button onClick={onAddPosition} className="mt-3 text-amber-600 text-xs hover:underline">Agregar posición</button>
     </div>
   )
-}
-
-// ── PortfolioTab ──────────────────────────────────────────────────────────────
-function PortfolioTab({ accounts, positions, onAddPosition, onEditPosition, onDeletePosition, onSyncAccount, prices = {}, blueRate = null }) {
-  const activeAccounts = accounts.filter(a => a.active)
-  const hasPositions = positions.length > 0
-  const [layout, setLayout] = useState(() => localStorage.getItem('portfolio_layout') || 'grid')
-  const onLayout = v => { setLayout(v); localStorage.setItem('portfolio_layout', v) }
 
   return (
-    <div className="max-w-6xl mx-auto">
-      <div className="flex items-center justify-between mb-4">
+    <div className="space-y-3">
+      <div className="flex items-center justify-between">
         <h2 className="text-sm font-semibold text-gray-700 uppercase tracking-wide">Posiciones</h2>
-        <div className="flex items-center gap-3">
-          <LayoutToggle value={layout} onChange={onLayout} />
-          <button onClick={onAddPosition} className="text-xs text-amber-600 hover:underline">+ Agregar</button>
-        </div>
+        <button onClick={onAddPosition} className="text-xs text-amber-600 hover:underline font-medium">+ Agregar</button>
       </div>
 
-      {!hasPositions ? (
-        <div className="text-center py-16 text-gray-400 text-sm">
-          <div className="text-4xl mb-3">📊</div>
-          <div>No tenés posiciones cargadas</div>
-          <button onClick={onAddPosition} className="mt-3 text-amber-600 text-xs hover:underline">Agregar posición</button>
-        </div>
-      ) : (
-        <div className={layout === 'masonry'
-          ? 'columns-1 sm:columns-2 lg:columns-3 gap-3'
-          : 'grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 items-start'}>
-          {activeAccounts.map(acc => {
-            const acPos = positions.filter(p => p.account_id === acc.id)
-            if (!acPos.length) return null
-            return (
-              <div key={acc.id} className={layout === 'masonry' ? 'break-inside-avoid mb-3' : ''}>
-                <AccountCard
-                  acc={acc}
-                  positions={acPos}
-                  onEdit={onEditPosition}
-                  onDelete={onDeletePosition}
-                  onSync={onSyncAccount}
-                  prices={prices}
-                  blueRate={blueRate}
-                />
-              </div>
-            )
-          })}
-        </div>
-      )}
+      <div className="bg-white rounded-xl border border-gray-200 shadow-sm">
+          <table className="w-full text-sm min-w-[600px]">
+            <thead className="sticky top-[41px] z-10">
+              <tr className="border-b border-gray-200 bg-gray-50">
+                <th className="px-4 py-2.5 text-left text-xs font-medium text-gray-400 uppercase tracking-wide">Activo</th>
+                <th className="px-3 py-2.5 text-right text-xs font-medium text-gray-400 uppercase tracking-wide">Cantidad</th>
+                <Th label="Valor" field="value" />
+                <th className="px-3 py-2.5 text-right text-xs font-medium text-gray-400 uppercase tracking-wide">Prom.</th>
+                <Th label="P&L" field="pnl" />
+                <th className="w-16" />
+              </tr>
+            </thead>
+            {activeAccounts.map(acc => {
+              const acPos = sorted(positions.filter(p => p.account_id === acc.id).map(enrich))
+              if (!acPos.length) return null
+              return (
+                <tbody key={acc.id}>
+                  <tr className="bg-gray-100/70" style={{ borderTop: `3px solid ${acc.color}` }}>
+                    <td colSpan={6} className="px-4 py-2">
+                      <div className="flex items-center gap-2">
+                        <span className="w-3 h-3 rounded-full shrink-0" style={{ background: acc.color }} />
+                        <span className="text-sm font-bold text-gray-800">{typeIcon(acc.type)} {acc.name}</span>
+                        <span className="text-xs text-gray-400">{acPos.length} pos.</span>
+                      </div>
+                    </td>
+                  </tr>
+                  {acPos.map(p => (
+                    <PositionRow key={p.id} p={p} blueRate={blueRate}
+                      onEdit={onEditPosition} onDelete={onDeletePosition} />
+                  ))}
+                </tbody>
+              )
+            })}
+          </table>
+      </div>
     </div>
   )
 }
@@ -1376,13 +1775,13 @@ function MovimientosTab({ transactions, accounts, onEdit, onDelete, onNewManual,
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead>
-                <tr className="border-b border-gray-100 bg-gray-50">
+                <tr className="border-b border-gray-200 bg-gray-50">
                   {['Fecha','Cuenta','Descripción','Categoría','Tipo','Monto','Precio unit.','P&L realizado','Comisión',''].map(h => (
                     <th key={h} className={`px-3 py-2 text-[10px] font-semibold text-gray-400 uppercase tracking-wide whitespace-nowrap ${h === '' || h === 'Monto' || h === 'Precio unit.' || h === 'P&L realizado' || h === 'Comisión' ? 'text-right' : 'text-left'}`}>{h}</th>
                   ))}
                 </tr>
               </thead>
-              <tbody className="divide-y divide-gray-50">
+              <tbody className="divide-y divide-gray-200">
                 {visible.map(t => (
                   <tr key={t.id} className="hover:bg-gray-50 group">
                     <td className="px-3 py-2.5 text-gray-500 tabular-nums whitespace-nowrap text-xs">{t.date}</td>
@@ -1393,17 +1792,21 @@ function MovimientosTab({ transactions, accounts, onEdit, onDelete, onNewManual,
                     <td className="px-3 py-2.5 text-xs text-gray-400 whitespace-nowrap">{t.category || '—'}</td>
                     <td className="px-3 py-2.5 whitespace-nowrap">
                       <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ${
-                        t.type === 'income'   ? 'bg-green-100 text-green-700' :
-                        t.type === 'transfer' ? 'bg-blue-100 text-blue-600'  :
-                                                'bg-red-100 text-red-600'
+                        t.source === 'swap'     ? 'bg-purple-100 text-purple-700' :
+                        t.source === 'transfer' ? 'bg-blue-100 text-blue-600'    :
+                        t.type === 'income'     ? 'bg-green-100 text-green-700'  :
+                        t.type === 'buy'        ? 'bg-teal-100 text-teal-700'   :
+                        t.type === 'transfer'   ? 'bg-blue-100 text-blue-600'   :
+                        t.type === 'sell'       ? 'bg-amber-100 text-amber-700' :
+                                                  'bg-red-100 text-red-600'
                       }`}>
-                        {t.type === 'income' ? 'Ingreso' : t.type === 'transfer' ? 'Transfer.' : 'Egreso'}
+                        {t.source === 'swap' ? 'Swap ↔' : t.source === 'transfer' ? 'Transfer.' : t.type === 'income' ? 'Ingreso' : t.type === 'buy' ? 'Compra' : t.type === 'transfer' ? 'Transfer.' : t.type === 'sell' ? 'Venta' : 'Gasto'}
                       </span>
                     </td>
                     <td className={`px-3 py-2.5 text-right tabular-nums font-semibold whitespace-nowrap ${
-                      t.type === 'income' ? 'text-green-600' : t.type === 'transfer' ? 'text-blue-500' : 'text-red-600'
+                      t.source === 'swap' ? 'text-purple-600' : t.source === 'transfer' ? 'text-blue-500' : t.type === 'income' || t.type === 'buy' ? 'text-green-600' : t.type === 'transfer' ? 'text-blue-500' : t.type === 'sell' ? 'text-amber-600' : 'text-red-600'
                     }`}>
-                      {t.type === 'income' ? '+' : t.type === 'transfer' ? '↔' : '-'}{fmtAmount(t.amount)} {t.currency}
+                      {t.source === 'swap' || t.source === 'transfer' ? '↔' : t.type === 'income' || t.type === 'buy' ? '+' : t.type === 'transfer' ? '↔' : '-'}{fmtAmount(t.amount)} {t.currency}
                     </td>
                     <td className="px-3 py-2.5 text-right tabular-nums text-gray-400 whitespace-nowrap text-xs">
                       {t.unit_price ? fmtAmount(t.unit_price) : <span className="text-gray-200">—</span>}
@@ -1543,31 +1946,45 @@ export default function App() {
   }
 
   async function saveTransaction(data) {
-    if (data._transfer_to) {
-      const { _transfer_to, ...rest } = data
-      const expense = { ...rest, type: 'expense' }
-      // Si la comisión está en la misma moneda, el destino recibe amount - fee
-      const receivedAmount = (rest.fee > 0 && rest.fee_currency?.toUpperCase() === rest.currency?.toUpperCase())
-        ? Math.max(0, rest.amount - rest.fee)
-        : rest.amount
-      const income  = { ...rest, type: 'income', account_id: _transfer_to, amount: receivedAmount, fee: undefined, fee_currency: undefined }
-      if (editTarget?.id) {
-        await api(`/api/transactions/${editTarget.id}`, { method: 'PATCH', body: JSON.stringify(expense) })
+    try {
+      if (data._transfer_to) {
+        const { _transfer_to, ...rest } = data
+        const expense = { ...rest, type: 'transfer' }
+        // Si la comisión está en la misma moneda, el destino recibe amount - fee
+        const receivedAmount = (rest.fee > 0 && rest.fee_currency?.toUpperCase() === rest.currency?.toUpperCase())
+          ? Math.max(0, rest.amount - rest.fee)
+          : rest.amount
+        const income  = { ...rest, type: 'income', source: 'transfer', account_id: _transfer_to, amount: receivedAmount, fee: undefined, fee_currency: undefined }
+        if (editTarget?.id) {
+          await api(`/api/transactions/${editTarget.id}`, { method: 'PATCH', body: JSON.stringify(expense) })
+        } else {
+          await api('/api/transactions', { method: 'POST', body: JSON.stringify(expense) })
+        }
+        await api('/api/transactions', { method: 'POST', body: JSON.stringify(income) })
+        await api(`/api/positions/create-missing/${_transfer_to}`, { method: 'POST' })
+      } else if (data._swap_to) {
+        const { _swap_to, to_account_id, to_asset, to_amount, ...rest } = data
+        const fromAsset = (rest.currency || '').toUpperCase()
+        const FIAT_STABLE = new Set(['ARS','EUR','BRL','UYU','USD','USDT','USDC','DAI','BUSD','FDUSD','TUSD','PYUSD'])
+        const fromType = FIAT_STABLE.has(fromAsset) ? 'expense' : 'sell'
+        await api('/api/transactions', { method: 'POST', body: JSON.stringify({ ...rest, type: fromType, source: 'swap' }) })
+        await api('/api/transactions', { method: 'POST', body: JSON.stringify({
+          account_id: _swap_to.account_id, date: rest.date, description: rest.description,
+          amount: _swap_to.amount, currency: _swap_to.asset, type: 'buy', source: 'swap',
+        }) })
+        await api(`/api/positions/create-missing/${_swap_to.account_id}`, { method: 'POST' })
+      } else if (editTarget?.id) {
+        await api(`/api/transactions/${editTarget.id}`, { method: 'PATCH', body: JSON.stringify(data) })
       } else {
-        await api('/api/transactions', { method: 'POST', body: JSON.stringify(expense) })
+        await api('/api/transactions', { method: 'POST', body: JSON.stringify(data) })
+        if (data.account_id) {
+          await api(`/api/positions/create-missing/${data.account_id}`, { method: 'POST' })
+        }
       }
-      await api('/api/transactions', { method: 'POST', body: JSON.stringify(income) })
-      await api(`/api/positions/create-missing/${_transfer_to}`, { method: 'POST' })
-    } else if (editTarget?.id) {
-      await api(`/api/transactions/${editTarget.id}`, { method: 'PATCH', body: JSON.stringify(data) })
-    } else {
-      await api('/api/transactions', { method: 'POST', body: JSON.stringify(data) })
-      if (data.account_id) {
-        await api(`/api/positions/create-missing/${data.account_id}`, { method: 'POST' })
-      }
+    } finally {
+      await load()
+      setEditTarget(null)
     }
-    await load()
-    setEditTarget(null)
   }
 
   const TABS = [
@@ -1620,7 +2037,7 @@ export default function App() {
 
         {/* PATRIMONIO */}
         {tab === 'patrimonio' && (
-          <PatrimonioTab positions={positions} transactions={transactions} maximosUrl={maximosUrl} prices={prices} blueRate={blueRate} onRefreshPrices={loadPrices} />
+          <PatrimonioTab positions={positions} accounts={accounts} transactions={transactions} maximosUrl={maximosUrl} prices={prices} blueRate={blueRate} onRefreshPrices={loadPrices} />
         )}
 
         {/* PORTFOLIO */}

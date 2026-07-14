@@ -19,14 +19,22 @@ const CONDICIONES = [
 ]
 
 const AUTOMATIONS = [
-  { id: 'nuestra-parte',              label: 'Nuestra Parte',              desc: 'Datos completos del contribuyente, patrimonio, inversiones' },
-  { id: 'monotributo-info',           label: 'Monotributo',                desc: 'Categoría actual, monto facturado, próximo vencimiento' },
-  { id: 'mis-retenciones',            label: 'Retenciones',                desc: 'Retenciones y percepciones de Ganancias y BP' },
-  { id: 'domicilio-fiscal-electronico',label: 'Domicilio Fiscal',          desc: 'Notificaciones e intimaciones de ARCA' },
-  { id: 'ccma',                       label: 'Cuenta Corriente',           desc: 'Deuda, movimientos y obligaciones mensuales' },
-  { id: 'mis-comprobantes',           label: 'Comprobantes',               desc: 'Comprobantes emitidos y recibidos' },
-  { id: 'mis-facilidades',            label: 'Facilidades de Pago',        desc: 'Planes de pago activos' },
+  { id: 'nuestra-parte',               label: 'Nuestra Parte',       desc: 'Datos completos del contribuyente, patrimonio, inversiones' },
+  { id: 'monotributo-info',            label: 'Monotributo',         desc: 'Categoría actual, monto facturado, próximo vencimiento' },
+  { id: 'mis-retenciones',             label: 'Retenciones',         desc: 'Retenciones y percepciones de Ganancias y BP' },
+  { id: 'domicilio-fiscal-electronico',label: 'Domicilio Fiscal',    desc: 'Notificaciones e intimaciones de ARCA' },
+  { id: 'ccma',                        label: 'Cuenta Corriente',    desc: 'Deuda, movimientos y obligaciones mensuales' },
+  { id: 'mis-comprobantes',            label: 'Comprobantes',        desc: 'Comprobantes emitidos y recibidos' },
+  { id: 'mis-facilidades',             label: 'Facilidades de Pago', desc: 'Planes de pago activos' },
 ]
+
+// Params extra por automatización — función que recibe el año/período seleccionado
+const AUTOMATION_EXTRA = {
+  'mis-retenciones':             (p) => ({ filters: { year: p } }),
+  'domicilio-fiscal-electronico':(p) => ({ filters: { fechaPublicacionSince: `01/01/${p}`, fechaPublicacionTo: `31/12/${p}` }, page: 1, size: 100 }),
+  'ccma':                        (p) => ({ filters: { year: p } }),
+  'mis-comprobantes':            (p) => ({ filters: { t: 'E', fechaEmision: p } }),
+}
 
 // ── DashboardTab ───────────────────────────────────────────────────────────────
 function DashboardTab({ profile, cacheList }) {
@@ -195,50 +203,156 @@ function PerfilTab({ profile, onSave }) {
   )
 }
 
-// ── ARCATab ────────────────────────────────────────────────────────────────────
-function ARCATab({ profile, cacheList, onSync }) {
-  const [showSyncModal, setShowSyncModal] = useState(false)
-  const [selectedAuto, setSelectedAuto]   = useState(null)
-  const [password, setPassword]           = useState('')
-  const [periodo, setPeriodo]             = useState(new Date().getFullYear().toString())
-  const [syncing, setSyncing]             = useState(false)
-  const [syncResult, setSyncResult]       = useState(null)
-  const [expandedData, setExpandedData]   = useState(null)
+// ── syncOne — helper compartido por sync individual y bulk ─────────────────────
+async function syncOne({ autoId, cuit, password, periodo, onStatus }) {
+  const extraBuilder = AUTOMATION_EXTRA[autoId]
+  const extra = extraBuilder ? extraBuilder(periodo) : {}
+  onStatus('connecting')
+  const r = await fetch('/api/arca/sync', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ automation: autoId, cuit, password, periodo, ...extra }),
+  })
+  const startData = await r.json()
+  if (!r.ok) throw new Error(startData.detail || 'Error')
+  if (startData.source !== 'polling') return  // cache hit
+
+  const automationId = startData.automation_id
+  let elapsed = 0
+  for (let i = 0; i < 36; i++) {
+    await new Promise(res => setTimeout(res, 5000))
+    elapsed += 5
+    onStatus(`${elapsed}s`)
+    const pollR = await fetch(
+      `/api/arca/poll/${automationId}?automation=${encodeURIComponent(autoId)}&periodo=${encodeURIComponent(periodo)}`
+    )
+    const pollData = await pollR.json()
+    if (!pollR.ok) throw new Error(pollData.detail || 'Error')
+    if (pollData.status === 'complete') return
+  }
+  throw new Error('Timeout (3 min)')
+}
+
+// ── BulkSyncModal ──────────────────────────────────────────────────────────────
+function BulkSyncModal({ profile, cacheList, onClose, onDone }) {
+  const [password, setPassword] = useState('')
+  const [periodo, setPeriodo]   = useState((new Date().getFullYear() - 1).toString())
+  const [force, setForce]       = useState(false)
+  const [running, setRunning]   = useState(false)
+  const [done, setDone]         = useState(false)
+  // estado por automatización: null | 'skipped' | 'running:msg' | 'ok' | 'error:msg'
+  const [states, setStates]     = useState({})
 
   const cacheMap = Object.fromEntries(cacheList.map(c => [c.automation, c]))
+  const setState = (id, val) => setStates(s => ({ ...s, [id]: val }))
 
-  const openSync = (auto) => {
-    setSelectedAuto(auto)
-    setPassword('')
-    setSyncResult(null)
-    setShowSyncModal(true)
-  }
-
-  const runSync = async () => {
-    setSyncing(true)
-    setSyncResult(null)
-    try {
-      const r = await fetch('/api/arca/sync', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          automation: selectedAuto.id,
-          cuit: profile.cuit.replace(/[-]/g, ''),
-          password,
-          periodo,
-        }),
-      })
-      const data = await r.json()
-      if (!r.ok) throw new Error(data.detail || 'Error')
-      setSyncResult({ ok: true, source: data.source })
-      onSync()
-    } catch (e) {
-      setSyncResult({ ok: false, error: e.message })
-    } finally {
-      setSyncing(false)
-      setPassword('')
+  const runAll = async () => {
+    setRunning(true)
+    setDone(false)
+    const cuit = profile.cuit.replace(/[-]/g, '')
+    for (const auto of AUTOMATIONS) {
+      if (!force && cacheMap[auto.id]) {
+        setState(auto.id, 'skipped')
+        continue
+      }
+      setState(auto.id, 'running:Conectando…')
+      try {
+        await syncOne({
+          autoId: auto.id, cuit, password, periodo,
+          onStatus: s => setState(auto.id, s === 'connecting' ? 'running:Conectando…' : `running:${s}`),
+        })
+        setState(auto.id, 'ok')
+      } catch (e) {
+        setState(auto.id, `error:${e.message}`)
+        if (e.message.includes('límite')) break  // rate limit — no seguir
+      }
     }
+    setRunning(false)
+    setDone(true)
+    onDone()
   }
+
+  const statusIcon = (st) => {
+    if (!st)                    return <span className="text-gray-300">○</span>
+    if (st === 'skipped')       return <span className="text-gray-400">—</span>
+    if (st === 'ok')            return <span style={{ color: TEAL }}>✓</span>
+    if (st.startsWith('running')) return <span className="text-amber-500 animate-pulse">⟳</span>
+    if (st.startsWith('error')) return <span className="text-red-500">✗</span>
+    return null
+  }
+  const statusText = (st) => {
+    if (!st)                    return <span className="text-gray-300 text-xs">pendiente</span>
+    if (st === 'skipped')       return <span className="text-gray-400 text-xs">cache vigente</span>
+    if (st === 'ok')            return <span className="text-xs" style={{ color: TEAL }}>completado</span>
+    if (st.startsWith('running')) return <span className="text-amber-500 text-xs">{st.replace('running:', '')}</span>
+    if (st.startsWith('error')) return <span className="text-red-500 text-xs truncate max-w-[160px]" title={st.replace('error:', '')}>{st.replace('error:', '')}</span>
+    return null
+  }
+
+  return (
+    <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center" onClick={() => !running && onClose()}>
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md mx-4" onClick={e => e.stopPropagation()}>
+        <div className="px-6 pt-5 pb-4 border-b border-gray-100">
+          <h3 className="font-semibold text-gray-800">Sincronizar todo</h3>
+          <p className="text-xs text-gray-400 mt-0.5">CUIT: {profile.cuit} · La Clave Fiscal no se guarda</p>
+        </div>
+
+        {!running && !done && (
+          <div className="px-6 py-4 space-y-3">
+            <div>
+              <label className="text-xs text-gray-500 font-medium">Clave Fiscal</label>
+              <input type="password" value={password} onChange={e => setPassword(e.target.value)}
+                placeholder="Tu Clave Fiscal de ARCA" autoFocus
+                className="mt-1 w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-teal-400" />
+            </div>
+            <div>
+              <label className="text-xs text-gray-500 font-medium">Período (año)</label>
+              <input value={periodo} onChange={e => setPeriodo(e.target.value)}
+                className="mt-1 w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-teal-400" />
+            </div>
+            <label className="flex items-center gap-2 text-sm text-gray-600 cursor-pointer select-none">
+              <input type="checkbox" checked={force} onChange={e => setForce(e.target.checked)} className="accent-teal-500" />
+              Forzar actualización (incluir las que ya tienen cache)
+            </label>
+          </div>
+        )}
+
+        <div className="px-6 py-3 space-y-1.5 max-h-64 overflow-y-auto">
+          {AUTOMATIONS.map(auto => {
+            const st = states[auto.id]
+            return (
+              <div key={auto.id} className="flex items-center gap-3 py-1">
+                <span className="text-base w-4 flex-shrink-0">{statusIcon(st)}</span>
+                <span className="text-sm text-gray-700 flex-1">{auto.label}</span>
+                {statusText(st)}
+              </div>
+            )
+          })}
+        </div>
+
+        <div className="px-6 py-4 border-t border-gray-100 flex gap-2">
+          <button onClick={onClose} disabled={running}
+            className="flex-1 py-2.5 rounded-xl text-sm text-gray-500 hover:bg-gray-50 border border-gray-200 disabled:opacity-40">
+            {done ? 'Cerrar' : 'Cancelar'}
+          </button>
+          {!done && (
+            <button onClick={runAll} disabled={!password || running}
+              className="flex-1 py-2.5 rounded-xl text-sm font-semibold text-white disabled:opacity-50"
+              style={{ background: TEAL }}>
+              {running ? 'Sincronizando…' : 'Iniciar todo'}
+            </button>
+          )}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ── ARCATab ────────────────────────────────────────────────────────────────────
+function ARCATab({ profile, cacheList, onSync }) {
+  const [showBulk, setShowBulk]         = useState(false)
+  const [expandedData, setExpandedData] = useState(null)
+  const cacheMap = Object.fromEntries(cacheList.map(c => [c.automation, c]))
 
   return (
     <div className="max-w-3xl mx-auto space-y-4">
@@ -249,9 +363,18 @@ function ARCATab({ profile, cacheList, onSync }) {
       )}
 
       <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
-        <div className="px-4 py-3 border-b border-gray-100">
-          <h2 className="text-sm font-semibold text-gray-700">Automatizaciones disponibles</h2>
-          <p className="text-xs text-gray-400 mt-0.5">La Clave Fiscal no se guarda. Se usa solo durante la sincronización.</p>
+        <div className="px-4 py-3 border-b border-gray-100 flex items-center justify-between">
+          <div>
+            <h2 className="text-sm font-semibold text-gray-700">Automatizaciones disponibles</h2>
+            <p className="text-xs text-gray-400 mt-0.5">La Clave Fiscal no se guarda. Se usa solo durante la sincronización.</p>
+          </div>
+          <button
+            onClick={() => setShowBulk(true)}
+            disabled={!profile?.cuit}
+            className="text-sm font-semibold px-4 py-2 rounded-xl text-white disabled:opacity-40 flex-shrink-0"
+            style={{ background: TEAL }}>
+            Sincronizar todo
+          </button>
         </div>
         <div className="divide-y divide-gray-50">
           {AUTOMATIONS.map(auto => {
@@ -267,62 +390,25 @@ function ARCATab({ profile, cacheList, onSync }) {
                     </div>
                   )}
                 </div>
-                <div className="flex gap-2 shrink-0">
-                  {cached && (
-                    <button onClick={() => setExpandedData({ label: auto.label, id: auto.id })}
-                      className="text-xs text-gray-400 hover:text-teal-600 px-2 py-1 rounded-lg hover:bg-gray-50">
-                      Ver datos
-                    </button>
-                  )}
-                  <button onClick={() => openSync(auto)} disabled={!profile?.cuit}
-                    className="text-xs font-medium px-3 py-1.5 rounded-lg text-white disabled:opacity-40 transition-colors"
-                    style={{ background: TEAL }}>
-                    {cached ? 'Actualizar' : 'Sincronizar'}
+                {cached && (
+                  <button onClick={() => setExpandedData({ label: auto.label, id: auto.id })}
+                    className="text-xs text-gray-400 hover:text-teal-600 px-2 py-1 rounded-lg hover:bg-gray-50 shrink-0">
+                    Ver datos
                   </button>
-                </div>
+                )}
               </div>
             )
           })}
         </div>
       </div>
 
-      {showSyncModal && selectedAuto && (
-        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center" onClick={() => setShowSyncModal(false)}>
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm mx-4 p-6" onClick={e => e.stopPropagation()}>
-            <h3 className="font-semibold text-gray-800 mb-1">Sincronizar — {selectedAuto.label}</h3>
-            <p className="text-xs text-gray-400 mb-4">CUIT: {profile.cuit}</p>
-            <div className="space-y-3">
-              <div>
-                <label className="text-xs text-gray-500 font-medium">Clave Fiscal</label>
-                <input type="password" value={password} onChange={e => setPassword(e.target.value)}
-                  placeholder="Tu Clave Fiscal de ARCA"
-                  className="mt-1 w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-teal-400" />
-              </div>
-              <div>
-                <label className="text-xs text-gray-500 font-medium">Período (año)</label>
-                <input value={periodo} onChange={e => setPeriodo(e.target.value)}
-                  className="mt-1 w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-teal-400" />
-              </div>
-            </div>
-            {syncResult && (
-              <div className={`mt-3 text-sm px-3 py-2 rounded-lg ${syncResult.ok ? 'bg-teal-50 text-teal-700' : 'bg-red-50 text-red-600'}`}>
-                {syncResult.ok ? `Datos obtenidos desde ${syncResult.source}` : syncResult.error}
-              </div>
-            )}
-            <div className="flex gap-2 mt-4">
-              <button onClick={() => setShowSyncModal(false)}
-                className="flex-1 py-2.5 rounded-xl text-sm text-gray-500 hover:bg-gray-50 border border-gray-200">
-                Cancelar
-              </button>
-              <button onClick={runSync} disabled={!password || syncing}
-                className="flex-1 py-2.5 rounded-xl text-sm font-semibold text-white disabled:opacity-50"
-                style={{ background: TEAL }}>
-                {syncing ? 'Sincronizando...' : 'Sincronizar'}
-              </button>
-            </div>
-            {syncing && <p className="text-xs text-gray-400 text-center mt-2">Puede tardar hasta 2 minutos...</p>}
-          </div>
-        </div>
+      {showBulk && (
+        <BulkSyncModal
+          profile={profile}
+          cacheList={cacheList}
+          onClose={() => setShowBulk(false)}
+          onDone={() => { onSync(); }}
+        />
       )}
 
       {expandedData && <CacheDataModal automation={expandedData} onClose={() => setExpandedData(null)} />}
@@ -332,8 +418,12 @@ function ARCATab({ profile, cacheList, onSync }) {
 
 function CacheDataModal({ automation, onClose }) {
   const [data, setData] = useState(null)
+  const [error, setError] = useState(null)
   useEffect(() => {
-    fetch(`/api/arca/cache/${automation.id}`).then(r => r.json()).then(d => setData(d.data))
+    fetch(`/api/arca/cache/${automation.id}`)
+      .then(r => r.ok ? r.json() : Promise.reject(r.status))
+      .then(d => setData(d.data))
+      .catch(status => setError(status === 404 ? 'Sin datos en cache' : 'Error al cargar'))
   }, [automation.id])
 
   return (
@@ -345,7 +435,7 @@ function CacheDataModal({ automation, onClose }) {
         </div>
         <div className="overflow-y-auto flex-1 p-4">
           <pre className="text-xs text-gray-600 whitespace-pre-wrap break-words">
-            {data ? JSON.stringify(data, null, 2) : 'Cargando...'}
+            {error ? error : data ? JSON.stringify(data, null, 2) : 'Cargando...'}
           </pre>
         </div>
       </div>
