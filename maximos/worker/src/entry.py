@@ -122,24 +122,27 @@ async def on_fetch(request, env):
         except Exception as e:
             return _j({"error": str(e)}, status=500)
 
-        # Crypto: precios en vivo desde Binance (D1 puede tener datos viejos)
+        # Crypto: precios en vivo desde Binance en un solo request batch
         if list_id == "crypto" and rows:
-            _ts = int(time.time())
-            for row in rows:
-                ticker = row.get("ticker", "")
-                if ticker.endswith("-USD"):
-                    base = ticker[:-4]
-                    try:
-                        resp = await fetch(
-                            f"https://api.binance.com/api/v3/ticker/price?symbol={base}USDT&_={_ts}",
-                            headers={"User-Agent": "maximos/1.0"},
-                        )
-                        if resp.status == 200:
-                            d = json.loads(await resp.text())
-                            if "price" in d:
-                                row["price"] = round(float(d["price"]), 4)
-                    except Exception:
-                        pass
+            crypto_rows = [(i, row) for i, row in enumerate(rows) if row.get("ticker", "").endswith("-USD")]
+            if crypto_rows:
+                symbols = [row.get("ticker", "")[:-4] + "USDT" for _, row in crypto_rows]
+                sym_param = "%5B" + "%2C".join(f"%22{s}%22" for s in symbols) + "%5D"
+                _ts = int(time.time())
+                try:
+                    resp = await fetch(
+                        f"https://api.binance.com/api/v3/ticker/price?symbols={sym_param}&_={_ts}",
+                        headers={"User-Agent": "maximos/1.0"},
+                    )
+                    if resp.status == 200:
+                        price_list = json.loads(await resp.text())
+                        price_map = {item["symbol"]: float(item["price"]) for item in price_list if "symbol" in item and "price" in item}
+                        for _, row in crypto_rows:
+                            sym = row.get("ticker", "")[:-4] + "USDT"
+                            if sym in price_map:
+                                row["price"] = round(price_map[sym], 4)
+                except Exception:
+                    pass
 
         return _j({"status": "ready", "stocks": rows, "total": len(rows), "list_id": list_id})
 
