@@ -122,27 +122,32 @@ async def on_fetch(request, env):
         except Exception as e:
             return _j({"error": str(e)}, status=500)
 
-        # Crypto: precios en vivo desde Binance en un solo request batch
+        # Crypto: precios en vivo desde Binance — all-tickers endpoint, filtrado local
         if list_id == "crypto" and rows:
             crypto_rows = [(i, row) for i, row in enumerate(rows) if row.get("ticker", "").endswith("-USD")]
             if crypto_rows:
-                symbols = [row.get("ticker", "")[:-4] + "USDT" for _, row in crypto_rows]
-                sym_param = "%5B" + "%2C".join(f"%22{s}%22" for s in symbols) + "%5D"
+                needed = {row.get("ticker", "")[:-4] + "USDT" for _, row in crypto_rows}
                 _ts = int(time.time())
+                binance_error = None
                 try:
                     resp = await fetch(
-                        f"https://api.binance.com/api/v3/ticker/price?symbols={sym_param}&_={_ts}",
+                        f"https://api.binance.com/api/v3/ticker/price?_={_ts}",
                         headers={"User-Agent": "maximos/1.0"},
                     )
+                    raw = await resp.text()
                     if resp.status == 200:
-                        price_list = json.loads(await resp.text())
-                        price_map = {item["symbol"]: float(item["price"]) for item in price_list if "symbol" in item and "price" in item}
+                        all_prices = json.loads(raw)
+                        price_map = {item["symbol"]: float(item["price"]) for item in all_prices if item.get("symbol") in needed}
                         for _, row in crypto_rows:
                             sym = row.get("ticker", "")[:-4] + "USDT"
                             if sym in price_map:
                                 row["price"] = round(price_map[sym], 4)
-                except Exception:
-                    pass
+                    else:
+                        binance_error = f"Binance {resp.status}: {raw[:200]}"
+                except Exception as e:
+                    binance_error = str(e)
+                if binance_error:
+                    return _j({"status": "ready", "stocks": rows, "total": len(rows), "list_id": list_id, "_binance_error": binance_error})
 
         return _j({"status": "ready", "stocks": rows, "total": len(rows), "list_id": list_id})
 
