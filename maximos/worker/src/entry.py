@@ -1,4 +1,5 @@
 import json
+import time
 
 from workers import Response, fetch
 
@@ -60,7 +61,10 @@ async def on_fetch(request, env):
     cors = _cors(request)
 
     def _j(payload: dict, status: int = 200) -> Response:
-        headers = {"Content-Type": "application/json; charset=utf-8"}
+        headers = {
+            "Content-Type": "application/json; charset=utf-8",
+            "Cache-Control": "no-store",
+        }
         headers.update(cors)
         return Response(json.dumps(payload, ensure_ascii=False), status=status, headers=headers)
 
@@ -311,11 +315,12 @@ async def on_fetch(request, env):
         quotes = {}
 
         # Crypto: Binance (funciona desde datacenter)
+        _ts = int(time.time())
         for t in crypto_list:
             base = t[:-4]
             try:
                 resp = await fetch(
-                    f"https://api.binance.com/api/v3/ticker/price?symbol={base}USDT",
+                    f"https://api.binance.com/api/v3/ticker/price?symbol={base}USDT&_={_ts}",
                     headers={"User-Agent": "maximos/1.0"},
                 )
                 if resp.status == 200:
@@ -350,9 +355,10 @@ async def on_fetch(request, env):
             return _j({"quotes": {}})
         symbols = [s.strip().upper() for s in symbols_str.split(",") if s.strip()]
         quotes = {}
+        _ts = int(time.time())
         for base in symbols:
             try:
-                url = f"https://api.binance.com/api/v3/ticker/price?symbol={base}USDT"
+                url = f"https://api.binance.com/api/v3/ticker/price?symbol={base}USDT&_={_ts}"
                 resp = await fetch(url, headers={"User-Agent": "maximos/1.0"})
                 if resp.status == 200:
                     data = json.loads(await resp.text())

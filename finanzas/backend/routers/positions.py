@@ -128,16 +128,20 @@ def delete_position(position_id: int):
 FIAT_ASSETS       = {'ARS', 'USD', 'EUR', 'BRL', 'UYU'}
 STABLECOIN_ASSETS = {'USDT', 'USDC', 'DAI', 'BUSD', 'FDUSD', 'TUSD', 'PYUSD'}
 
-def guess_asset_type(asset: str) -> str:
+def guess_asset_type(asset: str, account_type: str = None) -> str:
     a = asset.upper()
     if a in FIAT_ASSETS:       return 'fiat'
     if a in STABLECOIN_ASSETS: return 'stablecoin'
+    if account_type in ('exchange', 'wallet_crypto'): return 'crypto'
+    if account_type == 'broker': return 'stock'
     return 'crypto'
 
 @router.post("/create-missing/{account_id}")
 def create_missing_positions(account_id: int):
     """Solo crea posiciones que no existen — no toca las existentes."""
     conn = get_db()
+    account = conn.execute("SELECT type FROM accounts WHERE id = ?", (account_id,)).fetchone()
+    account_type = account['type'] if account else None
     rows = conn.execute("""
         SELECT currency AS asset,
                SUM(CASE WHEN type='income' THEN amount ELSE -amount END) AS quantity
@@ -157,7 +161,7 @@ def create_missing_positions(account_id: int):
             (account_id, asset)
         ).fetchone()
         if not existing:
-            asset_type = guess_asset_type(asset)
+            asset_type = guess_asset_type(asset, account_type)
             conn.execute(
                 "INSERT INTO positions (account_id, asset, asset_type, quantity) VALUES (?, ?, ?, ?)",
                 (account_id, asset, asset_type, quantity)
