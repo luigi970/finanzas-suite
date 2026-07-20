@@ -121,6 +121,26 @@ async def on_fetch(request, env):
             rows = await get_results(db, list_id, signal if signal != "all" else None)
         except Exception as e:
             return _j({"error": str(e)}, status=500)
+
+        # Crypto: precios en vivo desde Binance (D1 puede tener datos viejos)
+        if list_id == "crypto" and rows:
+            _ts = int(time.time())
+            for row in rows:
+                ticker = row.get("ticker", "")
+                if ticker.endswith("-USD"):
+                    base = ticker[:-4]
+                    try:
+                        resp = await fetch(
+                            f"https://api.binance.com/api/v3/ticker/price?symbol={base}USDT&_={_ts}",
+                            headers={"User-Agent": "maximos/1.0"},
+                        )
+                        if resp.status == 200:
+                            d = json.loads(await resp.text())
+                            if "price" in d:
+                                row["price"] = round(float(d["price"]), 4)
+                    except Exception:
+                        pass
+
         return _j({"status": "ready", "stocks": rows, "total": len(rows), "list_id": list_id})
 
     # GET /api/history?list_id=sp500&ticker=AAPL
