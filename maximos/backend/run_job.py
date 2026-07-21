@@ -28,28 +28,10 @@ _CG_IDS = {
 }
 
 def fetch_crypto_prices(bases: list[str]) -> dict:
-    """Precios en tiempo real con fallback chain: CryptoCompare → CoinGecko."""
+    """Precios en tiempo real con fallback chain: CoinGecko → CryptoCompare."""
     syms = [b.upper() for b in bases]
 
-    # 1. CryptoCompare — sin geo-blocking desde data centers
-    try:
-        r = requests.get(
-            f"https://min-api.cryptocompare.com/data/pricemulti?fsyms={','.join(syms)}&tsyms=USD",
-            timeout=10, headers={"User-Agent": "maximos-screener/1.0"},
-        )
-        if r.status_code == 200:
-            data = r.json()
-            prices = {sym: float(pr["USD"]) for sym, pr in data.items() if "USD" in pr}
-            if prices:
-                print(f"[prices] CryptoCompare OK — {len(prices)} precios")
-                return prices
-            print("[prices] CryptoCompare: respuesta vacía", file=sys.stderr)
-        else:
-            print(f"[prices] CryptoCompare HTTP {r.status_code}", file=sys.stderr)
-    except Exception as e:
-        print(f"[prices] CryptoCompare error: {e}", file=sys.stderr)
-
-    # 2. CoinGecko — API pública sin key
+    # 1. CoinGecko — funciona desde GitHub Actions sin key
     try:
         ids = [_CG_IDS[s] for s in syms if s in _CG_IDS]
         id_to_sym = {v: k for k, v in _CG_IDS.items()}
@@ -68,6 +50,24 @@ def fetch_crypto_prices(bases: list[str]) -> dict:
                 print(f"[prices] CoinGecko HTTP {r.status_code}", file=sys.stderr)
     except Exception as e:
         print(f"[prices] CoinGecko error: {e}", file=sys.stderr)
+
+    # 2. CryptoCompare — fallback (requiere key desde datacenter)
+    try:
+        r = requests.get(
+            f"https://min-api.cryptocompare.com/data/pricemulti?fsyms={','.join(syms)}&tsyms=USD",
+            timeout=10, headers={"User-Agent": "maximos-screener/1.0"},
+        )
+        if r.status_code == 200:
+            data = r.json()
+            prices = {sym: float(pr["USD"]) for sym, pr in data.items() if "USD" in pr}
+            if prices:
+                print(f"[prices] CryptoCompare OK — {len(prices)} precios")
+                return prices
+            print("[prices] CryptoCompare: respuesta vacía", file=sys.stderr)
+        else:
+            print(f"[prices] CryptoCompare HTTP {r.status_code}", file=sys.stderr)
+    except Exception as e:
+        print(f"[prices] CryptoCompare error: {e}", file=sys.stderr)
 
     print("[prices] Todos los proveedores fallaron", file=sys.stderr)
     return {}
