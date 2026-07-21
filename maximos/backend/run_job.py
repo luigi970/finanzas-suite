@@ -180,8 +180,8 @@ def main():
     elapsed = time.time() - t0
     print(f"[job] Screener terminó en {elapsed:.1f}s — {len(results)} OK, {len(errors)} errores")
 
-    # Crypto: sobrescribir price con datos Binance en tiempo real antes de guardar en D1
-    if args.list_id == "crypto" and results:
+    # Crypto: enriquecer precios con Binance antes de guardar en D1
+    if args.list_id == "crypto":
         try:
             resp = requests.get(
                 "https://api.binance.com/api/v3/ticker/price",
@@ -189,14 +189,38 @@ def main():
                 headers={"User-Agent": "maximos-screener/1.0"},
             )
             if resp.status_code == 200:
-                needed = {r["ticker"].replace("-USD", "") + "USDT" for r in results if r.get("ticker", "").endswith("-USD")}
-                price_map = {item["symbol"][:-4]: float(item["price"]) for item in resp.json() if item.get("symbol") in needed}
-                updated = sum(1 for r in results if r.get("ticker", "").replace("-USD", "") in price_map)
-                for r in results:
-                    base = r.get("ticker", "").replace("-USD", "")
-                    if base in price_map:
-                        r["price"] = round(price_map[base], 4)
-                print(f"[binance] {updated}/{len(results)} precios crypto actualizados en tiempo real")
+                price_map = {
+                    item["symbol"][:-4]: float(item["price"])
+                    for item in resp.json()
+                    if item.get("symbol", "").endswith("USDT")
+                }
+                if results:
+                    # Caso normal: yfinance funcionó, enriquecer precios antes de upsert
+                    for r in results:
+                        base = r.get("ticker", "").replace("-USD", "")
+                        if base in price_map:
+                            r["price"] = round(price_map[base], 4)
+                    print(f"[binance] precios enriquecidos para {len(results)} tickers")
+                else:
+                    # Fallback: yfinance falló — actualizar solo price en datos existentes de D1
+                    print("[binance] yfinance falló — actualizando solo precios en D1 existente")
+                    existing = d1_query(token, account_id, db_id,
+                        "SELECT ticker, data FROM screener_results WHERE list_id = ?",
+                        [args.list_id])
+                    rows = existing[0].get("results", []) if existing else []
+                    now = datetime.now(timezone.utc).isoformat()
+                    updated = 0
+                    for row in rows:
+                        ticker = row["ticker"]
+                        base = ticker.replace("-USD", "")
+                        if base in price_map:
+                            data = json.loads(row["data"])
+                            data["price"] = round(price_map[base], 4)
+                            d1_query(token, account_id, db_id,
+                                "UPDATE screener_results SET data = ?, updated_at = ? WHERE list_id = ? AND ticker = ?",
+                                [json.dumps(data, ensure_ascii=False), now, args.list_id, ticker])
+                            updated += 1
+                    print(f"[binance] {updated}/{len(rows)} precios actualizados en D1")
             else:
                 print(f"[binance] HTTP {resp.status_code}", file=sys.stderr)
         except Exception as e:
