@@ -1542,21 +1542,23 @@ export default function App() {
       const data = await res.json();
       let stocks = data.stocks ?? [];
 
-      // Para crypto: precios en tiempo real desde Binance (proxeado por el Worker)
+      // Para crypto: precios en tiempo real directo desde Binance (CORS público)
+      // No va por el Worker para evitar restricciones de datacenter
       if (activeListId === "crypto" && stocks.length > 0) {
         try {
-          // s.ticker viene en formato Yahoo (BTC-USD) → extraer base (BTC)
           const baseSymbols = stocks.map(s => s.ticker.replace(/-USD$/, ""));
+          const symsParam = encodeURIComponent(JSON.stringify(baseSymbols.map(b => b + "USDT")));
           const r = await fetch(
-            `${API_BASE}/api/crypto-quotes?symbols=${baseSymbols.join(",")}`,
+            `https://api.binance.com/api/v3/ticker/price?symbols=${symsParam}&_=${Date.now()}`,
             { cache: "no-store" }
           );
           if (r.ok) {
-            const d = await r.json();
-            const quotes = d.quotes || {};
+            const list = await r.json();
+            const priceMap = {};
+            for (const item of list) priceMap[item.symbol] = parseFloat(item.price);
             stocks = stocks.map(s => {
-              const base = s.ticker.replace(/-USD$/, "");
-              return quotes[base] != null ? { ...s, price: quotes[base] } : s;
+              const sym = s.ticker.replace(/-USD$/, "") + "USDT";
+              return priceMap[sym] != null ? { ...s, price: priceMap[sym] } : s;
             });
           }
         } catch (_) {}
