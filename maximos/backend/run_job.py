@@ -180,6 +180,28 @@ def main():
     elapsed = time.time() - t0
     print(f"[job] Screener terminó en {elapsed:.1f}s — {len(results)} OK, {len(errors)} errores")
 
+    # Crypto: sobrescribir price con datos Binance en tiempo real antes de guardar en D1
+    if args.list_id == "crypto" and results:
+        try:
+            resp = requests.get(
+                "https://api.binance.com/api/v3/ticker/price",
+                timeout=10,
+                headers={"User-Agent": "maximos-screener/1.0"},
+            )
+            if resp.status_code == 200:
+                needed = {r["ticker"].replace("-USD", "") + "USDT" for r in results if r.get("ticker", "").endswith("-USD")}
+                price_map = {item["symbol"][:-4]: float(item["price"]) for item in resp.json() if item.get("symbol") in needed}
+                updated = sum(1 for r in results if r.get("ticker", "").replace("-USD", "") in price_map)
+                for r in results:
+                    base = r.get("ticker", "").replace("-USD", "")
+                    if base in price_map:
+                        r["price"] = round(price_map[base], 4)
+                print(f"[binance] {updated}/{len(results)} precios crypto actualizados en tiempo real")
+            else:
+                print(f"[binance] HTTP {resp.status_code}", file=sys.stderr)
+        except Exception as e:
+            print(f"[binance] Error: {e}", file=sys.stderr)
+
     for row in results:
         try:
             upsert_result(token, account_id, db_id, run_id, args.list_id, row)
