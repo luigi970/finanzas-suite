@@ -17,6 +17,61 @@ from screener import get_tickers, compute_all
 
 CF_API = "https://api.cloudflare.com/client/v4"
 
+# Mapeo symbol → CoinGecko ID para fallback
+_CG_IDS = {
+    'BTC': 'bitcoin', 'ETH': 'ethereum', 'BNB': 'binancecoin', 'SOL': 'solana',
+    'XRP': 'ripple', 'ADA': 'cardano', 'AVAX': 'avalanche-2', 'DOGE': 'dogecoin',
+    'TRX': 'tron', 'DOT': 'polkadot', 'LINK': 'chainlink', 'ATOM': 'cosmos',
+    'LTC': 'litecoin', 'BCH': 'bitcoin-cash', 'NEAR': 'near', 'APT': 'aptos',
+    'XLM': 'stellar', 'SHIB': 'shiba-inu', 'MATIC': 'matic-network',
+    'UNI': 'uniswap', 'TON': 'the-open-network',
+}
+
+def fetch_crypto_prices(bases: list[str]) -> dict:
+    """Precios en tiempo real con fallback chain: CryptoCompare → CoinGecko."""
+    syms = [b.upper() for b in bases]
+
+    # 1. CryptoCompare — sin geo-blocking desde data centers
+    try:
+        r = requests.get(
+            f"https://min-api.cryptocompare.com/data/pricemulti?fsyms={','.join(syms)}&tsyms=USD",
+            timeout=10, headers={"User-Agent": "maximos-screener/1.0"},
+        )
+        if r.status_code == 200:
+            data = r.json()
+            prices = {sym: float(pr["USD"]) for sym, pr in data.items() if "USD" in pr}
+            if prices:
+                print(f"[prices] CryptoCompare OK — {len(prices)} precios")
+                return prices
+            print("[prices] CryptoCompare: respuesta vacía", file=sys.stderr)
+        else:
+            print(f"[prices] CryptoCompare HTTP {r.status_code}", file=sys.stderr)
+    except Exception as e:
+        print(f"[prices] CryptoCompare error: {e}", file=sys.stderr)
+
+    # 2. CoinGecko — API pública sin key
+    try:
+        ids = [_CG_IDS[s] for s in syms if s in _CG_IDS]
+        id_to_sym = {v: k for k, v in _CG_IDS.items()}
+        if ids:
+            r = requests.get(
+                f"https://api.coingecko.com/api/v3/simple/price?ids={','.join(ids)}&vs_currencies=usd",
+                timeout=10, headers={"User-Agent": "maximos-screener/1.0"},
+            )
+            if r.status_code == 200:
+                data = r.json()
+                prices = {id_to_sym[cg_id]: float(pr["usd"]) for cg_id, pr in data.items() if "usd" in pr and cg_id in id_to_sym}
+                if prices:
+                    print(f"[prices] CoinGecko OK — {len(prices)} precios")
+                    return prices
+            else:
+                print(f"[prices] CoinGecko HTTP {r.status_code}", file=sys.stderr)
+    except Exception as e:
+        print(f"[prices] CoinGecko error: {e}", file=sys.stderr)
+
+    print("[prices] Todos los proveedores fallaron", file=sys.stderr)
+    return {}
+
 
 def cf_headers(token: str) -> dict:
     return {
@@ -180,51 +235,36 @@ def main():
     elapsed = time.time() - t0
     print(f"[job] Screener terminó en {elapsed:.1f}s — {len(results)} OK, {len(errors)} errores")
 
-    # Crypto: enriquecer precios con Binance antes de guardar en D1
+    # Crypto: enriquecer precios con fallback chain antes de guardar en D1
     if args.list_id == "crypto":
-        try:
-            resp = requests.get(
-                "https://api.binance.com/api/v3/ticker/price",
-                timeout=10,
-                headers={"User-Agent": "maximos-screener/1.0"},
-            )
-            if resp.status_code == 200:
-                price_map = {
-                    item["symbol"][:-4]: float(item["price"])
-                    for item in resp.json()
-                    if item.get("symbol", "").endswith("USDT")
-                }
-                if results:
-                    # Caso normal: yfinance funcionó, enriquecer precios antes de upsert
-                    for r in results:
-                        base = r.get("ticker", "").replace("-USD", "")
-                        if base in price_map:
-                            r["price"] = round(price_map[base], 4)
-                    print(f"[binance] precios enriquecidos para {len(results)} tickers")
-                else:
-                    # Fallback: yfinance falló — actualizar solo price en datos existentes de D1
-                    print("[binance] yfinance falló — actualizando solo precios en D1 existente")
-                    existing = d1_query(token, account_id, db_id,
-                        "SELECT ticker, data FROM screener_results WHERE list_id = ?",
-                        [args.list_id])
-                    rows = existing[0].get("results", []) if existing else []
-                    now = datetime.now(timezone.utc).isoformat()
-                    updated = 0
-                    for row in rows:
-                        ticker = row["ticker"]
-                        base = ticker.replace("-USD", "")
-                        if base in price_map:
-                            data = json.loads(row["data"])
-                            data["price"] = round(price_map[base], 4)
-                            d1_query(token, account_id, db_id,
-                                "UPDATE screener_results SET data = ?, updated_at = ? WHERE list_id = ? AND ticker = ?",
-                                [json.dumps(data, ensure_ascii=False), now, args.list_id, ticker])
-                            updated += 1
-                    print(f"[binance] {updated}/{len(rows)} precios actualizados en D1")
+        bases = [t.replace("-USD", "").upper() for t in tickers if t.endswith("-USD")]
+        price_map = fetch_crypto_prices(bases)
+        if price_map:
+            if results:
+                for r in results:
+                    base = r.get("ticker", "").replace("-USD", "").upper()
+                    if base in price_map:
+                        r["price"] = round(price_map[base], 4)
             else:
-                print(f"[binance] HTTP {resp.status_code}", file=sys.stderr)
-        except Exception as e:
-            print(f"[binance] Error: {e}", file=sys.stderr)
+                # yfinance falló — actualizar solo price en D1 existente
+                print("[prices] yfinance falló — actualizando precios en D1 existente")
+                existing = d1_query(token, account_id, db_id,
+                    "SELECT ticker, data FROM screener_results WHERE list_id = ?",
+                    [args.list_id])
+                rows = existing[0].get("results", []) if existing else []
+                now = datetime.now(timezone.utc).isoformat()
+                updated = 0
+                for row in rows:
+                    ticker_key = row["ticker"]
+                    base = ticker_key.replace("-USD", "").upper()
+                    if base in price_map:
+                        data = json.loads(row["data"])
+                        data["price"] = round(price_map[base], 4)
+                        d1_query(token, account_id, db_id,
+                            "UPDATE screener_results SET data = ?, updated_at = ? WHERE list_id = ? AND ticker = ?",
+                            [json.dumps(data, ensure_ascii=False), now, args.list_id, ticker_key])
+                        updated += 1
+                print(f"[prices] {updated}/{len(rows)} precios actualizados en D1")
 
     for row in results:
         try:
