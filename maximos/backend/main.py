@@ -324,22 +324,28 @@ def get_quotes(tickers: str = ""):
     if not symbols:
         return {"quotes": {}}
 
+    def _round_price(v):
+        # Cripto de centavos fraccionarios (ej. LINEA ~$0.0022) pierden todo su valor con 2 decimales
+        if v is None:
+            return None
+        return round(v, 8) if abs(v) < 1 else round(v, 2)
+
     def fetch_one(symbol):
         try:
             fi = yf.Ticker(symbol).fast_info
             price      = fi.last_price
             prev_close = fi.previous_close
-            change     = round(price - prev_close, 2)                    if price and prev_close else None
+            change     = _round_price(price - prev_close)                    if price and prev_close else None
             change_pct = round((price - prev_close) / prev_close * 100, 2) if price and prev_close else None
             return symbol, {
-                "price":      round(price, 2)      if price      else None,
+                "price":      _round_price(price)                if price else None,
                 "change":     change,
                 "change_pct": change_pct,
-                "open":       round(fi.open, 2)      if getattr(fi, 'open', None)      else None,
-                "high":       round(fi.day_high, 2)  if getattr(fi, 'day_high', None)  else None,
-                "low":        round(fi.day_low, 2)   if getattr(fi, 'day_low', None)   else None,
+                "open":       _round_price(getattr(fi, 'open', None)),
+                "high":       _round_price(getattr(fi, 'day_high', None)),
+                "low":        _round_price(getattr(fi, 'day_low', None)),
                 "volume":     getattr(fi, 'volume', None),
-                "prev_close": round(prev_close, 2)   if prev_close   else None,
+                "prev_close": _round_price(prev_close),
             }
         except Exception:
             return symbol, None
