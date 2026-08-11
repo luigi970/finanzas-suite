@@ -44,14 +44,14 @@ const ACCOUNT_TYPES = [
 ]
 
 const ASSET_TYPES = [
-  { value: 'fiat',       label: 'Fiat' },
-  { value: 'stablecoin', label: 'Stablecoin' },
-  { value: 'crypto',     label: 'Crypto' },
-  { value: 'stock',      label: 'Acción' },
-  { value: 'cedear',     label: 'CEDEAR' },
-  { value: 'fixed_term', label: 'Plazo fijo' },
-  { value: 'fund',       label: 'Fondo de inversión' },
-  { value: 'flexible',   label: 'Rendimiento flexible' },
+  { value: 'fiat',       label: 'Fiat',       hint: 'Plata "de verdad": pesos, dólares billete — la moneda de un país.' },
+  { value: 'stablecoin', label: 'Stablecoin', hint: 'Cripto que vale siempre ~1 dólar (USDT, USDC). Es la versión digital del dólar dentro de un exchange.' },
+  { value: 'crypto',     label: 'Crypto',     hint: 'Bitcoin, Ethereum y demás — su precio sube y baja con el mercado.' },
+  { value: 'stock',      label: 'Acción',     hint: 'Una parte de una empresa que cotiza en bolsa (ej. Apple, YPF).' },
+  { value: 'cedear',     label: 'CEDEAR',     hint: 'Un certificado que cotiza en pesos en Argentina y representa una acción extranjera.' },
+  { value: 'fixed_term', label: 'Plazo fijo', hint: 'Depositás plata a un banco por un tiempo fijo y te devuelve más al vencer.' },
+  { value: 'fund',       label: 'Fondo de inversión', hint: 'Tu plata la administra un tercero, junto con la de otros inversores.' },
+  { value: 'flexible',   label: 'Rendimiento flexible', hint: 'Genera interés todo el tiempo y podés sacarlo cuando quieras (ej. staking, cuenta remunerada).' },
 ]
 
 const CATEGORIES = [
@@ -82,12 +82,65 @@ function fmtAmount(amount) {
   return amount.toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 }
 
+// ── Toast — reemplaza alert() nativo por un mensaje prolijo y en español ──────
+let _toastListeners = []
+let _toastSeq = 0
+function _pushToast(message, tone) {
+  const id = ++_toastSeq
+  _toastListeners.forEach(fn => fn(list => [...list, { id, message, tone }]))
+  setTimeout(() => {
+    _toastListeners.forEach(fn => fn(list => list.filter(t => t.id !== id)))
+  }, 7000)
+}
+
+function parseErrorMessage(e, fallback = 'Algo salió mal. Probá de nuevo.') {
+  const raw = e?.message ?? String(e ?? '')
+  let msg = raw
+  try {
+    const d = JSON.parse(raw)
+    if (d?.detail) msg = typeof d.detail === 'string' ? d.detail : JSON.stringify(d.detail)
+  } catch {}
+  // Traducciones amigables para errores comunes de proveedores de IA
+  if (/429|quota|rate.?limit/i.test(msg)) return 'El servicio de IA está saturado en este momento (límite de uso alcanzado). Probá de nuevo en unos minutos.'
+  if (/failed to fetch|networkerror|ECONNREFUSED/i.test(msg)) return 'No se pudo conectar con el servidor. Verificá tu conexión.'
+  if (!msg) return fallback
+  return msg.length > 220 ? msg.slice(0, 220) + '…' : msg
+}
+
+function showToast(message, tone = 'error') { _pushToast(message, tone) }
+function showError(e, fallback) { _pushToast(parseErrorMessage(e, fallback), 'error') }
+
+function ToastContainer() {
+  const [toasts, setToasts] = useState([])
+  useEffect(() => {
+    _toastListeners.push(setToasts)
+    return () => { _toastListeners = _toastListeners.filter(fn => fn !== setToasts) }
+  }, [])
+  if (!toasts.length) return null
+  return (
+    <div className="fixed bottom-4 right-4 z-[200] space-y-2 max-w-sm w-[calc(100%-2rem)]">
+      {toasts.map(t => (
+        <div key={t.id}
+          className={`rounded-lg shadow-lg px-4 py-3 text-sm text-white flex items-start gap-2 ${t.tone === 'error' ? 'bg-red-600' : 'bg-slate-900'}`}>
+          <span className="shrink-0">{t.tone === 'error' ? '⚠️' : 'ℹ️'}</span>
+          <span className="flex-1 leading-snug">{t.message}</span>
+          <button onClick={() => setToasts(list => list.filter(x => x.id !== t.id))}
+            className="shrink-0 text-white/70 hover:text-white">✕</button>
+        </div>
+      ))}
+    </div>
+  )
+}
+
 function typeIcon(type) {
   return ACCOUNT_TYPES.find(t => t.value === type)?.icon ?? '📁'
 }
 
 function assetTypeLabel(type) {
   return ASSET_TYPES.find(t => t.value === type)?.label ?? type
+}
+function assetTypeHint(type) {
+  return ASSET_TYPES.find(t => t.value === type)?.hint ?? ''
 }
 
 // ── HelpModal ─────────────────────────────────────────────────────────────────
@@ -106,7 +159,7 @@ function HelpModal({ onClose }) {
       title: 'Cargá tus posiciones',
       tab: 'Portfolio',
       icon: '📊',
-      desc: 'Agregá lo que tenés en cada cuenta: cripto, acciones, CEDEARs, plazos fijos, fiat. Para plazos fijos y staking indicá la tasa y fecha de vencimiento — el interés devengado se calcula solo. Para CEDEARs completá el Ratio (cuántos CEDEARs = 1 acción) para que el valor en USD sea correcto. El botón 🔄 en cada cuenta resincroniza las cantidades si cargaste movimientos.',
+      desc: 'Agregá lo que tenés en cada cuenta: cripto, acciones, CEDEARs, plazos fijos, fiat. Para plazos fijos y staking indicá la tasa y fecha de vencimiento — el interés devengado se calcula solo. Para CEDEARs completá el Ratio (cuántos CEDEARs = 1 acción) para que el valor en USD sea correcto. El botón 🔄 en cada cuenta resincroniza las cantidades si cargaste movimientos. Si en algún momento la cantidad no coincide con lo que ves en tu exchange o banco, podés corregirla directamente con ✏️ — la app ajusta el saldo sola y no afecta tu precio promedio de compra ni las ganancias ya calculadas.',
       examples: ['BBVA: 500.000 ARS', 'Binance: 0.05 BTC (precio promedio en USD)', 'Nexo: 1.000 USDT al 7.5% hasta 08/2026', 'IOL: 25 AAPL CEDEAR (ratio 20)'],
     },
     {
@@ -247,6 +300,19 @@ function AccountForm({ initial, onSave, onClose }) {
   )
 }
 
+// ── FormSection — agrupa campos relacionados en formularios largos ────────────
+function FormSection({ title, subtitle, children }) {
+  return (
+    <div className="border-t border-gray-100 pt-4 first:border-t-0 first:pt-0 space-y-3">
+      <div>
+        <div className="text-xs font-bold text-gray-700">{title}</div>
+        {subtitle && <div className="text-[11px] text-gray-400">{subtitle}</div>}
+      </div>
+      {children}
+    </div>
+  )
+}
+
 // ── PositionForm ──────────────────────────────────────────────────────────────
 function PositionForm({ accounts, initial, onSave, onClose }) {
   const [form, setForm] = useState({
@@ -262,9 +328,13 @@ function PositionForm({ accounts, initial, onSave, onClose }) {
     notes: initial?.notes ?? '',
   })
   const set = k => e => setForm(f => ({ ...f, [k]: e.target.value }))
-  const hasTerm     = ['fixed_term', 'fund', 'flexible'].includes(form.asset_type)
-  const isFlexible  = form.asset_type === 'flexible'
-  const isCedear    = form.asset_type === 'cedear'
+  const hasTerm      = ['fixed_term', 'fund', 'flexible'].includes(form.asset_type)
+  const isFlexible   = form.asset_type === 'flexible'
+  const isCedear     = form.asset_type === 'cedear'
+  const isStablecoin = form.asset_type === 'stablecoin'
+  const avgPriceNum  = parseFloat(form.avg_price)
+  const stablecoinPriceWarning = isStablecoin && form.avg_price !== '' &&
+    !isNaN(avgPriceNum) && (avgPriceNum < 0.5 || avgPriceNum > 2)
 
   async function submit(e) {
     e.preventDefault()
@@ -279,91 +349,113 @@ function PositionForm({ accounts, initial, onSave, onClose }) {
   }
 
   return (
-    <form onSubmit={submit} className="space-y-4">
-      <div>
-        <label className="text-xs font-medium text-gray-500 uppercase tracking-wide">Cuenta</label>
-        <select value={form.account_id} onChange={set('account_id')}
-          className="mt-1 w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-amber-400">
-          {accounts.map(a => <option key={a.id} value={a.id}>{typeIcon(a.type)} {a.name}</option>)}
-        </select>
-      </div>
-      <div className="grid grid-cols-2 gap-3">
+    <form onSubmit={submit} className="space-y-5">
+      <FormSection title="Qué tenés">
         <div>
-          <label className="text-xs font-medium text-gray-500 uppercase tracking-wide">Activo</label>
-          <input value={form.asset} onChange={set('asset')} required placeholder="ARS, BTC, YPF..."
-            className="mt-1 w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-amber-400" />
+          <label className="text-xs font-medium text-gray-500 uppercase tracking-wide">Cuenta</label>
+          <select value={form.account_id} onChange={set('account_id')}
+            className="mt-1 w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-amber-400">
+            {accounts.map(a => <option key={a.id} value={a.id}>{typeIcon(a.type)} {a.name}</option>)}
+          </select>
         </div>
-        <div>
-          <label className="text-xs font-medium text-gray-500 uppercase tracking-wide">Cantidad</label>
-          <input value={form.quantity} onChange={set('quantity')} required type="number" step="any"
-            className="mt-1 w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-amber-400" />
-        </div>
-      </div>
-      <div>
-        <label className="text-xs font-medium text-gray-500 uppercase tracking-wide">Tipo de activo</label>
-        <select value={form.asset_type} onChange={set('asset_type')}
-          className="mt-1 w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-amber-400">
-          {ASSET_TYPES.map(t => <option key={t.value} value={t.value}>{t.label}</option>)}
-        </select>
-      </div>
-      {!['fiat', 'fixed_term'].includes(form.asset_type) && (
-        <div>
-          <label className="text-xs font-medium text-gray-500 uppercase tracking-wide">
-            Precio promedio de compra{' '}
-            <span className="text-gray-400 font-normal normal-case">
-              {isCedear ? '(ARS por CEDEAR, opcional)' : '(USD, opcional)'}
-            </span>
-          </label>
-          <input type="number" step="any" min="0" value={form.avg_price} onChange={set('avg_price')}
-            placeholder={isCedear ? 'ej: 14600 (precio pagado en ARS por CEDEAR)' : 'ej: 95000 para BTC comprado a USD 95k'}
-            className="mt-1 w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-amber-400" />
-          <p className="mt-1 text-[11px] text-gray-400 leading-snug">
-            Cargalo una sola vez. Las compras futuras que registres con precio lo actualizarán automáticamente.
-          </p>
-        </div>
-      )}
-      {isCedear && (
-        <div>
-          <label className="text-xs font-medium text-gray-500 uppercase tracking-wide">
-            Ratio <span className="text-gray-400 font-normal normal-case">(cuántos CEDEARs = 1 acción subyacente)</span>
-          </label>
-          <input type="number" step="1" min="1" value={form.rate} onChange={set('rate')}
-            placeholder="ej: 25 para AAPL — verificá en tu broker"
-            className="mt-1 w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-amber-400" />
-        </div>
-      )}
-      {hasTerm && (
         <div className="grid grid-cols-2 gap-3">
           <div>
-            <label className="text-xs font-medium text-gray-500 uppercase tracking-wide">Inicio</label>
-            <input type="date" value={form.start_date} onChange={set('start_date')}
+            <label className="text-xs font-medium text-gray-500 uppercase tracking-wide">Activo</label>
+            <input value={form.asset} onChange={set('asset')} required placeholder="ARS, BTC, YPF..."
               className="mt-1 w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-amber-400" />
           </div>
-          {!isFlexible && (
+          <div>
+            <label className="text-xs font-medium text-gray-500 uppercase tracking-wide">Cantidad</label>
+            <input value={form.quantity} onChange={set('quantity')} required type="number" step="any"
+              className="mt-1 w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-amber-400" />
+          </div>
+        </div>
+        <div>
+          <label className="text-xs font-medium text-gray-500 uppercase tracking-wide">Tipo de activo</label>
+          <select value={form.asset_type} onChange={set('asset_type')}
+            className="mt-1 w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-amber-400">
+            {ASSET_TYPES.map(t => <option key={t.value} value={t.value}>{t.label}</option>)}
+          </select>
+          <p className="mt-1 text-[11px] text-gray-400 leading-snug">
+            {ASSET_TYPES.find(t => t.value === form.asset_type)?.hint}
+          </p>
+        </div>
+      </FormSection>
+
+      {(!['fiat', 'fixed_term'].includes(form.asset_type) || isCedear) && (
+        <FormSection title="Precio de compra" subtitle="Opcional — para calcular ganancia/pérdida">
+          {!['fiat', 'fixed_term'].includes(form.asset_type) && (
             <div>
-              <label className="text-xs font-medium text-gray-500 uppercase tracking-wide">Vencimiento</label>
-              <input type="date" value={form.end_date} onChange={set('end_date')}
+              <label className="text-xs font-medium text-gray-500 uppercase tracking-wide">Precio promedio de compra</label>
+              <div className="mt-1 flex rounded-lg border border-gray-200 overflow-hidden focus-within:ring-2 focus-within:ring-amber-400">
+                <span className={`flex items-center px-3 text-sm font-bold shrink-0 ${isCedear ? 'bg-sky-100 text-sky-700' : 'bg-emerald-100 text-emerald-700'}`}>
+                  {isCedear ? 'ARS' : 'USD'}
+                </span>
+                <input type="number" step="any" min="0" value={form.avg_price} onChange={set('avg_price')}
+                  placeholder={isCedear ? 'ej: 14600 (precio pagado en ARS por CEDEAR)' : 'ej: 95000 para BTC comprado a USD 95k'}
+                  className="w-full px-3 py-2 text-sm focus:outline-none" />
+              </div>
+              <p className="mt-1 text-[11px] text-gray-400 leading-snug">
+                {isCedear
+                  ? 'El precio de CEDEARs siempre va en pesos argentinos (lo que pagaste en tu broker).'
+                  : 'El precio de todo lo demás (crypto, acciones) siempre va en dólares — no en pesos.'}
+                {' '}Cargalo una sola vez, las compras futuras con precio lo actualizan solo.
+              </p>
+              {stablecoinPriceWarning && (
+                <p className="mt-1.5 text-[11px] bg-red-50 text-red-700 rounded-md px-2.5 py-1.5 leading-snug">
+                  ⚠️ Un stablecoin vale ~1 USD. Si pagaste {fmtAmount(avgPriceNum)} pesos por unidad, ese número va en tu cuenta bancaria, no acá — este campo es en dólares.
+                </p>
+              )}
+            </div>
+          )}
+          {isCedear && (
+            <div>
+              <label className="text-xs font-medium text-gray-500 uppercase tracking-wide">
+                Ratio <span className="text-gray-400 font-normal normal-case">(cuántos CEDEARs = 1 acción subyacente)</span>
+              </label>
+              <input type="number" step="1" min="1" value={form.rate} onChange={set('rate')}
+                placeholder="ej: 25 para AAPL — verificá en tu broker"
                 className="mt-1 w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-amber-400" />
             </div>
           )}
-          <div>
-            <label className="text-xs font-medium text-gray-500 uppercase tracking-wide">Tasa anual %</label>
-            <input type="number" step="0.01" value={form.rate} onChange={set('rate')}
-              className="mt-1 w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-amber-400" />
-          </div>
-          {!isFlexible && (
-            <div className="flex items-end pb-2">
-              <label className="flex items-center gap-2 text-sm text-gray-600 cursor-pointer">
-                <input type="checkbox" checked={!!form.auto_renew}
-                  onChange={e => setForm(f => ({ ...f, auto_renew: e.target.checked ? 1 : 0 }))} />
-                Auto-renovar
-              </label>
-            </div>
-          )}
-        </div>
+        </FormSection>
       )}
+
+      {hasTerm && (
+        <FormSection title="Vencimiento y tasa">
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="text-xs font-medium text-gray-500 uppercase tracking-wide">Inicio</label>
+              <input type="date" value={form.start_date} onChange={set('start_date')}
+                className="mt-1 w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-amber-400" />
+            </div>
+            {!isFlexible && (
+              <div>
+                <label className="text-xs font-medium text-gray-500 uppercase tracking-wide">Vencimiento</label>
+                <input type="date" value={form.end_date} onChange={set('end_date')}
+                  className="mt-1 w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-amber-400" />
+              </div>
+            )}
+            <div>
+              <label className="text-xs font-medium text-gray-500 uppercase tracking-wide">Tasa anual %</label>
+              <input type="number" step="0.01" value={form.rate} onChange={set('rate')}
+                className="mt-1 w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-amber-400" />
+            </div>
+            {!isFlexible && (
+              <div className="flex items-end pb-2">
+                <label className="flex items-center gap-2 text-sm text-gray-600 cursor-pointer">
+                  <input type="checkbox" checked={!!form.auto_renew}
+                    onChange={e => setForm(f => ({ ...f, auto_renew: e.target.checked ? 1 : 0 }))} />
+                  Auto-renovar
+                </label>
+              </div>
+            )}
+          </div>
+        </FormSection>
+      )}
+
       <div>
-        <label className="text-xs font-medium text-gray-500 uppercase tracking-wide">Notas</label>
+        <label className="text-xs font-medium text-gray-500 uppercase tracking-wide">Notas <span className="text-gray-400 font-normal normal-case">(opcional)</span></label>
         <input value={form.notes} onChange={set('notes')} placeholder="opcional"
           className="mt-1 w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-amber-400" />
       </div>
@@ -406,7 +498,7 @@ function IngestPanel({ accounts, onDone }) {
       const data = await r.json()
       setPreview(data.transactions ?? [])
     } catch (e) {
-      alert('Error procesando archivo: ' + e.message)
+      showError(e, 'No pudimos leer ese archivo. Probá con otro formato o cargá los datos manualmente.')
     } finally {
       setLoading(false)
     }
@@ -423,14 +515,14 @@ function IngestPanel({ accounts, onDone }) {
       })
       setPreview(data.transactions ?? [])
     } catch (e) {
-      alert('Error procesando texto: ' + e.message)
+      showError(e, 'No pudimos leer ese texto. Revisá el formato o cargá los datos manualmente.')
     } finally {
       setLoading(false)
     }
   }
 
   async function confirm() {
-    if (!accountId) return alert('Seleccioná una cuenta')
+    if (!accountId) return showToast('Elegí una cuenta antes de confirmar', 'info')
     setSaving(true)
     try {
       await api('/api/transactions/batch', {
@@ -442,7 +534,7 @@ function IngestPanel({ accounts, onDone }) {
       setText('')
       onDone()
     } catch (e) {
-      alert('Error guardando: ' + e.message)
+      showError(e, 'No pudimos guardar estos movimientos. Probá de nuevo.')
     } finally {
       setSaving(false)
     }
@@ -893,17 +985,10 @@ function PatrimonioTypeCard({ type, group, pct }) {
   )
 }
 
-function PatrimonioTab({ positions, accounts = [], transactions = [], maximosUrl = MAXIMOS_ONLINE, prices = {}, blueRate = null, onRefreshPrices }) {
+function PatrimonioTab({ positions, accounts = [], transactions = [], maximosUrl = MAXIMOS_ONLINE, prices = {}, blueRate = null, onRefreshPrices, onGetStarted }) {
   const [loading,  setLoading]  = useState(true)
   const [error,    setError]    = useState(null)
   const MAXIMOS_API = maximosUrl
-
-  // Resumen de movimientos del mes actual
-  const thisMonth = new Date().toISOString().slice(0, 7)
-  const monthTx = transactions.filter(t => t.date?.startsWith(thisMonth))
-  const monthIncome  = monthTx.filter(t => t.type === 'income'  && t.source !== 'swap').reduce((s, t) => s + t.amount, 0)
-  const monthExpense = monthTx.filter(t => t.type === 'expense' && t.source !== 'swap').reduce((s, t) => s + t.amount, 0)
-  const currencies = [...new Set(monthTx.map(t => t.currency))].slice(0, 2).join(' / ') || '—'
 
   useEffect(() => {
     if (blueRate || Object.keys(prices).length > 0) {
@@ -951,9 +1036,12 @@ function PatrimonioTab({ positions, accounts = [], transactions = [], maximosUrl
     }
 
     const isCedear = p.asset_type === 'cedear'
-    const avgPriceUSD = isCedear && blueRate && p.avg_price
+    // Stablecoins y fiat siempre valen ~1:1 — un avg_price cargado por error (ej. en ARS)
+    // no debe generar P&L fantasma
+    const skipPnl = STABLECOINS.has(p.asset) || FIAT_USD.has(p.asset) || FIAT_ARS.has(p.asset)
+    const avgPriceUSD = skipPnl ? null : (isCedear && blueRate && p.avg_price
       ? p.avg_price / blueRate   // avg_price en ARS → convertir a USD por CEDEAR
-      : p.avg_price
+      : p.avg_price)
     const costUSD = avgPriceUSD != null ? avgPriceUSD * p.quantity : null
     const pnlUSD  = (valueUSD != null && costUSD != null) ? valueUSD - costUSD : null
     const pnlPct  = (priceUSD != null && avgPriceUSD != null) ? (priceUSD - avgPriceUSD) / avgPriceUSD * 100 : null
@@ -992,6 +1080,16 @@ function PatrimonioTab({ positions, accounts = [], transactions = [], maximosUrl
     if (!byType[p.asset_type]) byType[p.asset_type] = []
     byType[p.asset_type].push(p)
   }
+
+  // Agrupar por activo (cruzando cuentas) — promedio combinado cuando el mismo
+  // activo está repartido entre varias wallets/exchanges/bancos
+  const byAsset = {}
+  for (const p of enriched) {
+    if (FIAT_ARS.has(p.asset) || FIAT_USD.has(p.asset)) continue
+    if (!byAsset[p.asset]) byAsset[p.asset] = []
+    byAsset[p.asset].push(p)
+  }
+  const multiAccountAssets = Object.entries(byAsset).filter(([, list]) => list.length > 1)
 
   // Segmentos por clase de activo (Pesos / Dólares / Crypto / Acciones / CEDEARs)
   const assetSegs = useMemo(() => {
@@ -1039,12 +1137,30 @@ function PatrimonioTab({ positions, accounts = [], transactions = [], maximosUrl
     </div>
   )
 
-  if (positions.length === 0) return (
-    <div className="text-center py-16 text-gray-400 text-sm">
-      <div className="text-4xl mb-3">💰</div>
-      <div>Cargá posiciones en Portfolio para ver tu patrimonio</div>
-    </div>
-  )
+  if (positions.length === 0) {
+    const noAccounts = accounts.length === 0
+    return (
+      <div className="text-center py-16 max-w-sm mx-auto">
+        <div className="text-4xl mb-3">💰</div>
+        <div className="text-gray-600 font-medium mb-1">
+          {noAccounts ? 'Todavía no tenés nada cargado' : 'Falta cargar qué tenés en tus cuentas'}
+        </div>
+        <div className="text-gray-400 text-sm mb-5 leading-snug">
+          {noAccounts
+            ? 'Empezá agregando una cuenta — tu banco, un exchange de crypto, un broker — y después cargás lo que tenés en cada una.'
+            : 'Ya tenés cuentas creadas. Ahora agregá lo que tenés en cada una: plata, crypto, acciones, lo que sea.'}
+        </div>
+        <button onClick={() => onGetStarted?.(noAccounts ? 'add-account' : 'add-position')}
+          className="bg-amber-500 hover:bg-amber-600 text-white text-sm font-medium px-5 py-2.5 rounded-lg">
+          {noAccounts ? '+ Agregar mi primera cuenta' : '+ Cargar lo que tengo'}
+        </button>
+        <button onClick={() => onGetStarted?.('help')}
+          className="block mx-auto mt-3 text-xs text-gray-400 hover:text-amber-600 underline underline-offset-2">
+          Ver cómo funciona paso a paso
+        </button>
+      </div>
+    )
+  }
 
   return (
     <div className="max-w-6xl mx-auto space-y-6">
@@ -1052,33 +1168,6 @@ function PatrimonioTab({ positions, accounts = [], transactions = [], maximosUrl
         <div className="bg-amber-50 border border-amber-200 rounded-xl px-4 py-3 text-sm text-amber-700 flex items-center justify-between">
           <span>{error}</span>
           <button onClick={() => onRefreshPrices?.(positions)} className="text-amber-600 font-medium hover:underline">Reintentar</button>
-        </div>
-      )}
-
-      {/* Mini resumen del mes */}
-      {monthTx.length > 0 && (
-        <div className="grid grid-cols-3 gap-3">
-          <div className="bg-white rounded-xl border border-gray-200 p-3 shadow-sm text-center">
-            <div className="text-[10px] text-gray-400 uppercase tracking-wide mb-1">Ingresos este mes</div>
-            <div className="text-sm font-bold text-green-600 tabular-nums">
-              {monthIncome.toLocaleString('es-AR', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
-            </div>
-            <div className="text-[10px] text-gray-400">{currencies}</div>
-          </div>
-          <div className="bg-white rounded-xl border border-gray-200 p-3 shadow-sm text-center">
-            <div className="text-[10px] text-gray-400 uppercase tracking-wide mb-1">Gastos este mes</div>
-            <div className="text-sm font-bold text-red-500 tabular-nums">
-              {monthExpense.toLocaleString('es-AR', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
-            </div>
-            <div className="text-[10px] text-gray-400">{currencies}</div>
-          </div>
-          <div className="bg-white rounded-xl border border-gray-200 p-3 shadow-sm text-center">
-            <div className="text-[10px] text-gray-400 uppercase tracking-wide mb-1">Balance del mes</div>
-            <div className={`text-sm font-bold tabular-nums ${monthIncome - monthExpense >= 0 ? 'text-green-600' : 'text-red-500'}`}>
-              {(monthIncome - monthExpense >= 0 ? '+' : '')}{(monthIncome - monthExpense).toLocaleString('es-AR', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
-            </div>
-            <div className="text-[10px] text-gray-400">{currencies}</div>
-          </div>
         </div>
       )}
 
@@ -1137,6 +1226,53 @@ function PatrimonioTab({ positions, accounts = [], transactions = [], maximosUrl
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <DonutChart title="Por clase de activo" segments={assetSegs} totalUSD={totalUSD} />
           <DonutChart title="Por tipo de posición" segments={typeSegs} totalUSD={totalUSD} />
+        </div>
+      )}
+
+      {/* Promedio combinado — mismo activo en varias cuentas */}
+      {multiAccountAssets.length > 0 && (
+        <div className="bg-white rounded-xl border border-gray-200 shadow-sm px-4 py-3">
+          <div className="flex items-baseline gap-1.5 mb-2">
+            <span className="text-xs font-semibold text-gray-700 uppercase tracking-wide">Promedio combinado</span>
+            <span className="text-[10px] text-gray-400">mismo activo en varias cuentas</span>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            {multiAccountAssets.map(([asset, list]) => {
+              const totalQty = list.reduce((s, p) => s + p.quantity + (p.accrued ?? 0), 0)
+              const totalValueUSD = list.some(p => p.valueUSD != null)
+                ? list.reduce((s, p) => s + (p.valueUSD ?? 0), 0) : null
+              // Promedio real: desde las transacciones crudas, excluyendo transferencias entre
+              // cuentas propias (si no, el costo se cuenta dos veces — una al comprar, otra al
+              // "heredar" el costo en la cuenta destino)
+              const buys = transactions.filter(t =>
+                t.currency === asset && t.source !== 'transfer' &&
+                ['income', 'buy'].includes(t.type) && t.unit_price)
+              const totalCostUSD = buys.length > 0 ? buys.reduce((s, t) => s + t.amount * t.unit_price, 0) : null
+              const totalQtyBought = buys.reduce((s, t) => s + t.amount, 0)
+              const avgPrice = totalCostUSD != null && totalQtyBought > 0 ? totalCostUSD / totalQtyBought : null
+              const totalPnL = (totalValueUSD != null && avgPrice != null)
+                ? totalValueUSD - avgPrice * totalQty : null
+              const pnlPct = totalPnL != null && avgPrice > 0 ? totalPnL / (avgPrice * totalQty) * 100 : null
+              return (
+                <div key={asset} title={list.map(p => p.account_name).join(' + ')}
+                  className="flex items-center gap-2.5 bg-gray-50 hover:bg-amber-50 transition-colors rounded-lg px-3 py-1.5 text-xs cursor-default">
+                  <span className="font-bold text-gray-800">{asset}</span>
+                  <span className="text-gray-500 tabular-nums">{fmtAmount(totalQty)}</span>
+                  {avgPrice != null && <span className="text-gray-400 tabular-nums">@ {fmtAmount(avgPrice)}</span>}
+                  {totalValueUSD != null && (
+                    <span className="font-semibold text-gray-800 tabular-nums">
+                      USD {totalValueUSD.toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                    </span>
+                  )}
+                  {totalPnL != null && (
+                    <span className={`font-semibold tabular-nums ${totalPnL >= 0 ? 'text-green-600' : 'text-red-500'}`}>
+                      {totalPnL >= 0 ? '+' : ''}{pnlPct.toFixed(1)}%
+                    </span>
+                  )}
+                </div>
+              )
+            })}
+          </div>
         </div>
       )}
 
@@ -1284,137 +1420,144 @@ function TransactionForm({ initial, accounts, onSave, onClose }) {
       }
       onClose()
     } catch (err) {
-      alert(`Error al guardar: ${err.message}`)
+      showError(err, 'No pudimos guardar este movimiento. Probá de nuevo.')
     }
   }
 
   const inputCls = "mt-1 w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-amber-400"
 
   return (
-    <form onSubmit={submit} className="space-y-3">
-      <div className="grid grid-cols-2 gap-3">
-        <div>
-          <label className="text-xs font-medium text-gray-500 uppercase tracking-wide">Fecha</label>
-          <input type="date" value={form.date} onChange={set('date')} required className={inputCls} />
-        </div>
-        <div>
-          <label className="text-xs font-medium text-gray-500 uppercase tracking-wide">Tipo</label>
-          <select value={form.type} onChange={set('type')} className={inputCls}>
-            <option value="income">Ingreso</option>
-            <option value="buy">Compra</option>
-            <option value="expense">Gasto</option>
-            <option value="sell">Venta</option>
-            <option value="transfer">Transferencia</option>
-            <option value="swap">Swap / Cambio</option>
-          </select>
-        </div>
-      </div>
-      <div>
-        <label className="text-xs font-medium text-gray-500 uppercase tracking-wide">
-          {isTransfer ? 'Cuenta origen' : 'Cuenta'}
-        </label>
-        <select value={form.account_id} onChange={set('account_id')} required className={inputCls}>
-          {accounts.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
-        </select>
-      </div>
-      {isTransfer && (
-        <div>
-          <label className="text-xs font-medium text-gray-500 uppercase tracking-wide">Cuenta destino</label>
-          <select value={form.to_account_id} onChange={set('to_account_id')} required={isTransfer} className={inputCls}>
-            <option value="">— Elegí una cuenta —</option>
-            {accounts.filter(a => a.id !== parseInt(form.account_id)).map(a => (
-              <option key={a.id} value={a.id}>{a.name}</option>
-            ))}
-          </select>
-          <p className="mt-1 text-[11px] text-gray-400">Se registra un egreso en origen y un ingreso en destino automáticamente.</p>
-        </div>
-      )}
-      <div>
-        <label className="text-xs font-medium text-gray-500 uppercase tracking-wide">Descripción</label>
-        <input value={form.description} onChange={set('description')}
-          className={inputCls} placeholder="Ej: Supermercado, Netflix..." />
-      </div>
-      <div className="grid grid-cols-2 gap-3">
-        <div>
-          <label className="text-xs font-medium text-gray-500 uppercase tracking-wide">
-            {isSwap ? 'Cantidad entregada' : 'Monto / Cantidad'}
-          </label>
-          <input type="number" step="any" min="0" value={form.amount} onChange={set('amount')} required className={inputCls} />
-          {!isSwap && <p className="mt-0.5 text-[10px] text-gray-400">CEDEARs: cantidad de láminas</p>}
-        </div>
-        <div>
-          <label className="text-xs font-medium text-gray-500 uppercase tracking-wide">
-            {isSwap ? 'Activo entregado' : 'Moneda / Activo'}
-          </label>
-          <input value={form.currency} onChange={set('currency')} required
-            className={inputCls} placeholder="ARS, BTC, NVDA..." />
-          {!isSwap && <p className="mt-0.5 text-[10px] text-gray-400">CEDEARs: ticker (ej: NVDA)</p>}
-        </div>
-      </div>
-      {isSwap && (
-        <>
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className="text-xs font-medium text-gray-500 uppercase tracking-wide">Cantidad recibida</label>
-              <input type="number" step="any" min="0" value={form.to_amount} onChange={set('to_amount')} required className={inputCls} />
-            </div>
-            <div>
-              <label className="text-xs font-medium text-gray-500 uppercase tracking-wide">Activo recibido</label>
-              <input value={form.to_asset} onChange={set('to_asset')} required
-                className={inputCls} placeholder="USD, ETH, USDT..." />
-            </div>
+    <form onSubmit={submit} className="space-y-5">
+      <FormSection title="Cuándo y qué tipo de movimiento">
+        <div className="grid grid-cols-2 gap-3">
+          <div>
+            <label className="text-xs font-medium text-gray-500 uppercase tracking-wide">Fecha</label>
+            <input type="date" value={form.date} onChange={set('date')} required className={inputCls} />
           </div>
           <div>
-            <label className="text-xs font-medium text-gray-500 uppercase tracking-wide">Cuenta destino <span className="text-gray-400 normal-case font-normal">(opcional — por defecto la misma)</span></label>
-            <select value={form.to_account_id} onChange={set('to_account_id')} className={inputCls}>
-              <option value="">— Misma cuenta —</option>
-              {accounts.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
+            <label className="text-xs font-medium text-gray-500 uppercase tracking-wide">Tipo</label>
+            <select value={form.type} onChange={set('type')} className={inputCls}>
+              <option value="income">Ingreso</option>
+              <option value="buy">Compra</option>
+              <option value="expense">Gasto</option>
+              <option value="sell">Venta</option>
+              <option value="transfer">Transferencia</option>
+              <option value="swap">Swap / Cambio</option>
             </select>
           </div>
-          {impliedRate && (
-            <p className="text-[11px] text-gray-400 text-center">
-              Tipo de cambio implícito: 1 {form.to_asset.toUpperCase() || '?'} = {impliedRate} {form.currency.toUpperCase() || '?'}
-            </p>
-          )}
-        </>
-      )}
-      {!isTransfer && !isSwap && (
+        </div>
         <div>
-          <label className="text-xs font-medium text-gray-500 uppercase tracking-wide">Categoría</label>
-          <select value={form.category} onChange={set('category')} className={inputCls}>
-            <option value="">Sin categoría</option>
-            {CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
+          <label className="text-xs font-medium text-gray-500 uppercase tracking-wide">
+            {isTransfer ? 'Cuenta origen' : 'Cuenta'}
+          </label>
+          <select value={form.account_id} onChange={set('account_id')} required className={inputCls}>
+            {accounts.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
           </select>
         </div>
-      )}
-      {showUnitPrice && (
-        <div>
-          <label className="text-xs font-medium text-gray-500 uppercase tracking-wide">
-            Precio por unidad <span className="text-gray-400 normal-case font-normal">(opcional)</span>
-          </label>
-          <input type="number" step="any" min="0" value={form.unit_price} onChange={set('unit_price')}
-            className={inputCls} placeholder="ej: 97500" />
-          <p className="mt-1 text-[11px] text-gray-400 leading-snug">
-            {form.type === 'income' || form.type === 'buy'
-              ? 'Actualiza el precio promedio de tu posición. USD para crypto/acciones, ARS para CEDEARs.'
-              : 'Calcula la ganancia o pérdida realizada. USD para crypto/acciones, ARS para CEDEARs.'}
-          </p>
-        </div>
-      )}
-      {!isSwap && (
-        <div>
-          <label className="text-xs font-medium text-gray-500 uppercase tracking-wide">
-            Comisión <span className="text-gray-400 normal-case font-normal">(opcional)</span>
-          </label>
-          <div className="flex gap-2 mt-1">
-            <input type="number" step="any" min="0" value={form.fee} onChange={set('fee')}
-              className={`${inputCls} flex-1`} placeholder="0.001" />
-            <input type="text" value={form.fee_currency} onChange={set('fee_currency')}
-              className="w-24 border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-amber-400 shrink-0" placeholder="BNB" maxLength={10} />
+        {isTransfer && (
+          <div>
+            <label className="text-xs font-medium text-gray-500 uppercase tracking-wide">Cuenta destino</label>
+            <select value={form.to_account_id} onChange={set('to_account_id')} required={isTransfer} className={inputCls}>
+              <option value="">— Elegí una cuenta —</option>
+              {accounts.filter(a => a.id !== parseInt(form.account_id)).map(a => (
+                <option key={a.id} value={a.id}>{a.name}</option>
+              ))}
+            </select>
+            <p className="mt-1 text-[11px] text-gray-400">Se registra un egreso en origen y un ingreso en destino automáticamente.</p>
           </div>
-          {isTransfer && <p className="mt-1 text-[11px] text-gray-400">Si la comisión es en la misma moneda, se resta del monto recibido en destino.</p>}
+        )}
+        <div>
+          <label className="text-xs font-medium text-gray-500 uppercase tracking-wide">Descripción</label>
+          <input value={form.description} onChange={set('description')}
+            className={inputCls} placeholder="Ej: Supermercado, Netflix..." />
         </div>
+      </FormSection>
+
+      <FormSection title={isSwap ? 'Qué entregás y qué recibís' : 'Monto'}>
+        <div className="grid grid-cols-2 gap-3">
+          <div>
+            <label className="text-xs font-medium text-gray-500 uppercase tracking-wide">
+              {isSwap ? 'Cantidad entregada' : 'Monto / Cantidad'}
+            </label>
+            <input type="number" step="any" min="0" value={form.amount} onChange={set('amount')} required className={inputCls} />
+            {!isSwap && <p className="mt-0.5 text-[10px] text-gray-400">CEDEARs: cantidad de láminas</p>}
+          </div>
+          <div>
+            <label className="text-xs font-medium text-gray-500 uppercase tracking-wide">
+              {isSwap ? 'Activo entregado' : 'Moneda / Activo'}
+            </label>
+            <input value={form.currency} onChange={set('currency')} required
+              className={inputCls} placeholder="ARS, BTC, NVDA..." />
+            {!isSwap && <p className="mt-0.5 text-[10px] text-gray-400">CEDEARs: ticker (ej: NVDA)</p>}
+          </div>
+        </div>
+        {isSwap && (
+          <>
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="text-xs font-medium text-gray-500 uppercase tracking-wide">Cantidad recibida</label>
+                <input type="number" step="any" min="0" value={form.to_amount} onChange={set('to_amount')} required className={inputCls} />
+              </div>
+              <div>
+                <label className="text-xs font-medium text-gray-500 uppercase tracking-wide">Activo recibido</label>
+                <input value={form.to_asset} onChange={set('to_asset')} required
+                  className={inputCls} placeholder="USD, ETH, USDT..." />
+              </div>
+            </div>
+            <div>
+              <label className="text-xs font-medium text-gray-500 uppercase tracking-wide">Cuenta destino <span className="text-gray-400 normal-case font-normal">(opcional — por defecto la misma)</span></label>
+              <select value={form.to_account_id} onChange={set('to_account_id')} className={inputCls}>
+                <option value="">— Misma cuenta —</option>
+                {accounts.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
+              </select>
+            </div>
+            {impliedRate && (
+              <p className="text-[11px] text-gray-400 text-center">
+                Tipo de cambio implícito: 1 {form.to_asset.toUpperCase() || '?'} = {impliedRate} {form.currency.toUpperCase() || '?'}
+              </p>
+            )}
+          </>
+        )}
+      </FormSection>
+
+      {!isSwap && (
+        <FormSection title="Más detalles" subtitle="Opcional">
+          {!isTransfer && !isSwap && (
+            <div>
+              <label className="text-xs font-medium text-gray-500 uppercase tracking-wide">Categoría</label>
+              <select value={form.category} onChange={set('category')} className={inputCls}>
+                <option value="">Sin categoría</option>
+                {CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
+              </select>
+            </div>
+          )}
+          {showUnitPrice && (
+            <div>
+              <label className="text-xs font-medium text-gray-500 uppercase tracking-wide">Precio por unidad</label>
+              <input type="number" step="any" min="0" value={form.unit_price} onChange={set('unit_price')}
+                className={inputCls} placeholder="ej: 97500" />
+              <p className="mt-1 text-[11px] text-gray-400 leading-snug">
+                {form.type === 'income' || form.type === 'buy'
+                  ? 'Actualiza el precio promedio de tu posición. USD para crypto/acciones, ARS para CEDEARs.'
+                  : 'Calcula la ganancia o pérdida realizada. USD para crypto/acciones, ARS para CEDEARs.'}
+              </p>
+            </div>
+          )}
+          {!isSwap && (
+            <div>
+              <label className="text-xs font-medium text-gray-500 uppercase tracking-wide">Comisión</label>
+              <div className="flex gap-2 mt-1">
+                <input type="number" step="any" min="0" value={form.fee} onChange={set('fee')}
+                  className={`${inputCls} flex-1`} placeholder="0.001" />
+                <input type="text" value={form.fee_currency} onChange={set('fee_currency')}
+                  className="w-24 border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-amber-400 shrink-0" placeholder="BNB" maxLength={10} />
+              </div>
+              {isTransfer && <p className="mt-1 text-[11px] text-gray-400">Si la comisión es en la misma moneda, se resta del monto recibido en destino.</p>}
+            </div>
+          )}
+        </FormSection>
       )}
+
       <div className="flex gap-2 pt-1">
         <button type="button" onClick={onClose}
           className="flex-1 py-2 rounded-lg border border-gray-200 text-sm text-gray-600 hover:bg-gray-50">
@@ -1442,13 +1585,16 @@ function PositionRow({ p, blueRate, onEdit, onDelete }) {
     if (blueRate) valueSub = `≈ USD ${fmtAmount(p.quantity / blueRate)}`
   } else if (p.valueUSD != null) {
     valueMain = `USD ${fmtAmount(p.valueUSD)}`
+    if (p.asset_type === 'cedear' && blueRate) {
+      valueSub = `≈ ARS ${fmtAmount(p.valueUSD * blueRate)}`
+    }
   } else if (p.asset_type === 'cedear' && p.avg_price) {
     valueMain = `ARS ${fmtAmount(p.quantity * p.avg_price)}`
   }
 
   // precio promedio
   let avgText = null
-  if (isFixed && p.rate) {
+  if ((p.asset_type === 'fixed_term' || p.asset_type === 'fund') && p.rate) {
     avgText = <span className="text-green-600">{p.rate}% anual</span>
   } else if (p.avg_price && !isFiat) {
     const label = p.asset_type === 'cedear' ? `ARS ${fmtAmount(p.avg_price)}` : `USD ${fmtAmount(p.avg_price)}`
@@ -1473,7 +1619,7 @@ function PositionRow({ p, blueRate, onEdit, onDelete }) {
       <td className="px-4 py-2.5">
         <div className="flex items-center gap-1.5 flex-wrap">
           <span className="font-semibold text-gray-800 text-sm">{p.asset}</span>
-          <span className="text-[10px] bg-gray-100 text-gray-500 rounded px-1.5 py-0.5 leading-4">{assetTypeLabel(p.asset_type)}</span>
+          <span title={assetTypeHint(p.asset_type)} className="text-[10px] bg-gray-100 text-gray-500 rounded px-1.5 py-0.5 leading-4 cursor-help">{assetTypeLabel(p.asset_type)}</span>
           {p.end_date && <span className="text-[10px] bg-amber-100 text-amber-700 rounded px-1.5 py-0.5 leading-4">vence {p.end_date}</span>}
         </div>
         {p.notes && <div className="text-[10px] text-gray-400 mt-0.5 truncate max-w-[200px]">{p.notes}</div>}
@@ -1496,6 +1642,12 @@ function PositionRow({ p, blueRate, onEdit, onDelete }) {
       {/* Precio prom. */}
       <td className="px-3 py-2.5 text-right text-xs whitespace-nowrap">
         {avgText ?? <span className="text-gray-300">—</span>}
+      </td>
+      {/* Tasa */}
+      <td className="px-3 py-2.5 text-right text-xs whitespace-nowrap">
+        {(p.asset_type === 'fixed_term' || p.asset_type === 'fund' || p.asset_type === 'flexible') && p.rate
+          ? <span className="text-green-600">{p.rate}% anual</span>
+          : <span className="text-gray-300">—</span>}
       </td>
       {/* P&L */}
       <td className="px-3 py-2.5 text-right text-sm whitespace-nowrap">
@@ -1587,6 +1739,7 @@ function PortfolioTab({ accounts, positions, onAddPosition, onEditPosition, onDe
                 <th className="px-3 py-2.5 text-right text-xs font-medium text-gray-400 uppercase tracking-wide">Cantidad</th>
                 <Th label="Valor" field="value" />
                 <th className="px-3 py-2.5 text-right text-xs font-medium text-gray-400 uppercase tracking-wide">Prom.</th>
+                <th className="px-3 py-2.5 text-right text-xs font-medium text-gray-400 uppercase tracking-wide">Tasa</th>
                 <Th label="P&L" field="pnl" />
                 <th className="w-16" />
               </tr>
@@ -1597,7 +1750,7 @@ function PortfolioTab({ accounts, positions, onAddPosition, onEditPosition, onDe
               return (
                 <tbody key={acc.id}>
                   <tr className="bg-gray-100/70" style={{ borderTop: `3px solid ${acc.color}` }}>
-                    <td colSpan={6} className="px-4 py-2">
+                    <td colSpan={7} className="px-4 py-2">
                       <div className="flex items-center gap-2">
                         <span className="w-3 h-3 rounded-full shrink-0" style={{ background: acc.color }} />
                         <span className="text-sm font-bold text-gray-800">{typeIcon(acc.type)} {acc.name}</span>
@@ -1644,8 +1797,7 @@ function Chat({ messages, setMessages }) {
       })
       setMessages(m => [...m, { role: 'assistant', content: data.reply }])
     } catch (e) {
-      let msg = 'Error al conectar con el agente.'
-      try { const d = JSON.parse(e.message); if (d.detail) msg = d.detail } catch {}
+      const msg = parseErrorMessage(e, 'No pude conectarme. Probá de nuevo en un momento.')
       setMessages(m => [...m, { role: 'assistant', content: msg }])
     } finally {
       setLoading(false)
@@ -1712,6 +1864,11 @@ function MovimientosTab({ transactions, accounts, onEdit, onDelete, onNewManual,
   }), [transactions, search, filterMonth, filterCategory, filterAccount])
 
   const visible = filtered.slice(0, displayLimit)
+  // Columnas de detalle solo se muestran si algún movimiento visible las usa —
+  // reduce el ruido para quien solo carga gastos simples
+  const showUnitPriceCol = visible.some(t => t.unit_price)
+  const showPnlCol       = visible.some(t => t.realized_pnl != null)
+  const showFeeCol       = visible.some(t => t.fee && t.fee > 0)
 
   function resetFilters() { setSearch(''); setFilterMonth(''); setFilterCategory(''); setFilterAccount(''); setDisplayLimit(50) }
 
@@ -1776,7 +1933,11 @@ function MovimientosTab({ transactions, accounts, onEdit, onDelete, onNewManual,
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b border-gray-200 bg-gray-50">
-                  {['Fecha','Cuenta','Descripción','Categoría','Tipo','Monto','Precio unit.','P&L realizado','Comisión',''].map(h => (
+                  {['Fecha','Cuenta','Descripción','Categoría','Tipo','Monto',
+                    ...(showUnitPriceCol ? ['Precio unit.'] : []),
+                    ...(showPnlCol ? ['P&L realizado'] : []),
+                    ...(showFeeCol ? ['Comisión'] : []),
+                    ''].map(h => (
                     <th key={h} className={`px-3 py-2 text-[10px] font-semibold text-gray-400 uppercase tracking-wide whitespace-nowrap ${h === '' || h === 'Monto' || h === 'Precio unit.' || h === 'P&L realizado' || h === 'Comisión' ? 'text-right' : 'text-left'}`}>{h}</th>
                   ))}
                 </tr>
@@ -1808,19 +1969,25 @@ function MovimientosTab({ transactions, accounts, onEdit, onDelete, onNewManual,
                     }`}>
                       {t.source === 'swap' || t.source === 'transfer' ? '↔' : t.type === 'income' || t.type === 'buy' ? '+' : t.type === 'transfer' ? '↔' : '-'}{fmtAmount(t.amount)} {t.currency}
                     </td>
-                    <td className="px-3 py-2.5 text-right tabular-nums text-gray-400 whitespace-nowrap text-xs">
-                      {t.unit_price ? fmtAmount(t.unit_price) : <span className="text-gray-200">—</span>}
-                    </td>
-                    <td className={`px-3 py-2.5 text-right tabular-nums font-semibold whitespace-nowrap text-xs ${
-                      t.realized_pnl != null ? (t.realized_pnl >= 0 ? 'text-green-500' : 'text-red-500') : ''
-                    }`}>
-                      {t.realized_pnl != null
-                        ? `${t.realized_pnl >= 0 ? '+' : ''}USD ${t.realized_pnl.toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
-                        : <span className="text-gray-200">—</span>}
-                    </td>
-                    <td className="px-3 py-2.5 text-right tabular-nums text-orange-400 whitespace-nowrap text-xs">
-                      {t.fee && t.fee > 0 ? `${fmtAmount(t.fee)} ${t.fee_currency || ''}` : <span className="text-gray-200">—</span>}
-                    </td>
+                    {showUnitPriceCol && (
+                      <td className="px-3 py-2.5 text-right tabular-nums text-gray-400 whitespace-nowrap text-xs">
+                        {t.unit_price ? fmtAmount(t.unit_price) : <span className="text-gray-200">—</span>}
+                      </td>
+                    )}
+                    {showPnlCol && (
+                      <td className={`px-3 py-2.5 text-right tabular-nums font-semibold whitespace-nowrap text-xs ${
+                        t.realized_pnl != null ? (t.realized_pnl >= 0 ? 'text-green-500' : 'text-red-500') : ''
+                      }`}>
+                        {t.realized_pnl != null
+                          ? `${t.realized_pnl >= 0 ? '+' : ''}USD ${t.realized_pnl.toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+                          : <span className="text-gray-200">—</span>}
+                      </td>
+                    )}
+                    {showFeeCol && (
+                      <td className="px-3 py-2.5 text-right tabular-nums text-orange-400 whitespace-nowrap text-xs">
+                        {t.fee && t.fee > 0 ? `${fmtAmount(t.fee)} ${t.fee_currency || ''}` : <span className="text-gray-200">—</span>}
+                      </td>
+                    )}
                     <td className="px-2 py-2.5 whitespace-nowrap">
                       <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
                         <button onClick={() => onEdit(t)} className="text-gray-300 hover:text-amber-500 px-1 text-xs">✏️</button>
@@ -1965,12 +2132,23 @@ export default function App() {
       } else if (data._swap_to) {
         const { _swap_to, to_account_id, to_asset, to_amount, ...rest } = data
         const fromAsset = (rest.currency || '').toUpperCase()
+        const toAsset   = (_swap_to.asset || '').toUpperCase()
         const FIAT_STABLE = new Set(['ARS','EUR','BRL','UYU','USD','USDT','USDC','DAI','BUSD','FDUSD','TUSD','PYUSD'])
-        const fromType = FIAT_STABLE.has(fromAsset) ? 'expense' : 'sell'
-        await api('/api/transactions', { method: 'POST', body: JSON.stringify({ ...rest, type: fromType, source: 'swap' }) })
+        const fromIsStable = FIAT_STABLE.has(fromAsset)
+        const toIsStable   = FIAT_STABLE.has(toAsset)
+        const fromType = fromIsStable ? 'expense' : 'sell'
+        // Precio implícito en USD (stablecoin/fiat USD ≈ 1:1) cuando un lado es estable y el otro no —
+        // sin esto avg_price nunca se actualiza con los swaps (bug encontrado 2026-08-09)
+        let fromUnitPrice = null, toUnitPrice = null
+        if (fromIsStable && !toIsStable && _swap_to.amount > 0) {
+          toUnitPrice = rest.amount / _swap_to.amount
+        } else if (!fromIsStable && toIsStable && rest.amount > 0) {
+          fromUnitPrice = _swap_to.amount / rest.amount
+        }
+        await api('/api/transactions', { method: 'POST', body: JSON.stringify({ ...rest, type: fromType, source: 'swap', unit_price: fromUnitPrice }) })
         await api('/api/transactions', { method: 'POST', body: JSON.stringify({
           account_id: _swap_to.account_id, date: rest.date, description: rest.description,
-          amount: _swap_to.amount, currency: _swap_to.asset, type: 'buy', source: 'swap',
+          amount: _swap_to.amount, currency: _swap_to.asset, type: 'buy', source: 'swap', unit_price: toUnitPrice,
         }) })
         await api(`/api/positions/create-missing/${_swap_to.account_id}`, { method: 'POST' })
       } else if (editTarget?.id) {
@@ -1995,8 +2173,15 @@ export default function App() {
     { id: 'cuentas',    label: 'Cuentas' },
   ]
 
+  function handleGetStarted(action) {
+    if (action === 'add-account') { setTab('cuentas'); setEditTarget(null); setModal('add-account') }
+    else if (action === 'add-position') { setTab('portfolio'); setEditTarget(null); setModal('add-position') }
+    else if (action === 'help') { setModal('help') }
+  }
+
   return (
     <div className="min-h-screen bg-gray-50 flex flex-col">
+      <ToastContainer />
       {/* Header */}
       <header className="bg-slate-900 text-white px-4 sm:px-6 py-4 flex items-center justify-between"
         style={{ borderTop: '3px solid #f59e0b' }}>
@@ -2037,7 +2222,7 @@ export default function App() {
 
         {/* PATRIMONIO */}
         {tab === 'patrimonio' && (
-          <PatrimonioTab positions={positions} accounts={accounts} transactions={transactions} maximosUrl={maximosUrl} prices={prices} blueRate={blueRate} onRefreshPrices={loadPrices} />
+          <PatrimonioTab positions={positions} accounts={accounts} transactions={transactions} maximosUrl={maximosUrl} prices={prices} blueRate={blueRate} onRefreshPrices={loadPrices} onGetStarted={handleGetStarted} />
         )}
 
         {/* PORTFOLIO */}
