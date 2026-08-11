@@ -224,8 +224,12 @@ def create_transactions_batch(data: TransactionBatch):
 @router.delete("/{transaction_id}", status_code=204)
 def delete_transaction(transaction_id: int):
     conn = get_db()
+    tx = conn.execute("SELECT account_id, currency FROM transactions WHERE id = ?", (transaction_id,)).fetchone()
     conn.execute("DELETE FROM transactions WHERE id = ?", (transaction_id,))
     conn.commit()
+    if tx:
+        _sync_position(conn, tx["account_id"], tx["currency"].upper())
+        conn.commit()
     conn.close()
 
 @router.patch("/{transaction_id}")
