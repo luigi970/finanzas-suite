@@ -7,6 +7,9 @@ launcher/backend/launcher_config.json
 finanzas/backend/*.db
 fiscal/backend/*.db
 
+# Datos financieros personales
+recursos/
+
 # Python
 __pycache__/
 *.pyc
