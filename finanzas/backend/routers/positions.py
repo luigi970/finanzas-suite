@@ -133,7 +133,7 @@ def guess_asset_type(asset: str, account_type: str = None) -> str:
     if a in FIAT_ASSETS:       return 'fiat'
     if a in STABLECOIN_ASSETS: return 'stablecoin'
     if account_type in ('exchange', 'wallet_crypto'): return 'crypto'
-    if account_type == 'broker': return 'stock'
+    if account_type == 'broker': return 'cedear'
     return 'crypto'
 
 @router.post("/create-missing/{account_id}")

@@ -626,6 +626,13 @@ function IngestPanel({ accounts, onDone }) {
                       <input type="text" value={t.fee_currency||''} onChange={e => updatePreviewRow(i,'fee_currency',e.target.value.toUpperCase())}
                         className="border border-gray-200 rounded px-2 py-1 text-xs bg-white w-16" placeholder="BNB" />
                     </div>
+                    {!FIAT_CURRENCIES.has((t.currency||'').toUpperCase()) && (
+                      <select value={t.asset_type||''} onChange={e => updatePreviewRow(i,'asset_type',e.target.value||null)}
+                        className="w-full border border-gray-200 rounded px-2 py-1 text-xs bg-white">
+                        <option value="">Tipo de activo — dejar que el sistema decida</option>
+                        {ASSET_TYPES.filter(at => at.value !== 'fiat').map(at => <option key={at.value} value={at.value}>{at.label}</option>)}
+                      </select>
+                    )}
                     <div className="flex gap-2">
                       <button onClick={() => setEditingIdx(null)} className="flex-1 bg-amber-500 text-white rounded py-1 text-xs font-medium">Listo</button>
                       <button onClick={() => { removePreviewRow(i); setEditingIdx(null) }} className="text-red-400 hover:text-red-600 text-xs px-2">Eliminar</button>
@@ -644,7 +651,7 @@ function IngestPanel({ accounts, onDone }) {
                     </div>
                     {(t.unit_price || t.fee) && (
                       <div className="flex gap-3 pl-4 text-gray-400 mt-0.5">
-                        {t.unit_price && <span>@ USD {fmtAmount(t.unit_price)}</span>}
+                        {t.unit_price && <span>@ {fmtAmount(t.unit_price)} <span className="text-gray-300">(revisá la moneda — USD para crypto/acciones, ARS para CEDEARs)</span></span>}
                         {t.fee && <span className="text-orange-400">comisión {fmtAmount(t.fee)} {t.fee_currency}</span>}
                       </div>
                     )}
@@ -1381,6 +1388,8 @@ function TransactionForm({ initial, accounts, onSave, onClose }) {
     fee_currency:  initial?.fee_currency ?? '',
     to_asset:      '',
     to_amount:     '',
+    asset_type:    initial?.asset_type ?? '',
+    to_asset_type: '',
   })
   const set = k => e => setForm(f => ({ ...f, [k]: e.target.value }))
 
@@ -1404,6 +1413,8 @@ function TransactionForm({ initial, accounts, onSave, onClose }) {
     else delete base.unit_price
     if (form.fee !== '' && form.fee_currency) { base.fee = parseFloat(form.fee); base.fee_currency = form.fee_currency.toUpperCase() }
     else { delete base.fee; delete base.fee_currency }
+    if (!base.asset_type) delete base.asset_type
+    delete base.to_asset_type
 
     try {
       if (isTransfer && form.to_account_id) {
@@ -1414,6 +1425,7 @@ function TransactionForm({ initial, accounts, onSave, onClose }) {
           asset: form.to_asset.toUpperCase(),
           amount: parseFloat(form.to_amount),
           account_id: toAccountId,
+          asset_type: form.to_asset_type || undefined,
         }, description: base.description || `Swap ${form.currency.toUpperCase()} → ${form.to_asset.toUpperCase()}` })
       } else {
         await onSave(base)
@@ -1505,6 +1517,15 @@ function TransactionForm({ initial, accounts, onSave, onClose }) {
               </div>
             </div>
             <div>
+              <label className="text-xs font-medium text-gray-500 uppercase tracking-wide">
+                Tipo de activo recibido <span className="text-gray-400 normal-case font-normal">(opcional — solo si es la primera vez que cargás este activo)</span>
+              </label>
+              <select value={form.to_asset_type} onChange={set('to_asset_type')} className={inputCls}>
+                <option value="">— Dejar que el sistema decida —</option>
+                {ASSET_TYPES.filter(t => t.value !== 'fiat').map(t => <option key={t.value} value={t.value}>{t.label}</option>)}
+              </select>
+            </div>
+            <div>
               <label className="text-xs font-medium text-gray-500 uppercase tracking-wide">Cuenta destino <span className="text-gray-400 normal-case font-normal">(opcional — por defecto la misma)</span></label>
               <select value={form.to_account_id} onChange={set('to_account_id')} className={inputCls}>
                 <option value="">— Misma cuenta —</option>
@@ -1528,6 +1549,17 @@ function TransactionForm({ initial, accounts, onSave, onClose }) {
               <select value={form.category} onChange={set('category')} className={inputCls}>
                 <option value="">Sin categoría</option>
                 {CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
+              </select>
+            </div>
+          )}
+          {!isTransfer && !FIAT_CURRENCIES.has(form.currency.toUpperCase()) && (
+            <div>
+              <label className="text-xs font-medium text-gray-500 uppercase tracking-wide">
+                Tipo de activo <span className="text-gray-400 normal-case font-normal">(opcional — solo si es la primera vez que cargás este activo)</span>
+              </label>
+              <select value={form.asset_type} onChange={set('asset_type')} className={inputCls}>
+                <option value="">— Dejar que el sistema decida —</option>
+                {ASSET_TYPES.filter(t => t.value !== 'fiat').map(t => <option key={t.value} value={t.value}>{t.label}</option>)}
               </select>
             </div>
           )}
@@ -2149,6 +2181,7 @@ export default function App() {
         await api('/api/transactions', { method: 'POST', body: JSON.stringify({
           account_id: _swap_to.account_id, date: rest.date, description: rest.description,
           amount: _swap_to.amount, currency: _swap_to.asset, type: 'buy', source: 'swap', unit_price: toUnitPrice,
+          asset_type: _swap_to.asset_type,
         }) })
         await api(`/api/positions/create-missing/${_swap_to.account_id}`, { method: 'POST' })
       } else if (editTarget?.id) {

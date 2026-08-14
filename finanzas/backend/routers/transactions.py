@@ -19,6 +19,7 @@ class TransactionIn(BaseModel):
     unit_price: Optional[float] = None
     fee: Optional[float] = None
     fee_currency: Optional[str] = None
+    asset_type: Optional[str] = None  # tipo de activo elegido por el usuario, para la posición nueva (si aplica)
 
 VALID_TYPES = {'income', 'buy', 'expense', 'sell', 'transfer'}
 
@@ -33,6 +34,7 @@ class TransactionItem(BaseModel):
     unit_price: Optional[float] = None
     fee: Optional[float] = None
     fee_currency: Optional[str] = None
+    asset_type: Optional[str] = None
 
 class TransactionBatch(BaseModel):
     account_id: int
@@ -63,8 +65,10 @@ def _calc_realized_pnl(conn, account_id: int, asset: str, unit_price: float, amo
     return None
 
 
-def _sync_position(conn, account_id: int, asset: str):
-    """Recalcula quantity y avg_price de la posición desde todos los movimientos."""
+def _sync_position(conn, account_id: int, asset: str, asset_type_hint: str = None):
+    """Recalcula quantity y avg_price de la posición desde todos los movimientos.
+    asset_type_hint: si se pasa (ej. elegido por el usuario en el formulario), se usa
+    tal cual al crear la posición en vez de adivinarlo por tipo de cuenta."""
     from routers.positions import guess_asset_type
 
     qty_row = conn.execute("""
@@ -121,9 +125,14 @@ def _sync_position(conn, account_id: int, asset: str):
                 (qty, pos['id'])
             )
     elif qty > 0:
+        if asset_type_hint:
+            asset_type = asset_type_hint
+        else:
+            account = conn.execute("SELECT type FROM accounts WHERE id = ?", (account_id,)).fetchone()
+            asset_type = guess_asset_type(asset, account['type'] if account else None)
         conn.execute(
             "INSERT INTO positions (account_id, asset, asset_type, quantity, avg_price) VALUES (?, ?, ?, ?, ?)",
-            (account_id, asset, guess_asset_type(asset), qty, avg_price)
+            (account_id, asset, asset_type, qty, avg_price)
         )
 
 
@@ -179,7 +188,7 @@ def create_transaction(data: TransactionIn):
         (data.account_id, data.date, data.description, data.amount, asset, data.type, data.category, data.source, data.unit_price, realized_pnl, data.fee, fee_currency)
     )
     conn.commit()
-    _sync_position(conn, data.account_id, asset)
+    _sync_position(conn, data.account_id, asset, data.asset_type)
     conn.commit()
     row = conn.execute("SELECT * FROM transactions WHERE id = ?", (cur.lastrowid,)).fetchone()
     conn.close()
@@ -214,9 +223,14 @@ def create_transactions_batch(data: TransactionBatch):
     conn.commit()
 
     # Recalcular posiciones (qty y avg_price) desde todos los movimientos
+    asset_types = {}
+    for t in data.transactions:
+        c = t.currency.upper()
+        if t.asset_type and c not in asset_types:
+            asset_types[c] = t.asset_type
     currencies = {t.currency.upper() for t in data.transactions}
     for asset in currencies:
-        _sync_position(conn, data.account_id, asset)
+        _sync_position(conn, data.account_id, asset, asset_types.get(asset))
     conn.commit()
     conn.close()
     return {"inserted": len(inserted), "ids": inserted}
