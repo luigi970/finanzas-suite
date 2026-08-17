@@ -5,7 +5,7 @@ from workers import fetch
 from providers.prompt import build_prompt
 
 GEMINI_BASE = "https://generativelanguage.googleapis.com/v1beta/models"
-MODEL = "gemini-2.0-flash-lite"
+MODEL = "gemini-3.5-flash-lite"
 
 
 async def analyze(ticker_data: dict, api_key: str) -> str:

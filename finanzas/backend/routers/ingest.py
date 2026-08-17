@@ -74,7 +74,7 @@ async def call_groq_text(text: str) -> list:
             "https://api.groq.com/openai/v1/chat/completions",
             headers={"Authorization": f"Bearer {groq_key}"},
             json={
-                "model": "llama-3.3-70b-versatile",
+                "model": "openai/gpt-oss-120b",
                 "messages": [{"role": "user", "content": EXTRACTION_PROMPT + "Documento:\n" + text}],
                 "temperature": 0.1,
             }
@@ -117,7 +117,7 @@ async def call_gemini_vision(image_b64: str, mime: str) -> list:
         raise HTTPException(500, "GOOGLE_API_KEY not configured")
     async with httpx.AsyncClient(timeout=60) as client:
         r = await client.post(
-            f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={google_key}",
+            f"https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6-flash:generateContent?key={google_key}",
             json={
                 "contents": [{
                     "parts": [

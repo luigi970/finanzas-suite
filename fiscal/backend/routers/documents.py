@@ -23,7 +23,7 @@ async def _extract_text(file_path: str, mime: str) -> str:
         b64 = base64.b64encode(f.read()).decode()
     async with httpx.AsyncClient(timeout=60) as client:
         r = await client.post(
-            f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-lite:generateContent?key={GOOGLE_API_KEY}",
+            f"https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash-lite:generateContent?key={GOOGLE_API_KEY}",
             json={"contents": [{"parts": [
                 {"text": "Extraé todo el texto fiscal relevante de esta imagen. Incluí todos los números, fechas y conceptos."},
                 {"inlineData": {"mimeType": mime, "data": b64}},

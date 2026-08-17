@@ -203,7 +203,7 @@ async def analyze(body: dict):
             resp = await client.post(
                 "https://api.groq.com/openai/v1/chat/completions",
                 headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"},
-                json={"model": "llama-3.3-70b-versatile",
+                json={"model": "openai/gpt-oss-120b",
                       "messages": [{"role": "user", "content": prompt}],
                       "max_tokens": 700, "temperature": 0.5},
             )
@@ -215,7 +215,7 @@ async def analyze(body: dict):
     async def call_gemini(key):
         async with httpx.AsyncClient(timeout=30) as client:
             resp = await client.post(
-                f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-lite:generateContent?key={key}",
+                f"https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash-lite:generateContent?key={key}",
                 headers={"Content-Type": "application/json"},
                 json={"contents": [{"role": "user", "parts": [{"text": prompt}]}],
                       "generationConfig": {"maxOutputTokens": 512, "temperature": 0.4}},

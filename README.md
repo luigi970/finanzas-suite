@@ -221,8 +221,8 @@ Body de `/api/refresh`:
 Al abrir un ticker el modal llama a `/api/analyze`. La cadena de proveedores es:
 
 1. **Cloudflare Workers AI** — `llama-3.3-70b-instruct-fp8-fast` (edge, sin costo adicional)
-2. **Groq** — `llama-3.3-70b-versatile` (fallback)
-3. **Gemini** — `gemini-2.0-flash-lite` (segundo fallback)
+2. **Groq** — `openai/gpt-oss-120b` (fallback)
+3. **Gemini** — `gemini-3.5-flash-lite` (segundo fallback)
 
 El prompt incluye todos los indicadores y genera 4-5 oraciones en español rioplatense, empezando por la conclusión, con el tono de un experto hablando con un amigo.
 

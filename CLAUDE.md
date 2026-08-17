@@ -240,7 +240,7 @@ El prompt está en `worker/src/providers/prompt.py` (`build_prompt()`). El backe
 - **Persona**: analista experto, español rioplatense, tono amigo exitoso, sin jerga ni markdown
 - **Datos incluidos**: señal, dirección, scores, zona, MA5-MA200 (con % distancia), RSI, MACD, Bollinger %B, ADX, vol_ratio, momentum/Pulse, patrón de velas, pivots S1/P/R1, SL/TP
 - **Output**: 4-5 oraciones corridas, empezando por la conclusión, 2-3 datos clave, señal de falla, perspectiva de riesgo
-- **Modelos**: `llama-3.3-70b-versatile` (Groq), `gemini-2.0-flash-lite` (Gemini), `@cf/meta/llama-3.3-70b-instruct-fp8-fast` (CF AI)
+- **Modelos**: `openai/gpt-oss-120b` (Groq), `gemini-3.5-flash-lite` (Gemini), `@cf/meta/llama-3.3-70b-instruct-fp8-fast` (CF AI)
 
 ## Decisiones técnicas
 

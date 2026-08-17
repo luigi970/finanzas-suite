@@ -89,7 +89,7 @@ async def _call_groq(messages: list) -> str:
         r = await client.post(
             "https://api.groq.com/openai/v1/chat/completions",
             headers={"Authorization": f"Bearer {GROQ_API_KEY}"},
-            json={"model": "llama-3.3-70b-versatile", "messages": messages, "max_tokens": 1500, "temperature": 0.3},
+            json={"model": "openai/gpt-oss-120b", "messages": messages, "max_tokens": 1500, "temperature": 0.3},
         )
         r.raise_for_status()
         return r.json()["choices"][0]["message"]["content"]
@@ -101,7 +101,7 @@ async def _call_gemini(messages: list) -> str:
                 "parts": [{"text": m["content"]}]} for m in messages[1:]]
     async with httpx.AsyncClient(timeout=60) as client:
         r = await client.post(
-            f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-lite:generateContent?key={GOOGLE_API_KEY}",
+            f"https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash-lite:generateContent?key={GOOGLE_API_KEY}",
             json={"contents": history, "systemInstruction": {"parts": [{"text": messages[0]["content"]}]}},
         )
         r.raise_for_status()

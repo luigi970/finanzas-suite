@@ -145,7 +145,7 @@ applies_to (condicion que aplica), notes
 ## Agente IA (`routers/agent.py`)
 
 ### Cadena de proveedores
-Groq (`llama-3.3-70b-versatile`) → Gemini (`gemini-2.0-flash-lite`)
+Groq (`openai/gpt-oss-120b`) → Gemini (`gemini-3.5-flash-lite`)
 
 ### Contexto que recibe el agente
 
