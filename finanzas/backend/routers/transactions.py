@@ -249,10 +249,12 @@ def delete_transaction(transaction_id: int):
 @router.patch("/{transaction_id}")
 def update_transaction(transaction_id: int, data: TransactionUpdate):
     conn = get_db()
-    fields = {k: v for k, v in data.model_dump().items() if v is not None}
+    # exclude_unset (no exclude_none): un campo enviado explícitamente en null
+    # borra el valor existente; un campo que ni se manda queda intacto
+    fields = data.model_dump(exclude_unset=True)
     if not fields:
         raise HTTPException(400, "No fields to update")
-    if "currency" in fields:
+    if fields.get("currency"):
         fields["currency"] = fields["currency"].upper()
     if "fee_currency" in fields and fields["fee_currency"]:
         fields["fee_currency"] = fields["fee_currency"].upper()
@@ -270,7 +272,7 @@ def update_transaction(transaction_id: int, data: TransactionUpdate):
 
     # Resync posición afectada
     account_id = tx.get("account_id")
-    asset = fields.get("currency", tx.get("currency", "")).upper()
+    asset = (fields.get("currency") or tx.get("currency") or "").upper()
     if account_id and asset:
         _sync_position(conn, account_id, asset)
         conn.commit()

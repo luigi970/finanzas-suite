@@ -56,6 +56,12 @@ def init_db():
             price_ars    REAL,
             updated_at   TEXT DEFAULT (datetime('now'))
         );
+
+        CREATE TABLE IF NOT EXISTS weekly_reports (
+            id           INTEGER PRIMARY KEY AUTOINCREMENT,
+            created_at   TEXT DEFAULT (datetime('now')),
+            content      TEXT NOT NULL
+        );
     """)
     conn.commit()
     # Migrations: add columns to existing tables without breaking existing data

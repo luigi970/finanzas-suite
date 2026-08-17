@@ -198,15 +198,27 @@ async def build_price_context(positions: list, client: httpx.AsyncClient) -> str
 
     await asyncio.gather(*[fetch_binance(s) for s in crypto_assets])
 
-    # Stocks / CEDEARs: via CF Worker (D1)
+    # Stocks / CEDEARs: maximos local primero (yfinance, no depende de que el
+    # Worker tenga el D1 al día) — si no está corriendo, cae al Worker online
     if stock_tickers:
+        tickers_str = ",".join(stock_tickers)
+        got_local = False
         try:
-            tickers_str = ",".join(stock_tickers)
-            r = await client.get(f"{MAXIMOS_URL}/api/quotes?tickers={tickers_str}", timeout=10)
+            r = await client.get(f"http://localhost:8000/api/quotes?tickers={tickers_str}", timeout=3)
             if r.is_success:
-                quotes.update(r.json().get("quotes", {}))
+                local_quotes = r.json().get("quotes", {})
+                if local_quotes:
+                    quotes.update(local_quotes)
+                    got_local = True
         except Exception:
             pass
+        if not got_local:
+            try:
+                r = await client.get(f"{MAXIMOS_URL}/api/quotes?tickers={tickers_str}", timeout=10)
+                if r.is_success:
+                    quotes.update(r.json().get("quotes", {}))
+            except Exception:
+                pass
 
     def get_market_price(p) -> Optional[float]:
         asset, atype = p['asset'], p['asset_type']
@@ -217,7 +229,14 @@ async def build_price_context(positions: list, client: httpx.AsyncClient) -> str
         if atype in ('fixed_term', 'fund'):
             return None
         q = quotes.get(to_yahoo_ticker(asset, atype))
-        return q['price'] if q else None
+        if not q:
+            return None
+        price = q['price']
+        # CEDEAR: el precio en D1/yfinance es de la acción subyacente en USD —
+        # dividir por el ratio para obtener el precio por CEDEAR (mismo criterio que el frontend)
+        if atype == 'cedear' and p.get('rate'):
+            price = price / p['rate']
+        return price
 
     ctx = "\nVALUACIÓN ACTUAL DE CARTERA:\n"
     if blue_rate:
@@ -643,6 +662,38 @@ async def build_crypto_sentiment_context(positions: list, client: httpx.AsyncCli
     return "\nSENTIMIENTO Y CONTEXTO DE MERCADO CRYPTO:\n" + "\n".join(lines) + "\n"
 
 
+REPORT_SYSTEM_PROMPT = """Sos el asesor financiero personal del usuario — el mismo que lo conoce en el chat de todos los días, no un desconocido. La diferencia hoy es que en vez de responder una pregunta puntual, te sentás una vez por semana a mirar TODO con calma y le contás, como el amigo con más plata invertida y más cabeza para esto de todo su círculo, qué está pasando y qué harías vos en su lugar.
+
+Esto NO es un informe institucional. Nadie quiere leer un PDF de banco. Es una charla seria pero cercana — la clase de conversación que tendrías tomando un café, donde el otro te dice la verdad sin vueltas porque te aprecia, no porque le pagan por cubrirse las espaldas.
+
+Tono — esto es lo más importante, más que la estructura:
+- Español rioplatense, coloquial, cálido, como le hablarías a un amigo. Nada de "se recomienda", "el suscripto sugiere" — hablá en primera persona: "yo en tu lugar...", "che, esto me preocupa...", "acá te diría que sí, metele".
+- Mostrale que lo conocés: usá lo que sabés de su forma de invertir (si compra de a poco, si tiene sesgo a cripto, si vive en Argentina y le importa la brecha) en vez de hablar en abstracto de "el inversor".
+- Podés abrir con algo humano — un comentario sobre cómo viene la semana, un "che, quería avisarte algo" — no arranques siempre igual con un dato frío.
+- Convicción real: nada de "quizás", "podría considerarse", "es una posibilidad a evaluar". O tenés una postura clara con lo que tenés, o decís derecho que falta información — pero nunca te escondas detrás de un lenguaje tibio.
+- Cero disclaimers de manual ("consultá a un profesional", "esto no es consejo financiero") — vos SOS el profesional, hablá como tal.
+
+Formato: marcá cada uno de los 5 bloques de abajo con un título corto en markdown (## Así), pero elegí vos las palabras del título — que suene a charla, no a informe (ej. "## Cómo venís esta semana", no "## Resumen ejecutivo"). Dentro de cada bloque, escribí como se describe.
+
+Qué tiene que incluir (el orden importa menos que cubrir todo esto con calidez):
+
+1. **Cómo viene la cartera** — un arranque humano, no una ficha técnica: cuánto vale, cuánto ganó o perdió (no realizado + realizado, USD y %), y tu lectura de fondo de la semana.
+
+2. **Posición por posición** — para cada una con valor real (fiat/stablecoin solo si el % de cash importa para la estrategia): **TICKER — tu veredicto** (Mantener / Aumentar / Reducir / Vigilar de cerca), y 1-2 líneas del porqué, cruzando técnico + fundamentals + sentimiento cuando los tengas. Si hay tensión entre indicadores, contala como te la contarías a vos mismo, no la escondas.
+
+3. **Con la plata líquida que tiene ahora, ¿qué harías vos?** — mirá los saldos en efectivo/stablecoin/plazo fijo sin comprometer y proponé un plan concreto para el mes: cuánto meterías, en qué, o si directamente le dirías que se quede en pesos/dólares esperando mejor punto de entrada. Esto es lo que más valor le da — no te lo saltees nunca, aunque la respuesta sea "quedate líquido este mes".
+
+4. **Algo que hoy no tiene y le metería una mirada** — 1-2 ideas concretas por fuera de su cartera actual (un activo, un sector, una cobertura) que tengan sentido dado lo que ya sabés de él — no una lista genérica de "diversificá", una idea puntual con el motivo. Antes de sugerir algo, repasá TODAS sus posiciones actuales (no solo las que tienen análisis técnico) — nunca propongas como "nuevo" algo que ya tiene en cartera.
+
+5. **Qué vigilar esta semana** — 2-3 cosas concretas y accionables: catalizadores (earnings, vencimientos), niveles técnicos, riesgos macro.
+
+Reglas de fondo (no negociables, sí importan):
+- Nunca ignores concentración: si dos posiciones caen juntas por estar correlacionadas, avisale.
+- "Mantener" nunca es la respuesta cómoda por default — se justifica con la misma exigencia que un "Reducir".
+- Los datos técnicos/fundamentales son de la última corrida del screener, no en vivo al segundo — no finjas una precisión que no tenés, pero tampoco lo aclares como disclaimer frío, mencionalo de pasada si es relevante.
+- Si una posición no tiene precio de mercado (plazo fijo, fondo), evaluala por tasa real vs. inflación — no la ignores.
+- Precisión numérica: usá siempre los números exactos del contexto, nunca redondees ni estimes."""
+
 class ChatMessage(BaseModel):
     role: str   # user | assistant
     content: str
@@ -675,7 +726,7 @@ async def chat(req: ChatRequest):
                 r = await client.post(
                     "https://api.groq.com/openai/v1/chat/completions",
                     headers={"Authorization": f"Bearer {GROQ_API_KEY}"},
-                    json={"model": "llama-3.3-70b-versatile", "messages": messages, "temperature": 0.7},
+                    json={"model": "openai/gpt-oss-120b", "messages": messages, "temperature": 0.7},
                 )
                 if r.is_success:
                     return {"reply": r.json()["choices"][0]["message"]["content"]}
@@ -688,7 +739,7 @@ async def chat(req: ChatRequest):
                 gemini_messages = [{"parts": [{"text": m["content"]}], "role": "user" if m["role"] != "assistant" else "model"} for m in messages if m["role"] != "system"]
                 system_text = next((m["content"] for m in messages if m["role"] == "system"), "")
                 r = await client.post(
-                    f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={GOOGLE_API_KEY}",
+                    f"https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6-flash:generateContent?key={GOOGLE_API_KEY}",
                     json={
                         "system_instruction": {"parts": [{"text": system_text}]},
                         "contents": gemini_messages,
@@ -701,3 +752,79 @@ async def chat(req: ChatRequest):
                 pass
 
     raise HTTPException(503, "No se pudo conectar con el agente de IA. Verificá las API keys.")
+
+
+@router.post("/weekly-report")
+async def generate_weekly_report():
+    """Genera un informe de cartera on-demand (botón, no automático) y lo guarda en historial."""
+    conn = get_db()
+    db_context, positions = build_context(conn)
+    conn.close()
+
+    content = None
+    async with httpx.AsyncClient(timeout=45) as client:
+        price_context, tech_context, fund_context, sentiment_context = await asyncio.gather(
+            build_price_context(positions, client),
+            build_technical_context(positions, client),
+            build_fundamentals_context(positions, client),
+            build_crypto_sentiment_context(positions, client),
+        )
+        full_context = db_context + price_context + tech_context + fund_context + sentiment_context
+        system_text = REPORT_SYSTEM_PROMPT + "\n\n" + full_context
+        user_ask = "Generá el informe semanal de mi cartera con la estructura indicada."
+
+        if GROQ_API_KEY:
+            try:
+                r = await client.post(
+                    "https://api.groq.com/openai/v1/chat/completions",
+                    headers={"Authorization": f"Bearer {GROQ_API_KEY}"},
+                    json={"model": "openai/gpt-oss-120b", "messages": [
+                        {"role": "system", "content": system_text},
+                        {"role": "user", "content": user_ask},
+                    ], "temperature": 0.5},
+                )
+                if r.is_success:
+                    content = r.json()["choices"][0]["message"]["content"]
+            except Exception:
+                pass
+
+        if not content and GOOGLE_API_KEY:
+            try:
+                r = await client.post(
+                    f"https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6-flash:generateContent?key={GOOGLE_API_KEY}",
+                    json={
+                        "system_instruction": {"parts": [{"text": system_text}]},
+                        "contents": [{"parts": [{"text": user_ask}], "role": "user"}],
+                        "generationConfig": {"temperature": 0.5},
+                    },
+                )
+                if r.is_success:
+                    content = r.json()["candidates"][0]["content"]["parts"][0]["text"]
+            except Exception:
+                pass
+
+    if not content:
+        raise HTTPException(503, "No se pudo generar el análisis. Verificá las API keys.")
+
+    conn = get_db()
+    cur = conn.execute("INSERT INTO weekly_reports (created_at, content) VALUES (datetime('now'), ?)", (content,))
+    conn.commit()
+    row = conn.execute("SELECT * FROM weekly_reports WHERE id = ?", (cur.lastrowid,)).fetchone()
+    conn.close()
+    return dict(row)
+
+
+@router.get("/weekly-report")
+def list_weekly_reports():
+    conn = get_db()
+    rows = conn.execute("SELECT * FROM weekly_reports ORDER BY created_at DESC LIMIT 20").fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
+@router.delete("/weekly-report/{report_id}", status_code=204)
+def delete_weekly_report(report_id: int):
+    conn = get_db()
+    conn.execute("DELETE FROM weekly_reports WHERE id = ?", (report_id,))
+    conn.commit()
+    conn.close()

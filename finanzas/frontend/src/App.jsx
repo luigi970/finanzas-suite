@@ -33,6 +33,43 @@ async function api(path, opts = {}) {
   return r.json()
 }
 
+// Nombre completo para tooltip — cubre los tickers más comunes, no hace falta que sea exhaustivo
+const ASSET_NAMES = {
+  // Acciones / CEDEARs — tech y grandes empresas
+  AAPL: 'Apple Inc.', MSFT: 'Microsoft Corp.', GOOGL: 'Alphabet Inc. (Google)', GOOG: 'Alphabet Inc. (Google)',
+  AMZN: 'Amazon.com Inc.', TSLA: 'Tesla Inc.', META: 'Meta Platforms Inc.', NVDA: 'NVIDIA Corp.',
+  NFLX: 'Netflix Inc.', ADBE: 'Adobe Inc.', CRM: 'Salesforce Inc.', ORCL: 'Oracle Corp.',
+  INTC: 'Intel Corp.', CSCO: 'Cisco Systems Inc.', IBM: 'IBM Corp.', AMD: 'Advanced Micro Devices',
+  PYPL: 'PayPal Holdings', UBER: 'Uber Technologies', ABNB: 'Airbnb Inc.', SHOP: 'Shopify Inc.',
+  // Consumo / retail / salud / financiero
+  KO: 'The Coca-Cola Company', PEP: 'PepsiCo Inc.', WMT: 'Walmart Inc.', MCD: "McDonald's Corp.",
+  SBUX: 'Starbucks Corp.', NKE: 'Nike Inc.', DIS: 'The Walt Disney Company', HD: 'The Home Depot',
+  JNJ: 'Johnson & Johnson', PG: 'Procter & Gamble', PFE: 'Pfizer Inc.', ABT: 'Abbott Laboratories',
+  MRK: 'Merck & Co.', JPM: 'JPMorgan Chase & Co.', BAC: 'Bank of America', V: 'Visa Inc.',
+  MA: 'Mastercard Inc.', XOM: 'Exxon Mobil Corp.', CVX: 'Chevron Corp.', T: 'AT&T Inc.', VZ: 'Verizon Communications',
+  // ETFs
+  SPY: 'SPDR S&P 500 ETF Trust', QQQ: 'Invesco QQQ Trust (Nasdaq 100)', DIA: 'SPDR Dow Jones Industrial Average ETF',
+  VOO: 'Vanguard S&P 500 ETF', VTI: 'Vanguard Total Stock Market ETF', ARKK: 'ARK Innovation ETF',
+  GLD: 'SPDR Gold Shares', SLV: 'iShares Silver Trust',
+  // ADRs argentinos / regionales
+  MELI: 'MercadoLibre Inc.', GGAL: 'Grupo Financiero Galicia', YPF: 'YPF S.A.', PAM: 'Pampa Energía',
+  BMA: 'Banco Macro', SUPV: 'Grupo Supervielle', CEPU: 'Central Puerto', TEO: 'Telecom Argentina',
+  // Crypto
+  BTC: 'Bitcoin', ETH: 'Ethereum', BNB: 'BNB (Binance Coin)', XRP: 'XRP (Ripple)', ADA: 'Cardano',
+  SOL: 'Solana', DOGE: 'Dogecoin', DOT: 'Polkadot', MATIC: 'Polygon', POL: 'Polygon',
+  LTC: 'Litecoin', LINK: 'Chainlink', UNI: 'Uniswap', ATOM: 'Cosmos', AVAX: 'Avalanche',
+  TRX: 'TRON', XLM: 'Stellar Lumens', NEAR: 'NEAR Protocol', APT: 'Aptos', SHIB: 'Shiba Inu',
+  BCH: 'Bitcoin Cash', TON: 'Toncoin', ETC: 'Ethereum Classic', FIL: 'Filecoin', ICP: 'Internet Computer',
+  ARB: 'Arbitrum', OP: 'Optimism', INJ: 'Injective', SUI: 'Sui', LINEA: 'Linea', ALGO: 'Algorand',
+  VET: 'VeChain',
+  // Stablecoins
+  USDT: 'Tether (dólar digital)', USDC: 'USD Coin (dólar digital)', DAI: 'Dai (dólar digital)',
+  BUSD: 'Binance USD (dólar digital)', FDUSD: 'First Digital USD (dólar digital)', TUSD: 'TrueUSD (dólar digital)',
+}
+function assetName(ticker) {
+  return ASSET_NAMES[(ticker || '').toUpperCase()] || null
+}
+
 const ACCOUNT_TYPES = [
   { value: 'bank',          label: 'Banco',         icon: '🏦' },
   { value: 'exchange',      label: 'Exchange',       icon: '₿'  },
@@ -294,7 +331,7 @@ function AccountForm({ initial, onSave, onClose }) {
         <button type="button" onClick={onClose}
           className="flex-1 border border-gray-200 rounded-lg py-2 text-sm text-gray-600 hover:bg-gray-50">Cancelar</button>
         <button type="submit"
-          className="flex-1 bg-amber-500 text-white rounded-lg py-2 text-sm font-medium hover:bg-amber-600">Guardar</button>
+          className="flex-1 bg-amber-500 text-white rounded-lg py-2 text-sm font-medium hover:bg-amber-600 shadow-sm hover:shadow-md transition-shadow">Guardar</button>
       </div>
     </form>
   )
@@ -463,7 +500,7 @@ function PositionForm({ accounts, initial, onSave, onClose }) {
         <button type="button" onClick={onClose}
           className="flex-1 border border-gray-200 rounded-lg py-2 text-sm text-gray-600 hover:bg-gray-50">Cancelar</button>
         <button type="submit"
-          className="flex-1 bg-amber-500 text-white rounded-lg py-2 text-sm font-medium hover:bg-amber-600">Guardar</button>
+          className="flex-1 bg-amber-500 text-white rounded-lg py-2 text-sm font-medium hover:bg-amber-600 shadow-sm hover:shadow-md transition-shadow">Guardar</button>
       </div>
     </form>
   )
@@ -578,7 +615,7 @@ function IngestPanel({ accounts, onDone }) {
 
       {text && (
         <button onClick={processText} disabled={loading}
-          className="w-full bg-amber-500 text-white rounded-lg py-2 text-sm font-medium hover:bg-amber-600 disabled:opacity-50">
+          className="w-full bg-amber-500 text-white rounded-lg py-2 text-sm font-medium hover:bg-amber-600 shadow-sm hover:shadow-md transition-shadow disabled:opacity-50">
           {loading ? 'Procesando...' : 'Analizar texto'}
         </button>
       )}
@@ -789,7 +826,7 @@ function DonutChart({ title, segments: rawSegments, totalUSD }) {
     : `$${Math.round(totalUSD)}`
 
   return (
-    <div className="bg-white rounded-2xl border border-gray-200 shadow-sm p-5">
+    <div className="bg-white rounded-2xl border border-gray-100 shadow-md shadow-gray-100/60 p-5">
       <div className="flex items-center justify-between mb-4">
         <h3 className="text-sm font-semibold text-gray-700">{title}</h3>
         <button
@@ -804,7 +841,7 @@ function DonutChart({ title, segments: rawSegments, totalUSD }) {
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
             <thead>
-              <tr className="text-[11px] text-gray-400 uppercase tracking-wide border-b border-gray-100">
+              <tr className="text-[11px] text-gray-500 uppercase tracking-wide border-b border-gray-100">
                 <th className="text-left pb-2 font-medium">Tipo</th>
                 <th className="text-right pb-2 font-medium">USD</th>
                 <th className="text-right pb-2 font-medium">%</th>
@@ -924,7 +961,7 @@ function PatrimonioTypeCard({ type, group, pct }) {
   const [open, setOpen] = useState(true)
   const groupTotal = group.reduce((s, p) => s + (p.valueUSD ?? 0), 0)
   return (
-    <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
+    <div className="bg-white rounded-xl border border-gray-100 shadow-md shadow-gray-100/60 overflow-hidden">
       <button onClick={() => setOpen(o => !o)}
         className="flex items-center justify-between w-full px-4 py-3 hover:bg-gray-50 transition-colors text-left">
         <div className="flex items-center gap-2">
@@ -949,7 +986,7 @@ function PatrimonioTypeCard({ type, group, pct }) {
             <div key={p.id} className="flex items-center gap-3 px-4 py-2.5">
               <div className="flex-1 min-w-0">
                 <div className="flex items-center gap-2 flex-wrap">
-                  <span className="font-semibold text-sm text-gray-800">{p.asset}</span>
+                  <span className="font-semibold text-sm text-gray-800" title={assetName(p.asset) || undefined}>{p.asset}</span>
                   {p.end_date && <span className="text-[10px] bg-amber-100 text-amber-700 rounded px-1.5 py-0.5">vence {p.end_date}</span>}
                   {p.rate && <span className="text-[10px] bg-green-100 text-green-700 rounded px-1.5 py-0.5">{p.asset_type === 'cedear' ? `ratio ${p.rate}` : `${p.rate}% anual`}</span>}
                 </div>
@@ -1158,7 +1195,7 @@ function PatrimonioTab({ positions, accounts = [], transactions = [], maximosUrl
             : 'Ya tenés cuentas creadas. Ahora agregá lo que tenés en cada una: plata, crypto, acciones, lo que sea.'}
         </div>
         <button onClick={() => onGetStarted?.(noAccounts ? 'add-account' : 'add-position')}
-          className="bg-amber-500 hover:bg-amber-600 text-white text-sm font-medium px-5 py-2.5 rounded-lg">
+          className="bg-amber-500 hover:bg-amber-600 shadow-sm hover:shadow-md transition-shadow text-white text-sm font-medium px-5 py-2.5 rounded-lg">
           {noAccounts ? '+ Agregar mi primera cuenta' : '+ Cargar lo que tengo'}
         </button>
         <button onClick={() => onGetStarted?.('help')}
@@ -1238,7 +1275,7 @@ function PatrimonioTab({ positions, accounts = [], transactions = [], maximosUrl
 
       {/* Promedio combinado — mismo activo en varias cuentas */}
       {multiAccountAssets.length > 0 && (
-        <div className="bg-white rounded-xl border border-gray-200 shadow-sm px-4 py-3">
+        <div className="bg-white rounded-xl border border-gray-100 shadow-md shadow-gray-100/60 px-4 py-3">
           <div className="flex items-baseline gap-1.5 mb-2">
             <span className="text-xs font-semibold text-gray-700 uppercase tracking-wide">Promedio combinado</span>
             <span className="text-[10px] text-gray-400">mismo activo en varias cuentas</span>
@@ -1284,16 +1321,16 @@ function PatrimonioTab({ positions, accounts = [], transactions = [], maximosUrl
       )}
 
       {/* Desglose por tipo de activo (tabla) */}
-      <div className="bg-white rounded-xl border border-gray-200 shadow-sm">
+      <div className="bg-white rounded-xl border border-gray-100 shadow-md shadow-gray-100/60">
           <table className="w-full text-sm min-w-[600px]">
             <thead className="sticky top-[41px] z-10">
               <tr className="border-b border-gray-200 bg-gray-50">
-                <th className="px-4 py-2.5 text-left text-xs font-medium text-gray-400 uppercase tracking-wide">Activo</th>
-                <th className="px-3 py-2.5 text-left text-xs font-medium text-gray-400 uppercase tracking-wide">Cuenta</th>
-                <th className="px-3 py-2.5 text-right text-xs font-medium text-gray-400 uppercase tracking-wide">Cantidad</th>
-                <th className="px-3 py-2.5 text-right text-xs font-medium text-gray-400 uppercase tracking-wide">Precio</th>
-                <th className="px-3 py-2.5 text-right text-xs font-medium text-gray-400 uppercase tracking-wide">Valor USD</th>
-                <th className="px-3 py-2.5 text-right text-xs font-medium text-gray-400 uppercase tracking-wide">P&L</th>
+                <th className="px-4 py-2.5 text-left text-xs font-medium text-gray-500 uppercase tracking-wide">Activo</th>
+                <th className="px-3 py-2.5 text-left text-xs font-medium text-gray-500 uppercase tracking-wide">Cuenta</th>
+                <th className="px-3 py-2.5 text-right text-xs font-medium text-gray-500 uppercase tracking-wide">Cantidad</th>
+                <th className="px-3 py-2.5 text-right text-xs font-medium text-gray-500 uppercase tracking-wide">Precio</th>
+                <th className="px-3 py-2.5 text-right text-xs font-medium text-gray-500 uppercase tracking-wide">Valor USD</th>
+                <th className="px-3 py-2.5 text-right text-xs font-medium text-gray-500 uppercase tracking-wide">P&L</th>
               </tr>
             </thead>
             {TYPE_ORDER.filter(t => byType[t]).map(type => {
@@ -1324,7 +1361,7 @@ function PatrimonioTab({ positions, accounts = [], transactions = [], maximosUrl
                     <tr key={p.id} className="border-t border-gray-200 hover:bg-amber-50/40 transition-colors">
                       <td className="px-4 py-2.5">
                         <div className="flex items-center gap-2 flex-wrap">
-                          <span className="font-semibold text-sm text-gray-800">{p.asset}</span>
+                          <span className="font-semibold text-sm text-gray-800" title={assetName(p.asset) || undefined}>{p.asset}</span>
                           {p.end_date && <span className="text-[10px] bg-amber-100 text-amber-700 rounded px-1.5 py-0.5">vence {p.end_date}</span>}
                           {p.rate && <span className="text-[10px] bg-green-100 text-green-700 rounded px-1.5 py-0.5">{p.asset_type === 'cedear' ? `ratio ${p.rate}` : `${p.rate}% anual`}</span>}
                         </div>
@@ -1406,13 +1443,26 @@ function TransactionForm({ initial, accounts, onSave, onClose }) {
     ? (fromAmt / toAmt).toLocaleString('es-AR', { maximumFractionDigits: 4 })
     : null
 
+  const isEditing = !!initial
+
   async function submit(e) {
     e.preventDefault()
     const base = { ...form, amount: parseFloat(form.amount), account_id: parseInt(form.account_id) }
     if (form.unit_price !== '' && showUnitPrice) base.unit_price = parseFloat(form.unit_price)
-    else delete base.unit_price
-    if (form.fee !== '' && form.fee_currency) { base.fee = parseFloat(form.fee); base.fee_currency = form.fee_currency.toUpperCase() }
-    else { delete base.fee; delete base.fee_currency }
+    else if (isEditing) base.unit_price = null      // editando: vaciar el campo lo borra de verdad
+    else delete base.unit_price                      // creando: si no se cargó, ni se manda
+
+    if (isSwap) {
+      if (form.fee !== '') base.fee = parseFloat(form.fee)
+      else delete base.fee
+      delete base.fee_currency  // se resuelve en saveTransaction (moneda entregada)
+    } else if (form.fee !== '' && form.fee_currency) {
+      base.fee = parseFloat(form.fee); base.fee_currency = form.fee_currency.toUpperCase()
+    } else if (isEditing) {
+      base.fee = null; base.fee_currency = null
+    } else {
+      delete base.fee; delete base.fee_currency
+    }
     if (!base.asset_type) delete base.asset_type
     delete base.to_asset_type
 
@@ -1440,6 +1490,11 @@ function TransactionForm({ initial, accounts, onSave, onClose }) {
 
   return (
     <form onSubmit={submit} className="space-y-5">
+      {initial?.source === 'swap' && (
+        <div className="bg-purple-50 border border-purple-200 rounded-lg px-3 py-2 text-xs text-purple-700 leading-snug">
+          ↔ Esto es <b>una mitad de un swap</b> — la otra mitad (el activo que recibiste) es un movimiento aparte en Movimientos, con la misma descripción y fecha. Si corregís la comisión, hacelo acá, en la mitad que <b>entrega</b> el activo — es donde queda guardada siempre.
+        </div>
+      )}
       <FormSection title="Cuándo y qué tipo de movimiento">
         <div className="grid grid-cols-2 gap-3">
           <div>
@@ -1532,6 +1587,16 @@ function TransactionForm({ initial, accounts, onSave, onClose }) {
                 {accounts.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
               </select>
             </div>
+            <div>
+              <label className="text-xs font-medium text-gray-500 uppercase tracking-wide">
+                Comisión del swap <span className="text-gray-400 normal-case font-normal">(opcional, en {form.currency.toUpperCase() || 'la moneda entregada'})</span>
+              </label>
+              <input type="number" step="any" min="0" value={form.fee} onChange={set('fee')}
+                className={inputCls} placeholder="0.001" />
+              <p className="mt-1 text-[11px] text-gray-400 leading-snug">
+                Se descuenta de lo entregado — no hace falta elegir en qué mitad va, la app lo resuelve sola.
+              </p>
+            </div>
             {impliedRate && (
               <p className="text-[11px] text-gray-400 text-center">
                 Tipo de cambio implícito: 1 {form.to_asset.toUpperCase() || '?'} = {impliedRate} {form.currency.toUpperCase() || '?'}
@@ -1596,7 +1661,7 @@ function TransactionForm({ initial, accounts, onSave, onClose }) {
           Cancelar
         </button>
         <button type="submit"
-          className="flex-1 py-2 rounded-lg bg-amber-500 hover:bg-amber-600 text-white text-sm font-medium">
+          className="flex-1 py-2 rounded-lg bg-amber-500 hover:bg-amber-600 shadow-sm hover:shadow-md transition-shadow text-white text-sm font-medium">
           Guardar
         </button>
       </div>
@@ -1650,7 +1715,7 @@ function PositionRow({ p, blueRate, onEdit, onDelete }) {
       {/* Activo */}
       <td className="px-4 py-2.5">
         <div className="flex items-center gap-1.5 flex-wrap">
-          <span className="font-semibold text-gray-800 text-sm">{p.asset}</span>
+          <span className="font-semibold text-gray-800 text-sm" title={assetName(p.asset) || undefined}>{p.asset}</span>
           <span title={assetTypeHint(p.asset_type)} className="text-[10px] bg-gray-100 text-gray-500 rounded px-1.5 py-0.5 leading-4 cursor-help">{assetTypeLabel(p.asset_type)}</span>
           {p.end_date && <span className="text-[10px] bg-amber-100 text-amber-700 rounded px-1.5 py-0.5 leading-4">vence {p.end_date}</span>}
         </div>
@@ -1763,15 +1828,15 @@ function PortfolioTab({ accounts, positions, onAddPosition, onEditPosition, onDe
         <button onClick={onAddPosition} className="text-xs text-amber-600 hover:underline font-medium">+ Agregar</button>
       </div>
 
-      <div className="bg-white rounded-xl border border-gray-200 shadow-sm">
+      <div className="bg-white rounded-xl border border-gray-100 shadow-md shadow-gray-100/60">
           <table className="w-full text-sm min-w-[600px]">
             <thead className="sticky top-[41px] z-10">
               <tr className="border-b border-gray-200 bg-gray-50">
-                <th className="px-4 py-2.5 text-left text-xs font-medium text-gray-400 uppercase tracking-wide">Activo</th>
-                <th className="px-3 py-2.5 text-right text-xs font-medium text-gray-400 uppercase tracking-wide">Cantidad</th>
+                <th className="px-4 py-2.5 text-left text-xs font-medium text-gray-500 uppercase tracking-wide">Activo</th>
+                <th className="px-3 py-2.5 text-right text-xs font-medium text-gray-500 uppercase tracking-wide">Cantidad</th>
                 <Th label="Valor" field="value" />
-                <th className="px-3 py-2.5 text-right text-xs font-medium text-gray-400 uppercase tracking-wide">Prom.</th>
-                <th className="px-3 py-2.5 text-right text-xs font-medium text-gray-400 uppercase tracking-wide">Tasa</th>
+                <th className="px-3 py-2.5 text-right text-xs font-medium text-gray-500 uppercase tracking-wide">Prom.</th>
+                <th className="px-3 py-2.5 text-right text-xs font-medium text-gray-500 uppercase tracking-wide">Tasa</th>
                 <Th label="P&L" field="pnl" />
                 <th className="w-16" />
               </tr>
@@ -1865,10 +1930,157 @@ function Chat({ messages, setMessages }) {
           placeholder="Preguntame sobre tus finanzas..."
           className="flex-1 border border-gray-200 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-amber-400" />
         <button onClick={send} disabled={loading || !input.trim()}
-          className="bg-amber-500 text-white rounded-xl px-4 py-2.5 text-sm font-medium hover:bg-amber-600 disabled:opacity-40">
+          className="bg-amber-500 text-white rounded-xl px-4 py-2.5 text-sm font-medium hover:bg-amber-600 shadow-sm hover:shadow-md transition-shadow disabled:opacity-40">
           Enviar
         </button>
       </div>
+    </div>
+  )
+}
+
+// ── WeeklyReportPanel — análisis de cartera on-demand, separado del chat ───────
+function fmtReportDate(iso) {
+  try {
+    return new Date(iso.replace(' ', 'T') + 'Z').toLocaleString('es-AR', {
+      day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit',
+    })
+  } catch { return iso }
+}
+
+function renderReportText(text) {
+  return text.split('\n').map((line, i) => {
+    if (line.startsWith('## ')) {
+      return <div key={i} className="text-sm font-bold text-gray-800 mt-4 first:mt-0 mb-2">{line.slice(3)}</div>
+    }
+    if (!line.trim()) return <div key={i} className="h-1.5" />
+    const parts = line.split(/(\*\*[^*]+\*\*)/g).map((p, j) =>
+      p.startsWith('**') && p.endsWith('**')
+        ? <b key={j} className="text-gray-800">{p.slice(2, -2)}</b>
+        : <span key={j}>{p}</span>
+    )
+    return <p key={i} className="text-sm text-gray-600 leading-relaxed mb-1.5">{parts}</p>
+  })
+}
+
+function WeeklyReportPanel() {
+  const [reports, setReports] = useState([])
+  const [loading, setLoading] = useState(false)
+  const [showHistory, setShowHistory] = useState(false)
+
+  const loadReports = useCallback(async () => {
+    try { setReports(await api('/api/agent/weekly-report') || []) } catch (_) {}
+  }, [])
+
+  useEffect(() => { loadReports() }, [loadReports])
+
+  async function generate() {
+    setLoading(true)
+    try {
+      const report = await api('/api/agent/weekly-report', { method: 'POST' })
+      setReports(r => [report, ...r])
+    } catch (e) {
+      showError(e, 'No pudimos generar el análisis. Probá de nuevo.')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  async function deleteReport(id) {
+    try {
+      await api(`/api/agent/weekly-report/${id}`, { method: 'DELETE' })
+      setReports(r => r.filter(x => x.id !== id))
+    } catch (e) {
+      showError(e, 'No pudimos borrar el análisis. Probá de nuevo.')
+    }
+  }
+
+  const latest = reports[0]
+  const daysSince = latest
+    ? Math.floor((Date.now() - new Date(latest.created_at.replace(' ', 'T') + 'Z').getTime()) / 86400000)
+    : null
+
+  return (
+    <div className="max-w-6xl mx-auto space-y-3">
+      <div className="bg-white rounded-xl border border-gray-100 shadow-md shadow-gray-100/60 p-4">
+        <div className="flex items-center justify-between mb-1">
+          <div className="text-sm font-semibold text-gray-700">📊 Análisis semanal de cartera</div>
+          {latest && (
+            <span className="text-[11px] text-gray-400">
+              {daysSince <= 0 ? 'último: hoy' : `último: hace ${daysSince} día${daysSince === 1 ? '' : 's'}`}
+            </span>
+          )}
+        </div>
+        <p className="text-xs text-gray-400 mb-3 leading-snug">
+          Análisis completo con precios y técnico actualizados — veredicto por posición y qué mirar esta semana. No es una charla, es un reporte con estructura fija. Lo generás vos cuando querés, no corre solo. Queda guardado hasta que lo borres — no hay un límite de tiempo, se ve historial completo.
+        </p>
+        <button onClick={generate} disabled={loading}
+          className="w-full bg-amber-500 hover:bg-amber-600 shadow-sm hover:shadow-md transition-shadow disabled:opacity-50 text-white text-sm font-medium py-2.5 rounded-lg">
+          {loading ? 'Analizando cartera y mercado...' : latest ? 'Generar análisis nuevo' : 'Generar mi primer análisis'}
+        </button>
+      </div>
+
+      {latest && (
+        <div className="bg-white rounded-xl border border-gray-100 shadow-md shadow-gray-100/60 p-5">
+          <div className="flex items-center justify-between mb-3">
+            <div className="text-[10px] text-gray-500 uppercase tracking-wide">{fmtReportDate(latest.created_at)}</div>
+            <button onClick={() => deleteReport(latest.id)}
+              className="text-[11px] text-gray-300 hover:text-red-500 transition-colors">🗑 Borrar</button>
+          </div>
+          {renderReportText(latest.content)}
+        </div>
+      )}
+
+      {reports.length > 1 && (
+        <div className="bg-white rounded-xl border border-gray-100 shadow-md shadow-gray-100/60">
+          <button onClick={() => setShowHistory(s => !s)}
+            className="w-full px-4 py-2.5 text-xs text-gray-500 hover:text-amber-600 flex items-center justify-between">
+            <span>Análisis anteriores ({reports.length - 1})</span>
+            <span>{showHistory ? '▲' : '▼'}</span>
+          </button>
+          {showHistory && (
+            <div className="divide-y divide-gray-100">
+              {reports.slice(1).map(r => (
+                <div key={r.id} className="px-4 py-3">
+                  <div className="flex items-center justify-between">
+                    <details className="flex-1">
+                      <summary className="text-xs text-gray-500 cursor-pointer">{fmtReportDate(r.created_at)}</summary>
+                      <div className="mt-2">{renderReportText(r.content)}</div>
+                    </details>
+                    <button onClick={() => deleteReport(r.id)}
+                      className="text-[11px] text-gray-300 hover:text-red-500 transition-colors shrink-0 ml-2">🗑</button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ── AgenteTab — selector entre Chat y Análisis semanal ─────────────────────────
+function AgenteTab({ chatMessages, setChatMessages }) {
+  const [view, setView] = useState('chat')
+  return (
+    <div className="max-w-6xl mx-auto space-y-3">
+      <div className="flex gap-1 bg-gray-100 rounded-lg p-1 w-fit mx-auto">
+        <button onClick={() => setView('chat')}
+          className={`px-4 py-1.5 rounded-md text-xs font-medium transition-colors ${view === 'chat' ? 'bg-white text-amber-600 shadow-sm' : 'text-gray-500'}`}>
+          💬 Chat
+        </button>
+        <button onClick={() => setView('report')}
+          className={`px-4 py-1.5 rounded-md text-xs font-medium transition-colors ${view === 'report' ? 'bg-white text-amber-600 shadow-sm' : 'text-gray-500'}`}>
+          📊 Análisis semanal
+        </button>
+      </div>
+      {view === 'chat' ? (
+        <div className="h-[calc(100vh-260px)] max-w-3xl mx-auto bg-white rounded-xl border border-gray-100 shadow-md shadow-gray-100/60 flex flex-col overflow-hidden">
+          <Chat messages={chatMessages} setMessages={setChatMessages} />
+        </div>
+      ) : (
+        <WeeklyReportPanel />
+      )}
     </div>
   )
 }
@@ -1955,7 +2167,7 @@ function MovimientosTab({ transactions, accounts, onEdit, onDelete, onNewManual,
           <button onClick={resetFilters} className="mt-2 text-amber-500 hover:underline text-xs">Limpiar filtros</button>
         </div>
       ) : (
-        <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
+        <div className="bg-white rounded-xl border border-gray-100 shadow-md shadow-gray-100/60 overflow-hidden">
           {(filtered.length < transactions.length) && (
             <div className="px-4 py-2 bg-amber-50 border-b border-amber-100 text-xs text-amber-700">
               Mostrando {Math.min(visible.length, filtered.length)} de {filtered.length} movimientos filtrados (total: {transactions.length})
@@ -1970,7 +2182,7 @@ function MovimientosTab({ transactions, accounts, onEdit, onDelete, onNewManual,
                     ...(showPnlCol ? ['P&L realizado'] : []),
                     ...(showFeeCol ? ['Comisión'] : []),
                     ''].map(h => (
-                    <th key={h} className={`px-3 py-2 text-[10px] font-semibold text-gray-400 uppercase tracking-wide whitespace-nowrap ${h === '' || h === 'Monto' || h === 'Precio unit.' || h === 'P&L realizado' || h === 'Comisión' ? 'text-right' : 'text-left'}`}>{h}</th>
+                    <th key={h} className={`px-3 py-2 text-[10px] font-semibold text-gray-500 uppercase tracking-wide whitespace-nowrap ${h === '' || h === 'Monto' || h === 'Precio unit.' || h === 'P&L realizado' || h === 'Comisión' ? 'text-right' : 'text-left'}`}>{h}</th>
                   ))}
                 </tr>
               </thead>
@@ -1996,7 +2208,7 @@ function MovimientosTab({ transactions, accounts, onEdit, onDelete, onNewManual,
                         {t.source === 'swap' ? 'Swap ↔' : t.source === 'transfer' ? 'Transfer.' : t.type === 'income' ? 'Ingreso' : t.type === 'buy' ? 'Compra' : t.type === 'transfer' ? 'Transfer.' : t.type === 'sell' ? 'Venta' : 'Gasto'}
                       </span>
                     </td>
-                    <td className={`px-3 py-2.5 text-right tabular-nums font-semibold whitespace-nowrap ${
+                    <td title={assetName(t.currency) || undefined} className={`px-3 py-2.5 text-right tabular-nums font-semibold whitespace-nowrap ${
                       t.source === 'swap' ? 'text-purple-600' : t.source === 'transfer' ? 'text-blue-500' : t.type === 'income' || t.type === 'buy' ? 'text-green-600' : t.type === 'transfer' ? 'text-blue-500' : t.type === 'sell' ? 'text-amber-600' : 'text-red-600'
                     }`}>
                       {t.source === 'swap' || t.source === 'transfer' ? '↔' : t.type === 'income' || t.type === 'buy' ? '+' : t.type === 'transfer' ? '↔' : '-'}{fmtAmount(t.amount)} {t.currency}
@@ -2177,7 +2389,13 @@ export default function App() {
         } else if (!fromIsStable && toIsStable && rest.amount > 0) {
           fromUnitPrice = _swap_to.amount / rest.amount
         }
-        await api('/api/transactions', { method: 'POST', body: JSON.stringify({ ...rest, type: fromType, source: 'swap', unit_price: fromUnitPrice }) })
+        // La comisión del swap se carga en la moneda entregada, en la pata "from" —
+        // así no hay que elegir en cuál mitad va
+        const swapFee = rest.fee ? parseFloat(rest.fee) : undefined
+        await api('/api/transactions', { method: 'POST', body: JSON.stringify({
+          ...rest, type: fromType, source: 'swap', unit_price: fromUnitPrice,
+          fee: swapFee, fee_currency: swapFee ? fromAsset : undefined,
+        }) })
         await api('/api/transactions', { method: 'POST', body: JSON.stringify({
           account_id: _swap_to.account_id, date: rest.date, description: rest.description,
           amount: _swap_to.amount, currency: _swap_to.asset, type: 'buy', source: 'swap', unit_price: toUnitPrice,
@@ -2228,7 +2446,7 @@ export default function App() {
             ? Ayuda
           </button>
           <button onClick={() => { setModal('ingest'); setEditTarget(null) }}
-            className="bg-amber-500 hover:bg-amber-600 text-white text-xs font-medium px-3 py-1.5 rounded-lg">
+            className="bg-amber-500 hover:bg-amber-600 shadow-sm hover:shadow-md transition-shadow text-white text-xs font-medium px-3 py-1.5 rounded-lg">
             + Cargar movimientos
           </button>
         </div>
@@ -2289,9 +2507,7 @@ export default function App() {
 
         {/* AGENTE */}
         {tab === 'agente' && (
-          <div className="max-w-2xl mx-auto h-[calc(100vh-200px)] bg-white rounded-xl border border-gray-200 shadow-sm flex flex-col overflow-hidden">
-            <Chat messages={chatMessages} setMessages={setChatMessages} />
-          </div>
+          <AgenteTab chatMessages={chatMessages} setChatMessages={setChatMessages} />
         )}
 
         {/* CUENTAS */}
@@ -2312,7 +2528,7 @@ export default function App() {
             ) : (
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
                 {accounts.map(acc => (
-                  <div key={acc.id} className={`bg-white rounded-xl border border-gray-200 shadow-sm flex flex-col gap-3 p-4 ${!acc.active ? 'opacity-50' : ''}`}
+                  <div key={acc.id} className={`bg-white rounded-xl border border-gray-100 shadow-md shadow-gray-100/60 flex flex-col gap-3 p-4 ${!acc.active ? 'opacity-50' : ''}`}
                     style={{ borderTop: `3px solid ${acc.color}` }}>
                     <div className="flex items-center gap-3">
                       <span className="text-2xl">{typeIcon(acc.type)}</span>
