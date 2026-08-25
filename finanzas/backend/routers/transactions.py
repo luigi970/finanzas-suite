@@ -277,6 +277,21 @@ def update_transaction(transaction_id: int, data: TransactionUpdate):
         _sync_position(conn, account_id, asset)
         conn.commit()
 
+    # Si se tocó type/unit_price/amount/currency, el realized_pnl guardado puede haber
+    # quedado stale (ej. una venta editada a compra sigue teniendo P&L realizado de una
+    # venta que ya no existe). Se recalcula (o se borra si ya no aplica) con el avg_price
+    # posterior al resync — nunca se toca en ediciones que no cambian estos campos, para no
+    # sobreescribir un P&L histórico ya fijado con el avg_price de hoy.
+    if {"type", "unit_price", "amount", "currency"} & fields.keys():
+        eff_type       = fields.get("type", tx.get("type"))
+        eff_unit_price = fields.get("unit_price", tx.get("unit_price"))
+        eff_amount     = fields.get("amount", tx.get("amount"))
+        new_realized_pnl = None
+        if eff_type in ("expense", "sell") and eff_unit_price:
+            new_realized_pnl = _calc_realized_pnl(conn, account_id, asset, eff_unit_price, eff_amount)
+        conn.execute("UPDATE transactions SET realized_pnl = ? WHERE id = ?", (new_realized_pnl, transaction_id))
+        conn.commit()
+
     row = conn.execute("SELECT * FROM transactions WHERE id = ?", (transaction_id,)).fetchone()
     conn.close()
     return dict(row)

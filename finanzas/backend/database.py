@@ -25,7 +25,7 @@ def init_db():
             id           INTEGER PRIMARY KEY AUTOINCREMENT,
             account_id   INTEGER NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
             asset        TEXT NOT NULL,       -- ARS, USD, BTC, AAPL, YPF, USDT, etc.
-            asset_type   TEXT NOT NULL,       -- fiat | crypto | stablecoin | stock | cedear | fixed_term | fund
+            asset_type   TEXT NOT NULL,       -- fiat | crypto | stablecoin | stock | cedear | cedear_usd | fixed_term | fund | flexible
             quantity     REAL NOT NULL DEFAULT 0,
             -- Solo para fixed_term / fund:
             start_date   TEXT,
@@ -61,6 +61,11 @@ def init_db():
             id           INTEGER PRIMARY KEY AUTOINCREMENT,
             created_at   TEXT DEFAULT (datetime('now')),
             content      TEXT NOT NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS app_settings (
+            key   TEXT PRIMARY KEY,
+            value TEXT
         );
     """)
     conn.commit()

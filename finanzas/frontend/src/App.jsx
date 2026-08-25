@@ -85,7 +85,8 @@ const ASSET_TYPES = [
   { value: 'stablecoin', label: 'Stablecoin', hint: 'Cripto que vale siempre ~1 dólar (USDT, USDC). Es la versión digital del dólar dentro de un exchange.' },
   { value: 'crypto',     label: 'Crypto',     hint: 'Bitcoin, Ethereum y demás — su precio sube y baja con el mercado.' },
   { value: 'stock',      label: 'Acción',     hint: 'Una parte de una empresa que cotiza en bolsa (ej. Apple, YPF).' },
-  { value: 'cedear',     label: 'CEDEAR',     hint: 'Un certificado que cotiza en pesos en Argentina y representa una acción extranjera.' },
+  { value: 'cedear',     label: 'CEDEAR (ARS)', hint: 'Un certificado que cotiza en pesos en Argentina y representa una acción extranjera.' },
+  { value: 'cedear_usd', label: 'CEDEAR (USD)', hint: 'Un CEDEAR del segmento en dólares (ticker con sufijo D en tu broker) — se compra y cotiza directo en USD, sin pasar por el tipo de cambio.' },
   { value: 'fixed_term', label: 'Plazo fijo', hint: 'Depositás plata a un banco por un tiempo fijo y te devuelve más al vencer.' },
   { value: 'fund',       label: 'Fondo de inversión', hint: 'Tu plata la administra un tercero, junto con la de otros inversores.' },
   { value: 'flexible',   label: 'Rendimiento flexible', hint: 'Genera interés todo el tiempo y podés sacarlo cuando quieras (ej. staking, cuenta remunerada).' },
@@ -368,6 +369,8 @@ function PositionForm({ accounts, initial, onSave, onClose }) {
   const hasTerm      = ['fixed_term', 'fund', 'flexible'].includes(form.asset_type)
   const isFlexible   = form.asset_type === 'flexible'
   const isCedear     = form.asset_type === 'cedear'
+  const isCedearUsd  = form.asset_type === 'cedear_usd'
+  const isAnyCedear  = isCedear || isCedearUsd
   const isStablecoin = form.asset_type === 'stablecoin'
   const avgPriceNum  = parseFloat(form.avg_price)
   const stablecoinPriceWarning = isStablecoin && form.avg_price !== '' &&
@@ -419,7 +422,7 @@ function PositionForm({ accounts, initial, onSave, onClose }) {
         </div>
       </FormSection>
 
-      {(!['fiat', 'fixed_term'].includes(form.asset_type) || isCedear) && (
+      {(!['fiat', 'fixed_term'].includes(form.asset_type) || isAnyCedear) && (
         <FormSection title="Precio de compra" subtitle="Opcional — para calcular ganancia/pérdida">
           {!['fiat', 'fixed_term'].includes(form.asset_type) && (
             <div>
@@ -429,12 +432,14 @@ function PositionForm({ accounts, initial, onSave, onClose }) {
                   {isCedear ? 'ARS' : 'USD'}
                 </span>
                 <input type="number" step="any" min="0" value={form.avg_price} onChange={set('avg_price')}
-                  placeholder={isCedear ? 'ej: 14600 (precio pagado en ARS por CEDEAR)' : 'ej: 95000 para BTC comprado a USD 95k'}
+                  placeholder={isCedear ? 'ej: 14600 (precio pagado en ARS por CEDEAR)' : isCedearUsd ? 'ej: 11.5 (precio pagado en USD por CEDEAR, segmento D)' : 'ej: 95000 para BTC comprado a USD 95k'}
                   className="w-full px-3 py-2 text-sm focus:outline-none" />
               </div>
               <p className="mt-1 text-[11px] text-gray-400 leading-snug">
                 {isCedear
                   ? 'El precio de CEDEARs siempre va en pesos argentinos (lo que pagaste en tu broker).'
+                  : isCedearUsd
+                  ? 'Este CEDEAR cotiza en el segmento en dólares (ticker con sufijo D) — el precio va directo en USD, sin convertir.'
                   : 'El precio de todo lo demás (crypto, acciones) siempre va en dólares — no en pesos.'}
                 {' '}Cargalo una sola vez, las compras futuras con precio lo actualizan solo.
               </p>
@@ -445,7 +450,7 @@ function PositionForm({ accounts, initial, onSave, onClose }) {
               )}
             </div>
           )}
-          {isCedear && (
+          {isAnyCedear && (
             <div>
               <label className="text-xs font-medium text-gray-500 uppercase tracking-wide">
                 Ratio <span className="text-gray-400 font-normal normal-case">(cuántos CEDEARs = 1 acción subyacente)</span>
@@ -716,7 +721,7 @@ const FIAT_USD    = new Set(['USD'])
 const FIAT_ARS    = new Set(['ARS'])
 
 function toYahooTicker(asset, assetType) {
-  if (assetType === 'crypto' || (!STABLECOINS.has(asset) && !FIAT_USD.has(asset) && !FIAT_ARS.has(asset) && assetType !== 'stock' && assetType !== 'cedear' && assetType !== 'fixed_term' && assetType !== 'fund')) {
+  if (assetType === 'crypto' || (!STABLECOINS.has(asset) && !FIAT_USD.has(asset) && !FIAT_ARS.has(asset) && assetType !== 'stock' && assetType !== 'cedear' && assetType !== 'cedear_usd' && assetType !== 'fixed_term' && assetType !== 'fund')) {
     return `${asset}-USD`
   }
   return asset
@@ -724,22 +729,25 @@ function toYahooTicker(asset, assetType) {
 
 const TYPE_LABELS = {
   fiat: 'Fiat', stablecoin: 'Stablecoins', crypto: 'Crypto',
-  stock: 'Acciones', cedear: 'CEDEARs', fixed_term: 'Plazos fijos', fund: 'Fondos', flexible: 'Rend. flexible',
+  stock: 'Acciones', cedear: 'CEDEARs (ARS)', cedear_usd: 'CEDEARs (USD)', fixed_term: 'Plazos fijos', fund: 'Fondos', flexible: 'Rend. flexible',
 }
-const TYPE_ORDER = ['fiat','stablecoin','crypto','stock','cedear','fixed_term','fund','flexible']
+const TYPE_ORDER = ['fiat','stablecoin','crypto','stock','cedear','cedear_usd','fixed_term','fund','flexible']
 const TYPE_COLORS = {
   fiat: 'bg-blue-100 text-blue-700', stablecoin: 'bg-green-100 text-green-700',
   crypto: 'bg-orange-100 text-orange-700', stock: 'bg-purple-100 text-purple-700',
-  cedear: 'bg-pink-100 text-pink-700', fixed_term: 'bg-amber-100 text-amber-700',
+  cedear: 'bg-pink-100 text-pink-700', cedear_usd: 'bg-pink-100 text-pink-700', fixed_term: 'bg-amber-100 text-amber-700',
   fund: 'bg-teal-100 text-teal-700', flexible: 'bg-lime-100 text-lime-700',
 }
 // Paleta categórica validada — orden fijo CVD-safe (ΔE adyacente ≥24.2 en deuteranopia)
+// cedear_usd comparte color con cedear en el donut: misma clase de activo (exposición
+// a acciones vía CEDEAR), no amerita un 9no hue propio en un gráfico ya con 8 slots.
 const DONUT_COLORS = {
   fiat:       '#2a78d6',
   stablecoin: '#1baf7a',
   crypto:     '#eda100',
   stock:      '#008300',
   cedear:     '#4a3aa7',
+  cedear_usd: '#4a3aa7',
   fixed_term: '#e34948',
   fund:       '#e87ba4',
   flexible:   '#eb6834',
@@ -988,7 +996,7 @@ function PatrimonioTypeCard({ type, group, pct }) {
                 <div className="flex items-center gap-2 flex-wrap">
                   <span className="font-semibold text-sm text-gray-800" title={assetName(p.asset) || undefined}>{p.asset}</span>
                   {p.end_date && <span className="text-[10px] bg-amber-100 text-amber-700 rounded px-1.5 py-0.5">vence {p.end_date}</span>}
-                  {p.rate && <span className="text-[10px] bg-green-100 text-green-700 rounded px-1.5 py-0.5">{p.asset_type === 'cedear' ? `ratio ${p.rate}` : `${p.rate}% anual`}</span>}
+                  {p.rate && <span className="text-[10px] bg-green-100 text-green-700 rounded px-1.5 py-0.5">{(p.asset_type === 'cedear' || p.asset_type === 'cedear_usd') ? `ratio ${p.rate}` : `${p.rate}% anual`}</span>}
                 </div>
                 <div className="text-xs text-gray-400">{p.account_name} · {fmtAmount(p.quantity)} {p.asset}</div>
                 {p.accrued != null && (
@@ -1029,21 +1037,21 @@ function PatrimonioTypeCard({ type, group, pct }) {
   )
 }
 
-function PatrimonioTab({ positions, accounts = [], transactions = [], maximosUrl = MAXIMOS_ONLINE, prices = {}, blueRate = null, onRefreshPrices, onGetStarted }) {
+function PatrimonioTab({ positions, accounts = [], transactions = [], maximosUrl = MAXIMOS_ONLINE, prices = {}, cclRate = null, onRefreshPrices, onGetStarted }) {
   const [loading,  setLoading]  = useState(true)
   const [error,    setError]    = useState(null)
   const MAXIMOS_API = maximosUrl
 
   useEffect(() => {
-    if (blueRate || Object.keys(prices).length > 0) {
+    if (cclRate || Object.keys(prices).length > 0) {
       setLoading(false)
       setError(null)
     }
-  }, [prices, blueRate])
+  }, [prices, cclRate])
 
   useEffect(() => {
     const t = setTimeout(() => {
-      if (!blueRate && Object.keys(prices).length === 0) {
+      if (!cclRate && Object.keys(prices).length === 0) {
         setLoading(false)
         setError(`No se pudo conectar con maximos (${MAXIMOS_API}). Verificá tu conexión o que el servidor esté corriendo.`)
       }
@@ -1053,17 +1061,17 @@ function PatrimonioTab({ positions, accounts = [], transactions = [], maximosUrl
 
   function getPriceUSD(pos) {
     if (FIAT_USD.has(pos.asset) || STABLECOINS.has(pos.asset)) return 1
-    if (FIAT_ARS.has(pos.asset)) return blueRate ? 1 / blueRate : null
+    if (FIAT_ARS.has(pos.asset)) return cclRate ? 1 / cclRate : null
     if (pos.asset_type === 'fixed_term' || pos.asset_type === 'fund') return null
     const ticker = toYahooTicker(pos.asset, pos.asset_type)
     const rawPrice = prices[ticker]?.price ?? null
     if (rawPrice == null) return null
-    if (pos.asset_type === 'cedear' && pos.rate > 0) return rawPrice / pos.rate
+    if ((pos.asset_type === 'cedear' || pos.asset_type === 'cedear_usd') && pos.rate > 0) return rawPrice / pos.rate
     return rawPrice
   }
 
-  // Calcular valores (incluyendo interés devengado para plazos fijos / staking)
-  const enriched = positions.map(p => {
+  // Calcular precio/valor de mercado (no depende del costo, así que va en una pasada aparte)
+  const withValue = positions.map(p => {
     const accrued  = calcAccruedInterest(p)  // en moneda nativa
     let priceUSD   = getPriceUSD(p)
     let valueUSD   = null
@@ -1076,24 +1084,95 @@ function PatrimonioTab({ positions, accounts = [], transactions = [], maximosUrl
       // Plazo fijo / staking sin precio de mercado → valuamos por moneda
       const total = accrued != null ? p.quantity + accrued : p.quantity
       if (FIAT_USD.has(p.asset) || STABLECOINS.has(p.asset)) { valueUSD = total; priceUSD = 1 }
-      else if (FIAT_ARS.has(p.asset) && blueRate)            { valueUSD = total / blueRate; priceUSD = 1 / blueRate }
+      else if (FIAT_ARS.has(p.asset) && cclRate)            { valueUSD = total / cclRate; priceUSD = 1 / cclRate }
+    }
+    return { ...p, priceUSD, valueUSD, accrued }
+  })
+
+  // Agrupar por activo (cruzando cuentas) — promedio combinado cuando el mismo
+  // activo está repartido entre varias wallets/exchanges/bancos
+  const byAsset = {}
+  for (const p of withValue) {
+    // Fiat queda afuera (no tiene sentido "promediar" pesos/dólares entre cuentas). Las
+    // stablecoins SÍ se muestran acá (para ver cuánto USDT tenés repartido entre wallets en
+    // total) pero sin precio promedio ni P&L — valen ~1:1 siempre, así que esos dos campos
+    // no significan nada y un avg_price viejo/erróneo no debe generar un P&L fantasma.
+    if (FIAT_ARS.has(p.asset) || FIAT_USD.has(p.asset)) continue
+    if (!byAsset[p.asset]) byAsset[p.asset] = []
+    byAsset[p.asset].push(p)
+  }
+  const multiAccountAssets = Object.entries(byAsset).filter(([, list]) => list.length > 1)
+
+  // Precio promedio REAL por activo multi-cuenta — el avg_price guardado por posición, cuando
+  // cripto se transfiere entre cuentas propias, "hereda" el costo de la cuenta origen (para que
+  // esa cuenta sola tenga un costo real en su propia ficha). Pero eso significa que ni la ficha
+  // individual de esa cuenta ni una suma entre cuentas reflejan el costo real — hay que ignorar
+  // el avg_price guardado para CUALQUIER posición de un activo multi-cuenta, y usar en su lugar
+  // el promedio ponderado de las compras REALES de todas las cuentas (excluyendo transferencias).
+  //
+  // Esto asume que cada compra quedó cargada como transacción — pero no siempre es así (a veces
+  // se corrige la posición directo en Portfolio, sin movimiento de respaldo). Para una cuenta sin
+  // NINGUNA compra propia con precio, no hay pool que armar ahí — se usa su avg_price guardado
+  // (manual o lo que sea) en vez de excluirla, que subestimaría el costo real de esa porción.
+  const consolidatedPnl = {}
+  for (const [asset, list] of multiAccountAssets) {
+    const totalValueUSD = list.some(p => p.valueUSD != null)
+      ? list.reduce((s, p) => s + (p.valueUSD ?? 0), 0) : null
+
+    if (STABLECOINS.has(asset)) {
+      // Sin precio promedio ni P&L — solo cantidad total y valor, vale ~1:1 siempre.
+      const totalQty = list.reduce((s, p) => s + p.quantity + (p.accrued ?? 0), 0)
+      consolidatedPnl[asset] = { totalQty, totalValueUSD, avgPrice: null, totalPnL: null, pnlPct: null }
+      continue
     }
 
+    const isCedear = list[0]?.asset_type === 'cedear'
+    const accountIds = new Set(list.map(p => p.account_id))
+    const buys = transactions.filter(t =>
+      t.currency === asset && t.source !== 'transfer' && accountIds.has(t.account_id) &&
+      ['income', 'buy'].includes(t.type) && t.unit_price)
+    const buyAccountIds = new Set(buys.map(t => t.account_id))
+    const totalCostNative = buys.reduce((s, t) => s + t.amount * t.unit_price, 0)
+    const totalQtyBought = buys.reduce((s, t) => s + t.amount, 0)
+    let globalAvg = totalQtyBought > 0 ? totalCostNative / totalQtyBought : null
+    if (globalAvg != null && isCedear && cclRate) globalAvg = globalAvg / cclRate  // ARS por CEDEAR → USD
+
+    let totalCost = 0, totalQty = 0
+    for (const p of list) {
+      const qty = p.quantity + (p.accrued ?? 0)
+      if (buyAccountIds.has(p.account_id) && globalAvg != null) {
+        totalCost += globalAvg * qty
+        totalQty += qty
+      } else if (p.avg_price) {
+        const legAvg = (isCedear && cclRate) ? p.avg_price / cclRate : p.avg_price
+        totalCost += legAvg * qty
+        totalQty += qty
+      }
+    }
+    const avgPrice = totalQty > 0 ? totalCost / totalQty : null
+    const totalPnL = (totalValueUSD != null && avgPrice != null) ? totalValueUSD - totalCost : null
+    const pnlPct = totalPnL != null && totalCost > 0 ? totalPnL / totalCost * 100 : null
+    consolidatedPnl[asset] = { totalQty, totalValueUSD, avgPrice, totalPnL, pnlPct }
+  }
+
+  // Segunda pasada: costo/P&L por posición. Para un activo multi-cuenta, cada cuenta usa el
+  // promedio ponderado REAL de consolidatedPnl (no su propio avg_price guardado) — así una
+  // ficha individual (ej. "BTC en Nexo") y el total general siempre cuentan la misma historia.
+  const enriched = withValue.map(p => {
     const isCedear = p.asset_type === 'cedear'
-    // Stablecoins y fiat siempre valen ~1:1 — un avg_price cargado por error (ej. en ARS)
-    // no debe generar P&L fantasma
     const skipPnl = STABLECOINS.has(p.asset) || FIAT_USD.has(p.asset) || FIAT_ARS.has(p.asset)
-    const avgPriceUSD = skipPnl ? null : (isCedear && blueRate && p.avg_price
-      ? p.avg_price / blueRate   // avg_price en ARS → convertir a USD por CEDEAR
-      : p.avg_price)
+    const consolidated = consolidatedPnl[p.asset]
+    const avgPriceUSD = skipPnl ? null : consolidated
+      ? consolidated.avgPrice
+      : (isCedear && cclRate && p.avg_price ? p.avg_price / cclRate : p.avg_price)
     const costUSD = avgPriceUSD != null ? avgPriceUSD * p.quantity : null
-    const pnlUSD  = (valueUSD != null && costUSD != null) ? valueUSD - costUSD : null
-    const pnlPct  = (priceUSD != null && avgPriceUSD != null) ? (priceUSD - avgPriceUSD) / avgPriceUSD * 100 : null
-    return { ...p, priceUSD, valueUSD, costUSD, pnlUSD, pnlPct, accrued }
+    const pnlUSD  = (p.valueUSD != null && costUSD != null) ? p.valueUSD - costUSD : null
+    const pnlPct  = (p.priceUSD != null && avgPriceUSD != null) ? (p.priceUSD - avgPriceUSD) / avgPriceUSD * 100 : null
+    return { ...p, avgPriceUSD, costUSD, pnlUSD, pnlPct }
   })
 
   const totalUSD      = enriched.reduce((s, p) => s + (p.valueUSD ?? 0), 0)
-  const totalARS      = blueRate ? totalUSD * blueRate : null
+  const totalARS      = cclRate ? totalUSD * cclRate : null
   const totalPnl      = enriched.reduce((s, p) => s + (p.pnlUSD ?? 0), 0)
   const hasPnl        = enriched.some(p => p.pnlUSD != null)
   const totalRealized = transactions.reduce((s, t) => s + (t.realized_pnl ?? 0), 0)
@@ -1103,7 +1182,7 @@ function PatrimonioTab({ positions, accounts = [], transactions = [], maximosUrl
     if (!amount || !cur) return 0
     const c = cur.toUpperCase()
     if (c === 'USD' || c === 'USDT' || c === 'USDC') return amount
-    if (c === 'ARS' && blueRate) return amount / blueRate
+    if (c === 'ARS' && cclRate) return amount / cclRate
     const price = prices[`${c}-USD`]?.price
     return price ? amount * price : 0
   }
@@ -1125,16 +1204,6 @@ function PatrimonioTab({ positions, accounts = [], transactions = [], maximosUrl
     byType[p.asset_type].push(p)
   }
 
-  // Agrupar por activo (cruzando cuentas) — promedio combinado cuando el mismo
-  // activo está repartido entre varias wallets/exchanges/bancos
-  const byAsset = {}
-  for (const p of enriched) {
-    if (FIAT_ARS.has(p.asset) || FIAT_USD.has(p.asset)) continue
-    if (!byAsset[p.asset]) byAsset[p.asset] = []
-    byAsset[p.asset].push(p)
-  }
-  const multiAccountAssets = Object.entries(byAsset).filter(([, list]) => list.length > 1)
-
   // Segmentos por clase de activo (Pesos / Dólares / Crypto / Acciones / CEDEARs)
   const assetSegs = useMemo(() => {
     const grp = { pesos: 0, dolares: 0, stablecoins: 0, crypto: 0, acciones: 0, cedears: 0 }
@@ -1145,7 +1214,7 @@ function PatrimonioTab({ positions, accounts = [], transactions = [], maximosUrl
       if (FIAT_ARS.has(a))          grp.pesos       += v
       else if (FIAT_USD.has(a))     grp.dolares     += v
       else if (STABLECOINS.has(a))  grp.stablecoins += v
-      else if (p.asset_type === 'cedear') grp.cedears  += v
+      else if (p.asset_type === 'cedear' || p.asset_type === 'cedear_usd') grp.cedears  += v
       else if (p.asset_type === 'stock')  grp.acciones += v
       else                                grp.crypto   += v
     }
@@ -1229,8 +1298,8 @@ function PatrimonioTab({ positions, accounts = [], transactions = [], maximosUrl
               ≈ ARS {totalARS.toLocaleString('es-AR', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
             </div>
           )}
-          {blueRate && (
-            <div className="text-xs text-gray-600 mt-3">Dólar blue: ${blueRate} · Precios vía maximos</div>
+          {cclRate && (
+            <div className="text-xs text-gray-600 mt-3">Dólar CCL: ${cclRate} · Precios vía maximos</div>
           )}
         </div>
 
@@ -1282,21 +1351,7 @@ function PatrimonioTab({ positions, accounts = [], transactions = [], maximosUrl
           </div>
           <div className="flex flex-wrap gap-2">
             {multiAccountAssets.map(([asset, list]) => {
-              const totalQty = list.reduce((s, p) => s + p.quantity + (p.accrued ?? 0), 0)
-              const totalValueUSD = list.some(p => p.valueUSD != null)
-                ? list.reduce((s, p) => s + (p.valueUSD ?? 0), 0) : null
-              // Promedio real: desde las transacciones crudas, excluyendo transferencias entre
-              // cuentas propias (si no, el costo se cuenta dos veces — una al comprar, otra al
-              // "heredar" el costo en la cuenta destino)
-              const buys = transactions.filter(t =>
-                t.currency === asset && t.source !== 'transfer' &&
-                ['income', 'buy'].includes(t.type) && t.unit_price)
-              const totalCostUSD = buys.length > 0 ? buys.reduce((s, t) => s + t.amount * t.unit_price, 0) : null
-              const totalQtyBought = buys.reduce((s, t) => s + t.amount, 0)
-              const avgPrice = totalCostUSD != null && totalQtyBought > 0 ? totalCostUSD / totalQtyBought : null
-              const totalPnL = (totalValueUSD != null && avgPrice != null)
-                ? totalValueUSD - avgPrice * totalQty : null
-              const pnlPct = totalPnL != null && avgPrice > 0 ? totalPnL / (avgPrice * totalQty) * 100 : null
+              const { totalQty, totalValueUSD, avgPrice, totalPnL, pnlPct } = consolidatedPnl[asset]
               return (
                 <div key={asset} title={list.map(p => p.account_name).join(' + ')}
                   className="flex items-center gap-2.5 bg-gray-50 hover:bg-amber-50 transition-colors rounded-lg px-3 py-1.5 text-xs cursor-default">
@@ -1363,7 +1418,7 @@ function PatrimonioTab({ positions, accounts = [], transactions = [], maximosUrl
                         <div className="flex items-center gap-2 flex-wrap">
                           <span className="font-semibold text-sm text-gray-800" title={assetName(p.asset) || undefined}>{p.asset}</span>
                           {p.end_date && <span className="text-[10px] bg-amber-100 text-amber-700 rounded px-1.5 py-0.5">vence {p.end_date}</span>}
-                          {p.rate && <span className="text-[10px] bg-green-100 text-green-700 rounded px-1.5 py-0.5">{p.asset_type === 'cedear' ? `ratio ${p.rate}` : `${p.rate}% anual`}</span>}
+                          {p.rate && <span className="text-[10px] bg-green-100 text-green-700 rounded px-1.5 py-0.5">{(p.asset_type === 'cedear' || p.asset_type === 'cedear_usd') ? `ratio ${p.rate}` : `${p.rate}% anual`}</span>}
                         </div>
                       </td>
                       <td className="px-3 py-2.5 text-xs text-gray-400 whitespace-nowrap">{p.account_name}</td>
@@ -1670,7 +1725,7 @@ function TransactionForm({ initial, accounts, onSave, onClose }) {
 }
 
 // ── PortfolioTab ──────────────────────────────────────────────────────────────
-function PositionRow({ p, blueRate, onEdit, onDelete }) {
+function PositionRow({ p, cclRate, onEdit, onDelete }) {
   const [hov, setHov] = useState(false)
   const isFiat  = FIAT_ARS.has(p.asset) || FIAT_USD.has(p.asset) || STABLECOINS.has(p.asset)
   const isFixed = p.asset_type === 'fixed_term' || p.asset_type === 'fund' || p.asset_type === 'flexible'
@@ -1679,14 +1734,16 @@ function PositionRow({ p, blueRate, onEdit, onDelete }) {
   let valueMain = null, valueSub = null
   if (FIAT_ARS.has(p.asset)) {
     valueMain = `ARS ${fmtAmount(p.quantity)}`
-    if (blueRate) valueSub = `≈ USD ${fmtAmount(p.quantity / blueRate)}`
+    if (cclRate) valueSub = `≈ USD ${fmtAmount(p.quantity / cclRate)}`
   } else if (p.valueUSD != null) {
     valueMain = `USD ${fmtAmount(p.valueUSD)}`
-    if (p.asset_type === 'cedear' && blueRate) {
-      valueSub = `≈ ARS ${fmtAmount(p.valueUSD * blueRate)}`
+    if ((p.asset_type === 'cedear' || p.asset_type === 'cedear_usd') && cclRate) {
+      valueSub = `≈ ARS ${fmtAmount(p.valueUSD * cclRate)}`
     }
   } else if (p.asset_type === 'cedear' && p.avg_price) {
     valueMain = `ARS ${fmtAmount(p.quantity * p.avg_price)}`
+  } else if (p.asset_type === 'cedear_usd' && p.avg_price) {
+    valueMain = `USD ${fmtAmount(p.quantity * p.avg_price)}`
   }
 
   // precio promedio
@@ -1720,7 +1777,7 @@ function PositionRow({ p, blueRate, onEdit, onDelete }) {
           {p.end_date && <span className="text-[10px] bg-amber-100 text-amber-700 rounded px-1.5 py-0.5 leading-4">vence {p.end_date}</span>}
         </div>
         {p.notes && <div className="text-[10px] text-gray-400 mt-0.5 truncate max-w-[200px]">{p.notes}</div>}
-        {p.asset_type === 'cedear' && p.rate && <div className="text-[10px] text-indigo-500 mt-0.5">ratio {p.rate}</div>}
+        {(p.asset_type === 'cedear' || p.asset_type === 'cedear_usd') && p.rate && <div className="text-[10px] text-indigo-500 mt-0.5">ratio {p.rate}</div>}
       </td>
       {/* Cantidad */}
       <td className="px-3 py-2.5 text-right tabular-nums text-gray-600 text-sm whitespace-nowrap">
@@ -1761,18 +1818,18 @@ function PositionRow({ p, blueRate, onEdit, onDelete }) {
   )
 }
 
-function PortfolioTab({ accounts, positions, onAddPosition, onEditPosition, onDeletePosition, onSyncAccount, prices = {}, blueRate = null }) {
+function PortfolioTab({ accounts, positions, onAddPosition, onEditPosition, onDeletePosition, onSyncAccount, prices = {}, cclRate = null }) {
   const [sortBy, setSortBy]     = useState('value')
   const [syncingId, setSyncingId] = useState(null)
   const activeAccounts = accounts.filter(a => a.active)
 
   function mktPriceUSD(p) {
     if (FIAT_USD.has(p.asset) || STABLECOINS.has(p.asset)) return 1
-    if (FIAT_ARS.has(p.asset)) return blueRate ? 1 / blueRate : null
+    if (FIAT_ARS.has(p.asset)) return cclRate ? 1 / cclRate : null
     const ticker = toYahooTicker(p.asset, p.asset_type)
     const raw = prices[ticker]?.price ?? null
     if (raw == null) return null
-    return p.asset_type === 'cedear' && p.rate > 0 ? raw / p.rate : raw
+    return (p.asset_type === 'cedear' || p.asset_type === 'cedear_usd') && p.rate > 0 ? raw / p.rate : raw
   }
 
   function enrich(p) {
@@ -1782,7 +1839,7 @@ function PortfolioTab({ accounts, positions, onAddPosition, onEditPosition, onDe
     const valueUSD = mkt != null ? effectiveQty * mkt : null
     let pnlPct = null
     if (mkt != null && p.avg_price && !STABLECOINS.has(p.asset) && !FIAT_USD.has(p.asset) && !FIAT_ARS.has(p.asset)) {
-      const avgUSD = p.asset_type === 'cedear' ? (blueRate ? p.avg_price / blueRate : null) : p.avg_price
+      const avgUSD = p.asset_type === 'cedear' ? (cclRate ? p.avg_price / cclRate : null) : p.avg_price
       if (avgUSD && avgUSD > 0) pnlPct = (mkt - avgUSD) / avgUSD * 100
     }
     return { ...p, valueUSD, pnlPct, accrued }
@@ -1856,7 +1913,7 @@ function PortfolioTab({ accounts, positions, onAddPosition, onEditPosition, onDe
                     </td>
                   </tr>
                   {acPos.map(p => (
-                    <PositionRow key={p.id} p={p} blueRate={blueRate}
+                    <PositionRow key={p.id} p={p} cclRate={cclRate}
                       onEdit={onEditPosition} onDelete={onDeletePosition} />
                   ))}
                 </tbody>
@@ -1947,18 +2004,33 @@ function fmtReportDate(iso) {
   } catch { return iso }
 }
 
+function renderInlineBold(line, keyPrefix) {
+  return line.split(/(\*\*[^*]+\*\*)/g).map((p, j) =>
+    p.startsWith('**') && p.endsWith('**')
+      ? <b key={`${keyPrefix}-${j}`} className="text-gray-800">{p.slice(2, -2)}</b>
+      : <span key={`${keyPrefix}-${j}`}>{p}</span>
+  )
+}
+
 function renderReportText(text) {
   return text.split('\n').map((line, i) => {
     if (line.startsWith('## ')) {
       return <div key={i} className="text-sm font-bold text-gray-800 mt-4 first:mt-0 mb-2">{line.slice(3)}</div>
     }
+    if (/^-{3,}$/.test(line.trim())) {
+      return <hr key={i} className="border-gray-100 my-3" />
+    }
     if (!line.trim()) return <div key={i} className="h-1.5" />
-    const parts = line.split(/(\*\*[^*]+\*\*)/g).map((p, j) =>
-      p.startsWith('**') && p.endsWith('**')
-        ? <b key={j} className="text-gray-800">{p.slice(2, -2)}</b>
-        : <span key={j}>{p}</span>
-    )
-    return <p key={i} className="text-sm text-gray-600 leading-relaxed mb-1.5">{parts}</p>
+    const bulletMatch = line.match(/^\s*[*-]\s+(.*)$/)
+    if (bulletMatch) {
+      return (
+        <div key={i} className="flex gap-2 text-sm text-gray-600 leading-relaxed mb-1.5 pl-1">
+          <span className="text-amber-500 shrink-0">•</span>
+          <p>{renderInlineBold(bulletMatch[1], i)}</p>
+        </div>
+      )
+    }
+    return <p key={i} className="text-sm text-gray-600 leading-relaxed mb-1.5">{renderInlineBold(line, i)}</p>
   })
 }
 
@@ -2059,11 +2131,84 @@ function WeeklyReportPanel() {
   )
 }
 
+// ── InvestmentProfilePanel — perfil de inversión que el agente respeta por sobre
+// cualquier conclusión genérica de indicadores técnicos (objetivo, horizonte,
+// estrategia por activo) ─────────────────────────────────────────────────────
+function InvestmentProfilePanel() {
+  const [content, setContent] = useState('')
+  const [saved,   setSaved]   = useState('')
+  const [open,    setOpen]    = useState(false)
+  const [saving,  setSaving]  = useState(false)
+  const [loaded,  setLoaded]  = useState(false)
+
+  useEffect(() => {
+    api('/api/agent/profile').then(d => {
+      setContent(d?.content || '')
+      setSaved(d?.content || '')
+      setLoaded(true)
+    }).catch(() => setLoaded(true))
+  }, [])
+
+  useEffect(() => { if (loaded && !saved.trim()) setOpen(true) }, [loaded]) // eslint-disable-line
+
+  async function save() {
+    setSaving(true)
+    try {
+      await api('/api/agent/profile', { method: 'POST', body: JSON.stringify({ content }) })
+      setSaved(content)
+      showToast('Perfil guardado — el agente lo va a tener en cuenta de acá en adelante.', 'info')
+      setOpen(false)
+    } catch (e) {
+      showError(e, 'No se pudo guardar el perfil.')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  if (!loaded) return null
+
+  return (
+    <div className="bg-white rounded-xl border border-gray-100 shadow-md shadow-gray-100/60 overflow-hidden">
+      <button onClick={() => setOpen(o => !o)}
+        className="w-full px-4 py-2.5 text-xs text-gray-600 hover:text-amber-600 flex items-center justify-between gap-2">
+        <span className="flex items-center gap-1.5 min-w-0">
+          <span className="shrink-0">🎯</span>
+          <span className="font-medium shrink-0">Tu perfil de inversión</span>
+          {!open && saved.trim() && <span className="text-gray-400 truncate">— {saved.trim().slice(0, 90)}{saved.trim().length > 90 ? '…' : ''}</span>}
+          {!open && !saved.trim() && <span className="text-amber-600">— contale al agente qué estás buscando para que no te tire consejos genéricos</span>}
+        </span>
+        <span className="shrink-0">{open ? '▲' : '▼'}</span>
+      </button>
+      {open && (
+        <div className="px-4 pb-4 space-y-2 border-t border-gray-100 pt-3">
+          <p className="text-[11px] text-gray-400 leading-snug">
+            Objetivo general (jubilación, hacer crecer capital, ahorrar para algo puntual), horizonte, cuánto riesgo tolerás,
+            y si tenés una estrategia puntual para algún activo (ej. "el BTC lo acumulo con DCA hasta el próximo halving para vender todo ahí").
+            Esto tiene prioridad sobre cualquier indicador técnico — el agente lo usa para evaluar si lo que hacés tiene sentido con TU plan, no para proponerte otro.
+          </p>
+          <textarea value={content} onChange={e => setContent(e.target.value)} rows={5}
+            placeholder="Ej: estoy armando mi jubilación a 15+ años. Tolero volatilidad en crypto porque es una porción chica. El BTC lo acumulo con DCA hasta el próximo halving, ahí vendo todo. Los CEDEARs son mi core de largo plazo, no los toco salvo que cambie el fundamento de la empresa."
+            className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-amber-400 resize-y" />
+          <div className="flex justify-end gap-2">
+            {saved.trim() && <button onClick={() => { setContent(saved); setOpen(false) }}
+              className="text-sm text-gray-500 px-3 py-1.5 hover:text-gray-700">Cancelar</button>}
+            <button onClick={save} disabled={saving || content === saved}
+              className="bg-amber-500 text-white rounded-lg px-4 py-1.5 text-sm font-medium hover:bg-amber-600 shadow-sm hover:shadow-md transition-shadow disabled:opacity-40 disabled:pointer-events-none">
+              {saving ? 'Guardando…' : 'Guardar'}
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
 // ── AgenteTab — selector entre Chat y Análisis semanal ─────────────────────────
 function AgenteTab({ chatMessages, setChatMessages }) {
   const [view, setView] = useState('chat')
   return (
     <div className="max-w-6xl mx-auto space-y-3">
+      <InvestmentProfilePanel />
       <div className="flex gap-1 bg-gray-100 rounded-lg p-1 w-fit mx-auto">
         <button onClick={() => setView('chat')}
           className={`px-4 py-1.5 rounded-md text-xs font-medium transition-colors ${view === 'chat' ? 'bg-white text-amber-600 shadow-sm' : 'text-gray-500'}`}>
@@ -2276,15 +2421,15 @@ export default function App() {
     }).catch(() => {})
   }, [])
   const [prices,   setPrices]   = useState({})
-  const [blueRate, setBlueRate] = useState(null)
+  const [cclRate, setCclRate] = useState(null)
 
   const loadPrices = useCallback(async (pos) => {
     try {
       const dollarRes = await fetch(`${maximosUrl}/api/dollar`)
       if (dollarRes.ok) {
         const dd = await dollarRes.json()
-        const blue = (dd.dollar || []).find(d => d.nombre?.toLowerCase().includes('blue'))
-        if (blue) setBlueRate(blue.venta)
+        const ccl = (dd.dollar || []).find(d => d.casa === 'contadoconliqui')
+        if (ccl) setCclRate(ccl.venta)
       }
       const needsPrice = pos.filter(p =>
         !FIAT_ARS.has(p.asset) && !FIAT_USD.has(p.asset) && !STABLECOINS.has(p.asset) &&
@@ -2356,6 +2501,21 @@ export default function App() {
     await load()
   }
 
+  // Precio de mercado en USD para un activo cripto — usa el que ya está cargado en `prices`
+  // (posiciones existentes) y si no lo tiene, lo pide directo a Binance.
+  async function fetchCryptoPriceUSD(asset) {
+    const cached = prices[`${asset}-USD`]?.price
+    if (cached) return cached
+    try {
+      const r = await fetch(`https://api.binance.com/api/v3/ticker/price?symbol=${asset}USDT`)
+      if (r.ok) {
+        const d = await r.json()
+        return d.price ? parseFloat(d.price) : null
+      }
+    } catch (_) {}
+    return null
+  }
+
   async function saveTransaction(data) {
     try {
       if (data._transfer_to) {
@@ -2388,6 +2548,14 @@ export default function App() {
           toUnitPrice = rest.amount / _swap_to.amount
         } else if (!fromIsStable && toIsStable && rest.amount > 0) {
           fromUnitPrice = _swap_to.amount / rest.amount
+        } else if (!fromIsStable && !toIsStable) {
+          // Cripto por cripto (ej. ETH por BTC) — ninguno de los dos lados da un precio
+          // implícito, así que se busca el precio real de mercado de cada uno en USD. Sin
+          // esto la venta no muestra P&L realizado y el activo recibido entra "gratis" (sin
+          // costo), distorsionando su promedio de compra.
+          const [fp, tp] = await Promise.all([fetchCryptoPriceUSD(fromAsset), fetchCryptoPriceUSD(toAsset)])
+          fromUnitPrice = fp
+          toUnitPrice = tp
         }
         // La comisión del swap se carga en la moneda entregada, en la pata "from" —
         // así no hay que elegir en cuál mitad va
@@ -2473,7 +2641,7 @@ export default function App() {
 
         {/* PATRIMONIO */}
         {tab === 'patrimonio' && (
-          <PatrimonioTab positions={positions} accounts={accounts} transactions={transactions} maximosUrl={maximosUrl} prices={prices} blueRate={blueRate} onRefreshPrices={loadPrices} onGetStarted={handleGetStarted} />
+          <PatrimonioTab positions={positions} accounts={accounts} transactions={transactions} maximosUrl={maximosUrl} prices={prices} cclRate={cclRate} onRefreshPrices={loadPrices} onGetStarted={handleGetStarted} />
         )}
 
         {/* PORTFOLIO */}
@@ -2489,7 +2657,7 @@ export default function App() {
               await load()
             }}
             prices={prices}
-            blueRate={blueRate}
+            cclRate={cclRate}
           />
         )}
 

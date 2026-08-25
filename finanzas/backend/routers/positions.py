@@ -8,7 +8,7 @@ router = APIRouter(prefix="/api/positions", tags=["positions"])
 class PositionIn(BaseModel):
     account_id: int
     asset: str          # ARS, USD, BTC, AAPL, USDT, etc.
-    asset_type: str     # fiat | crypto | stablecoin | stock | cedear | fixed_term | fund
+    asset_type: str     # fiat | crypto | stablecoin | stock | cedear | cedear_usd | fixed_term | fund | flexible
     quantity: float
     avg_price: Optional[float] = None
     start_date: Optional[str] = None
@@ -43,17 +43,31 @@ def list_positions(account_id: Optional[int] = None):
     conn.close()
     return [dict(r) for r in rows]
 
-def _update_opening_balance(conn, account_id: int, asset: str, target_qty: float):
-    """Crea o ajusta la transacción 'opening_balance' de forma que _sync_position
-    produzca exactamente target_qty para este account/asset."""
+def _update_opening_balance(conn, account_id: int, asset: str, target_qty: float, target_avg_price: float = None):
+    """Ancla quantity (y, si se pasa, avg_price) para que _sync_position reproduzca
+    exactamente lo que el usuario puso en Portfolio, aunque después se carguen más
+    movimientos — Portfolio manda, no se deja que un movimiento nuevo lo pise.
+
+    La cantidad se ancla con una transacción sintética 'opening_balance' que tapa
+    el hueco entre lo que las transacciones reales explican y lo que el usuario puso
+    (igual que antes). El precio promedio es distinto: si ya existe una compra real
+    sin precio cargado (típico — se anota "tengo esto" sin el precio exacto), se le
+    RELLENA el precio a esa transacción en vez de inventar una fila nueva — porque si
+    la cantidad ya está 100% explicada por transacciones reales, no queda ningún
+    "hueco" de cantidad donde anclar un precio con una fila sintética."""
     income_excl = conn.execute(
         "SELECT COALESCE(SUM(amount),0) as t FROM transactions WHERE account_id=? AND currency=? AND type IN ('income','buy') AND source!='opening_balance'",
         (account_id, asset)
     ).fetchone()['t']
     expense_total = conn.execute(
-        "SELECT COALESCE(SUM(amount),0) as t FROM transactions WHERE account_id=? AND currency=? AND type NOT IN ('income','buy')",
+        "SELECT COALESCE(SUM(amount),0) as t FROM transactions WHERE account_id=? AND currency=? AND type NOT IN ('income','buy') AND source!='opening_balance'",
         (account_id, asset)
     ).fetchone()['t']
+    # Positivo: los movimientos reales explican MENOS que lo que el usuario puso (falta
+    # sumar) — típico si depositó algo sin cargarlo. Negativo: los movimientos reales
+    # explican MÁS de lo que el usuario puso (falta restar) — típico si gastó algo (el
+    # almacén, comisiones, lo que sea) sin cargarlo. Las dos direcciones son igual de
+    # comunes y las dos tienen que anclarse — antes solo se anclaba la primera.
     opening_amount = round(target_qty - (income_excl - expense_total), 8)
 
     existing = conn.execute(
@@ -63,16 +77,59 @@ def _update_opening_balance(conn, account_id: int, asset: str, target_qty: float
 
     from datetime import date as _date
     today = _date.today().isoformat()
+    opening_type = 'income' if opening_amount > 0 else 'expense'
+    opening_abs = abs(opening_amount)
     if existing:
-        if opening_amount > 0:
-            conn.execute("UPDATE transactions SET amount=? WHERE id=?", (opening_amount, existing['id']))
+        if opening_abs > 0:
+            conn.execute("UPDATE transactions SET amount=?, type=? WHERE id=?",
+                         (opening_abs, opening_type, existing['id']))
         else:
             conn.execute("DELETE FROM transactions WHERE id=?", (existing['id'],))
-    elif opening_amount > 0:
-        conn.execute(
+            existing = None
+    elif opening_abs > 0:
+        cur = conn.execute(
             "INSERT INTO transactions (account_id, date, description, amount, currency, type, source) VALUES (?,?,?,?,?,?,?)",
-            (account_id, today, 'Saldo inicial', opening_amount, asset, 'income', 'opening_balance')
+            (account_id, today, 'Saldo inicial', opening_abs, asset, opening_type, 'opening_balance')
         )
+        existing = {'id': cur.lastrowid}
+
+    if target_avg_price is None:
+        return
+
+    # Costo de compras reales ya precificadas por el usuario (nunca se tocan) — lo que falta
+    # cubrir para llegar al costo total pedido se reparte entre las filas "rellenables": la
+    # sintética de arriba (si quedó con cantidad > 0), cualquier compra real sin precio, y
+    # cualquier fila que ESTA MISMA función haya rellenado antes (marcada source='avg_price_anchor')
+    # — así una segunda edición del promedio en Portfolio puede corregir lo que rellenó la
+    # primera, en vez de quedar pegada para siempre. Nunca una transferencia — esa ya tiene su
+    # propio mecanismo de costo heredado.
+    priced_cost = conn.execute(
+        "SELECT COALESCE(SUM(amount*unit_price),0) as c FROM transactions "
+        "WHERE account_id=? AND currency=? AND type IN ('income','buy') "
+        "AND source NOT IN ('opening_balance','avg_price_anchor') "
+        "AND unit_price IS NOT NULL AND unit_price > 0",
+        (account_id, asset)
+    ).fetchone()['c']
+    fillable_rows = conn.execute(
+        "SELECT id, amount FROM transactions WHERE account_id=? AND currency=? AND type IN ('income','buy') "
+        "AND source NOT IN ('opening_balance','transfer') "
+        "AND (unit_price IS NULL OR unit_price <= 0 OR source='avg_price_anchor')",
+        (account_id, asset)
+    ).fetchall()
+
+    fillable_qty = sum(r['amount'] for r in fillable_rows)
+    if existing and opening_amount > 0:
+        fillable_qty += opening_amount
+
+    if fillable_qty <= 0:
+        return  # nada anclable con transacciones — el avg_price queda solo en la posición,
+                # puede no sobrevivir si se agrega una transacción con precio más adelante
+
+    fill_price = round((target_avg_price * target_qty - priced_cost) / fillable_qty, 8)
+    for r in fillable_rows:
+        conn.execute("UPDATE transactions SET unit_price=?, source='avg_price_anchor' WHERE id=?", (fill_price, r['id']))
+    if existing and opening_amount > 0:
+        conn.execute("UPDATE transactions SET unit_price=? WHERE id=?", (fill_price, existing['id']))
 
 
 @router.post("", status_code=201)
@@ -85,7 +142,7 @@ def create_position(data: PositionIn):
          data.start_date, data.end_date, data.rate, data.auto_renew, data.notes)
     )
     if data.asset_type not in ('fixed_term', 'fund') and data.quantity > 0:
-        _update_opening_balance(conn, data.account_id, data.asset.upper(), data.quantity)
+        _update_opening_balance(conn, data.account_id, data.asset.upper(), data.quantity, data.avg_price)
     conn.commit()
     row = conn.execute("SELECT * FROM positions WHERE id = ?", (cur.lastrowid,)).fetchone()
     conn.close()
@@ -107,12 +164,15 @@ def update_position(position_id: int, data: PositionUpdate):
     sets += ", updated_at = datetime('now')"
     values = list(fields.values())
     conn.execute(f"UPDATE positions SET {sets} WHERE id = ?", (*values, position_id))
-    # Si cambió la quantity, ajustar el saldo inicial
-    new_qty = fields.get('quantity')
+    # Si cambió quantity y/o avg_price, ajustar el saldo inicial para anclar ambos —
+    # así lo que se corrige acá (Portfolio manda) sobrevive a que se carguen más
+    # movimientos después, en vez de que _sync_position lo recalcule y lo pise.
     asset_type = fields.get('asset_type', current['asset_type'])
-    if new_qty is not None and asset_type not in ('fixed_term', 'fund'):
+    if ('quantity' in fields or 'avg_price' in fields) and asset_type not in ('fixed_term', 'fund'):
         asset = fields.get('asset', current['asset']).upper()
-        _update_opening_balance(conn, current['account_id'], asset, new_qty)
+        new_qty = fields.get('quantity', current['quantity'])
+        new_avg = fields.get('avg_price', current['avg_price'])
+        _update_opening_balance(conn, current['account_id'], asset, new_qty, new_avg)
     conn.commit()
     row = conn.execute("SELECT * FROM positions WHERE id = ?", (position_id,)).fetchone()
     conn.close()
