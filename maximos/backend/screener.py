@@ -1,4 +1,6 @@
 import io
+import os
+import re
 import concurrent.futures
 import httpx
 import pandas as pd
@@ -43,8 +45,8 @@ LISTS: dict[str, list[str]] = {
         # Agrícolas
         "ZW=F","ZC=F","ZS=F","KC=F","CC=F","CT=F","SB=F","OJ=F",
     ],
-    # Top 100 crypto por market cap (sin stablecoins) — ordenados de mayor a menor.
-    # get_tickers() acepta el parámetro `crypto_limit` para devolver los primeros N.
+    # Respaldo si CoinGecko falla (get_crypto_tickers_live) — lista fija, se desactualiza
+    # con el tiempo. La fuente real del ranking de cripto es la consulta en vivo.
     "crypto": [
         "BTC-USD","ETH-USD","BNB-USD","SOL-USD","XRP-USD",
         "ADA-USD","AVAX-USD","DOGE-USD","TRX-USD","DOT-USD",
@@ -78,13 +80,88 @@ def get_sp500_tickers() -> list[str]:
     return [t.replace(".", "-") for t in df["Symbol"].tolist()]
 
 
+# Stablecoins conocidas — se excluyen del ranking de "top crypto por market cap"
+# igual que ya se hace en finanzas (no son una apuesta de inversión, valen ~1:1 siempre).
+STABLECOIN_SYMBOLS = {
+    "usdt", "usdc", "dai", "busd", "fdusd", "tusd", "pyusd", "usde", "usds",
+    "frax", "gusd", "usdp", "usdd", "eurs", "eurc", "susds", "usd1", "usdy",
+    "rlusd", "bfusd", "usd0", "usdg", "usdx",
+}
+
+# Un símbolo de ticker real es corto y alfanumérico (con guión/guión bajo como mucho) —
+# esto filtra entradas con datos corruptos en el origen (ej. símbolos con caracteres
+# no latinos que aparecieron una vez en CoinGecko sin que el nombre real fuera ese).
+_TICKER_RE = re.compile(r"^[A-Z0-9_-]{1,15}$")
+
+
+def _get_binance_tradable_symbols() -> set[str] | None:
+    """Símbolos con par activo contra USDT en Binance. Se usa para filtrar el ranking
+    de CoinGecko: el market cap crudo mezcla fondos tokenizados (BUIDL, USYC, JAAA),
+    oro tokenizado (XAUT, PAXG) y basura/spam — cosas que un exchange real no lista
+    como criptomoneda para operar. Cruzar contra Binance da una lista "de verdad"
+    Y garantiza que el screener después consiga datos de precio para cada ticker."""
+    try:
+        with httpx.Client(timeout=15) as client:
+            r = client.get(f"{BINANCE_BASE}/exchangeInfo")
+            r.raise_for_status()
+            data = r.json()
+        return {
+            s["baseAsset"].upper()
+            for s in data.get("symbols", [])
+            if s.get("quoteAsset") == "USDT" and s.get("status") == "TRADING"
+        }
+    except Exception:
+        return None
+
+
+def get_crypto_tickers_live(limit: int = 20) -> list[str]:
+    """Top N crypto por market cap REAL (CoinGecko) que además cotiza en Binance —
+    igual que lo muestra cualquier exchange/broker, en vez de la lista fija de abajo
+    que se desactualiza con el tiempo (le faltaban monedas nuevas como Hyperliquid).
+    Si CoinGecko o Binance fallan (rate limit, sin key, sin red), cae a LISTS['crypto']
+    — el screener nunca se queda sin tickers por esto."""
+    api_key = os.getenv("COINGECKO_API_KEY", "")
+    try:
+        tradable = _get_binance_tradable_symbols()
+        headers = {"x-cg-demo-api-key": api_key} if api_key else {}
+        with httpx.Client(timeout=15) as client:
+            r = client.get(
+                "https://api.coingecko.com/api/v3/coins/markets",
+                params={
+                    "vs_currency": "usd", "order": "market_cap_desc",
+                    "per_page": min(250, limit + 150), "page": 1,
+                },
+                headers=headers,
+            )
+            r.raise_for_status()
+            data = r.json()
+        tickers, seen = [], set()
+        for coin in data:
+            symbol = (coin.get("symbol") or "").upper()
+            if not symbol or not _TICKER_RE.match(symbol):
+                continue
+            if symbol.lower() in STABLECOIN_SYMBOLS or symbol in seen:
+                continue
+            if tradable is not None and symbol not in tradable:
+                continue
+            seen.add(symbol)
+            tickers.append(f"{symbol}-USD")
+            if len(tickers) >= limit:
+                break
+        if len(tickers) >= min(limit, 10):  # respuesta razonable, no un fallo silencioso
+            return tickers
+    except Exception:
+        pass
+    return LISTS["crypto"][:max(1, limit)]
+
+
 def get_tickers(list_id: str, custom: list[str] | None = None, crypto_limit: int = 20) -> list[str]:
     if list_id == "sp500":
         return get_sp500_tickers()
     if list_id == "custom" and custom:
         return [t.upper().strip() for t in custom if t.strip()]
     if list_id == "crypto":
-        return LISTS["crypto"][:max(1, crypto_limit)]
+        return get_crypto_tickers_live(max(1, crypto_limit))
     return LISTS.get(list_id, [])
 
 

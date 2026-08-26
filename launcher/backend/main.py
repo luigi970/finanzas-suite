@@ -38,7 +38,7 @@ APPS = {
 KEYS_MAP = {
     "GROQ_API_KEY":         ["maximos", "finanzas", "fiscal"],
     "GOOGLE_API_KEY":       ["maximos", "finanzas", "fiscal"],
-    "COINGECKO_API_KEY":    ["finanzas"],
+    "COINGECKO_API_KEY":    ["maximos", "finanzas"],
     "AFIPSDK_ACCESS_TOKEN": ["fiscal"],
     "MAXIMOS_MODE":         ["finanzas"],
 }

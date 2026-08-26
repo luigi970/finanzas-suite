@@ -129,6 +129,7 @@ Status del Worker: `"idle"` → `"loading"` → `"ready"` (mapeado desde D1: `ru
 - `CF_ACCOUNT_ID` — account ID de Cloudflare
 - `CF_D1_DB_ID` — ID de la base D1
 - `VITE_API_URL` — URL del Worker para el build de Pages
+- `COINGECKO_API_KEY` — para el ranking en vivo de la lista `crypto` (opcional: si falta, `get_crypto_tickers_live()` cae a la lista fija vieja sin romper el job)
 
 ### Cloudflare Worker (dashboard → Settings → Variables and Secrets)
 - `GH_PAT` — GitHub PAT con permisos `repo` (para repository_dispatch)
@@ -226,8 +227,14 @@ Parámetros: `pivot_len=3`, `min_bars_between=5`, `min_osc_delta=3.0`, `turn_lev
 | `nasdaq100` | 100 empresas tech | Hardcodeado en `screener.py` |
 | `etfs` | 49 ETFs | Hardcodeado en `screener.py` |
 | `adrs_arg` | 17 ADRs argentinos | Hardcodeado en `screener.py` |
-| `crypto` | Top N criptos (sin stablecoins) | Hardcodeado, limitado por `crypto_limit` |
+| `crypto` | Top N criptos por market cap real (sin stablecoins), limitado por `crypto_limit` | **En vivo** desde CoinGecko (`get_crypto_tickers_live()` en `screener.py`), filtrado contra pares activos en Binance — cae a una lista fija vieja si CoinGecko/Binance fallan |
 | `commodities` | 18 futuros: metales, energía y agrícolas | Hardcodeado en `screener.py` con tickers `=F` |
+
+### `crypto` — ranking en vivo (gotchas, 2026-08-26)
+- **Antes era 100% hardcodeado** — una lista fija tipeada en el código, que se desactualizaba con el tiempo (tenía monedas de 2020-2021 como SAND/CHZ/WIN/DENT y le faltaban todas las que subieron después, ej. Hyperliquid). Ahora `get_crypto_tickers_live(limit)` pide el ranking real a CoinGecko (`/coins/markets`, requiere `COINGECKO_API_KEY` — la misma key gratuita que ya se usa en finanzas, repartida también a maximos vía el launcher) y devuelve el top N actualizado.
+- **El ranking crudo de CoinGecko trae basura**: fondos tokenizados (BUIDL, USYC, JAAA), oro/commodities tokenizados (XAUT, PAXG), stablecoins nuevas no cubiertas por la lista de exclusión, y ocasionalmente símbolos con datos corruptos (se vio un símbolo con caracteres no latinos). Se filtra con: (1) lista de stablecoins conocidas, (2) regex `^[A-Z0-9_-]{1,15}$` para descartar símbolos con formato raro, (3) cruce contra `_get_binance_tradable_symbols()` — solo se incluye un ticker si tiene un par activo contra USDT en Binance, que es de donde el screener saca los precios igual, así se evita listar algo que después no va a tener datos.
+- **Límite real, no un bug**: si una moneda no cotiza en Binance spot, NUNCA va a aparecer en la lista, sin importar cuán alto esté el `crypto_limit` — el motor de indicadores (RSI, ADX, medias móviles) depende de velas diarias de Binance. Caso verificado: Hyperliquid (HYPE) no tiene par `HYPEUSDT` en Binance (confirmado directo contra la API, devuelve "Invalid symbol") — para incluirla habría que agregar otra fuente de precios para cripto, que es un cambio de arquitectura más grande, no un ajuste de la lista.
+- Respaldo: si CoinGecko o Binance fallan (rate limit, sin red, sin key), `get_crypto_tickers_live()` cae a la lista fija vieja (`LISTS["crypto"]`) — el screener nunca se queda sin tickers por esto, aunque en ese caso vuelve a ser una lista desactualizada hasta la próxima corrida exitosa.
 
 ## IA — cadena de proveedores
 
