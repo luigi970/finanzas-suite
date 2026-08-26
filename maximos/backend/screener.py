@@ -95,11 +95,17 @@ _TICKER_RE = re.compile(r"^[A-Z0-9_-]{1,15}$")
 
 
 def _get_binance_tradable_symbols() -> set[str] | None:
-    """Símbolos con par activo contra USDT en Binance. Se usa para filtrar el ranking
-    de CoinGecko: el market cap crudo mezcla fondos tokenizados (BUIDL, USYC, JAAA),
-    oro tokenizado (XAUT, PAXG) y basura/spam — cosas que un exchange real no lista
-    como criptomoneda para operar. Cruzar contra Binance da una lista "de verdad"
-    Y garantiza que el screener después consiga datos de precio para cada ticker."""
+    """Símbolos con par activo contra USDT en Binance SPOT. Se usa para filtrar el
+    ranking de CoinGecko: el market cap crudo mezcla fondos tokenizados (BUIDL, USYC,
+    JAAA), oro tokenizado (XAUT, PAXG) y basura/spam — cosas que un exchange real no
+    lista como criptomoneda para operar. Cruzar contra Binance da una lista "de
+    verdad" Y garantiza que el screener después consiga datos de precio para cada
+    ticker. A propósito NO se agregan símbolos que solo existen en futuros/perpetuos
+    (ej. Hyperliquid/HYPE) — mezclar precio spot y precio de futuros en el mismo
+    ranking le mete ruido a los indicadores (funding rate, apalancamiento, mechas de
+    liquidación no son comparables al spot) y los scores dejarían de ser comparables
+    entre activos. Si una moneda solo cotiza en futuros, no entra a la lista — es una
+    limitación real, no un bug."""
     try:
         with httpx.Client(timeout=15) as client:
             r = client.get(f"{BINANCE_BASE}/exchangeInfo")
@@ -177,6 +183,9 @@ def _to_binance_symbol(ticker: str) -> str:
 
 
 def _fetch_binance_klines(symbol: str, interval: str, limit: int = 30) -> pd.DataFrame | None:
+    # Solo spot — a propósito no cae a futuros/perpetuos: esos precios divergen del
+    # spot (funding rate, apalancamiento, mechas de liquidación) y mezclarían datos
+    # de distinta naturaleza entre tickers, haciendo los scores no comparables entre sí.
     try:
         resp = httpx.get(
             f"{BINANCE_BASE}/klines",
