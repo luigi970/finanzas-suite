@@ -12,6 +12,38 @@ GOOGLE_API_KEY    = os.getenv("GOOGLE_API_KEY", "")
 MAXIMOS_URL       = os.getenv("MAXIMOS_URL", "https://maximos-worker.luchotour.workers.dev")
 COINGECKO_API_KEY = os.getenv("COINGECKO_API_KEY", "")
 
+# Cuántos mensajes previos del chat se re-envían al modelo (el resto sigue visible en pantalla
+# para el usuario, solo se deja de mandar al LLM). Groq tiene un límite de 8000 tokens/minuto en
+# la cuenta free y el contexto financiero solo ya pesa ~6500 — sin este tope, una conversación
+# larga termina superando el límite y el agente deja de responder a mitad de charla.
+MAX_CHAT_HISTORY = 12
+
+GEMINI_MODEL = "gemini-3.6-flash"
+
+async def _post_gemini(client: httpx.AsyncClient, system_text: str, contents: list, temperature: float, retries: int = 1) -> Optional[httpx.Response]:
+    """POST a Gemini con un reintento corto — el modelo devuelve 503 "high demand"
+    de forma intermitente (carga del free tier de Google), y casi siempre se recupera
+    solo, unos segundos después."""
+    last = None
+    for attempt in range(retries + 1):
+        try:
+            r = await client.post(
+                f"https://generativelanguage.googleapis.com/v1beta/models/{GEMINI_MODEL}:generateContent?key={GOOGLE_API_KEY}",
+                json={
+                    "system_instruction": {"parts": [{"text": system_text}]},
+                    "contents": contents,
+                    "generationConfig": {"temperature": temperature},
+                },
+            )
+            if r.is_success or r.status_code not in (429, 503):
+                return r
+            last = r
+        except Exception:
+            last = None
+        if attempt < retries:
+            await asyncio.sleep(2.5)
+    return last
+
 SYSTEM_PROMPT = """Sos el asesor financiero personal del usuario. Conocés su cartera en detalle, su historial de movimientos y los precios actuales de mercado. Hablás en español rioplatense, directo y sin rodeos, como alguien de confianza que sabe de lo que habla.
 
 Cómo responder:
@@ -77,15 +109,20 @@ def get_investment_profile(conn) -> str:
     row = conn.execute("SELECT value FROM app_settings WHERE key = 'investment_profile'").fetchone()
     return (row['value'] if row else '') or ''
 
-def build_context(conn) -> tuple[str, list]:
+def build_context(conn, include_recent_tx: bool = True) -> tuple[str, list]:
+    """include_recent_tx=False omite el detalle día a día de movimientos — lo usa el reporte
+    semanal, que ya de por sí tiene un prompt mucho más pesado (REPORT_SYSTEM_PROMPT) y no
+    necesita ese nivel de detalle: el resumen mensual y el P&L realizado total le alcanzan.
+    El chat sí lo necesita para responder preguntas tipo "qué hice últimamente"."""
     profile = get_investment_profile(conn)
     accounts = conn.execute("SELECT * FROM accounts WHERE active = 1").fetchall()
     positions = conn.execute(
         "SELECT p.*, a.name as account_name FROM positions p JOIN accounts a ON p.account_id = a.id"
     ).fetchall()
     recent_tx = conn.execute(
-        "SELECT t.*, a.name as account_name FROM transactions t JOIN accounts a ON t.account_id = a.id ORDER BY t.date DESC LIMIT 50"
-    ).fetchall()
+        "SELECT t.*, a.name as account_name FROM transactions t JOIN accounts a ON t.account_id = a.id "
+        "WHERE t.date >= date('now', '-10 days') ORDER BY t.date DESC LIMIT 30"
+    ).fetchall() if include_recent_tx else []
     summary = conn.execute("""
         SELECT strftime('%Y-%m', date) as month, currency,
                SUM(CASE WHEN type='income' THEN amount ELSE 0 END) as income,
@@ -120,7 +157,11 @@ def build_context(conn) -> tuple[str, list]:
     for a in accounts:
         ctx += f"- {a['name']} ({a['type']})\n"
 
-    ctx += "\nÚLTIMAS 50 TRANSACCIONES:\n"
+    if include_recent_tx:
+        if recent_tx:
+            ctx += "\nMOVIMIENTOS DE LOS ÚLTIMOS 10 DÍAS:\n"
+        else:
+            ctx += "\nMOVIMIENTOS DE LOS ÚLTIMOS 10 DÍAS: ninguno (no confundir con inactividad total de la cuenta — el resumen mensual de abajo y el P&L acumulado cubren el resto del historial).\n"
     for t in recent_tx:
         sign = "+" if t['type'] == 'income' else ("-" if t['type'] == 'expense' else "↔")
         line = f"- {t['date']} | {t['account_name']} | {sign}{t['amount']} {t['currency']} | {t['description'] or ''} | {t['category'] or ''}"
@@ -856,7 +897,7 @@ Qué tiene que incluir (el orden importa menos que cubrir todo esto con calidez)
 
 2. **Posición por posición** — por ACTIVO, no por cuenta: si tiene el mismo activo repartido en varias cuentas/brokers (ej. BTC en Binance y en Nexo), consolidalo en UN solo veredicto — cantidad total, precio promedio ponderado si difiere entre cuentas, y una sola conclusión. No des un "Reducir" para la misma moneda en una cuenta y un "Mantener" en otra como si fueran activos distintos; si hay una razón real para tratarlas distinto (tasa de rendimiento de esa plataforma, impuestos, liquidez), decila explícita como parte de ESE único veredicto. El punto de partida de cada veredicto es la estrategia que el usuario ya te contó (perfil de inversión + notas de la posición), no el indicador técnico: si dijo que hace DCA de un activo hasta un evento futuro para vender todo ahí, tu laburo es decir si el ritmo/tamaño actual tiene sentido y si algo (técnico, fundamental, macro) pone en riesgo ESA estrategia — no proponerle abandonarla porque un indicador de corto plazo diga otra cosa. Si no declaró nada para un activo, ahí sí el técnico/fundamental es tu única guía y lo decís con la misma convicción. Para cada activo real (fiat/stablecoin solo si el % de cash importa para la estrategia): **TICKER — tu veredicto** (Mantener / Aumentar / Reducir / Vigilar de cerca) + **el horizonte**, que tiene que ser EXACTAMENTE uno de estos tres textos, sin combinarlos ni inventar variantes ("core corto/mediano" no es válido, elegí uno): `corto plazo` (trading táctico) / `mediano plazo` / `largo plazo` (core, DCA). Después 1-2 líneas del porqué, traducido a lenguaje simple (ver regla de jerga). Si el veredicto cambia según el horizonte (ej. "a corto plazo cuidado, pero tu posición core de largo plazo no la tocaría"), decilo así de explícito, pero elegí igual UN horizonte principal para la etiqueta — no des un consejo sin marco temporal. Si hay tensión entre indicadores, contala como te la contarías a vos mismo, no la escondas. Usá la lista de CHECKLIST al final de VALUACIÓN ACTUAL DE CARTERA para verificar que no te falta ninguno antes de cerrar esta sección. Para decidir el veredicto de CADA posición usá SOLO su P&L no realizado (lo que pasa si vendés lo que tenés HOY) — nunca le sumes el P&L realizado de ventas viejas de ese mismo activo para armar una "pérdida total" combinada. Lo realizado ya pasó, es plata que ya ganaste o perdiste en una operación que ya cerró, y no cambia en nada si te conviene vender lo que tenés ahora. Si querés mencionar que en el pasado hubo una venta con pérdida/ganancia en ese activo, decilo aparte y aclaralo como algo que ya pasó — nunca lo sumes al no realizado para justificar el veredicto de hoy.
 
-3. **Con la plata líquida que tiene ahora, ¿qué harías vos?** — mirá los saldos en efectivo/stablecoin/plazo fijo sin comprometer y proponé un plan concreto para el mes, separado por horizonte: qué parte (si alguna) destinarías a una jugada táctica de corto plazo y por qué, y qué parte al core de largo plazo (DCA sistemático en lo que ya viene acumulando). Si no hay nada que amerite trading de corto plazo ahora, decilo derecho ("nada para trading esta semana, todo a largo plazo") en vez de forzar una idea. Esto es lo que más valor le da — no te lo saltees nunca, aunque la respuesta sea "quedate líquido este mes". Cuando enumeres el efectivo cuenta por cuenta: si una MISMA cuenta aparece dos veces en el contexto (ej. "BBVA | ARS" y "BBVA | USD" — algunas cuentas tienen las dos monedas a la vez), son DOS montos distintos que van los dos, nunca uses el valor de una para describir la otra ni asumas que una reemplaza a la otra. Ya pasó: se dijo "USD 86 en BBVA" usando el equivalente en dólares de los PESOS de BBVA, mientras el saldo real en dólares de esa misma cuenta (USD 234.62) desapareció del reporte sin mencionarse.
+3. **Con la plata líquida que tiene ahora, ¿qué harías vos?** — mirá los saldos en efectivo/stablecoin/plazo fijo sin comprometer y proponé un plan concreto para el mes, separado por horizonte: qué parte (si alguna) destinarías a una jugada táctica de corto plazo y por qué, y qué parte al core de largo plazo (DCA sistemático en lo que ya viene acumulando). Si no hay nada que amerite trading de corto plazo ahora, decilo derecho ("nada para trading esta semana, todo a largo plazo") en vez de forzar una idea. Esto es lo que más valor le da — no te lo saltees nunca, aunque la respuesta sea "quedate líquido este mes". Cuando enumeres el efectivo cuenta por cuenta (prosa O tabla, aplica igual): si una MISMA cuenta aparece dos veces en el contexto (ej. "BBVA | ARS" y "BBVA | USD" — algunas cuentas tienen las dos monedas a la vez), son DOS montos DISTINTOS y van los dos, cada uno con SU PROPIO número — nunca copies el valor de una fila a la otra, nunca asumas que una reemplaza a la otra, y nunca repitas el mismo número en ambas filas aunque "suene parecido". Ya pasó dos veces: (1) se dijo "USD 86 en BBVA" usando el equivalente en dólares de los PESOS de BBVA, mientras el saldo real en dólares de esa misma cuenta (USD 234.62) desapareció sin mencionarse; (2) en una tabla se puso "BBVA | USD | 86.38" Y "BBVA | ARS (convertido) | 86.38" — el mismo número copiado en las dos filas, cuando el contexto trae claramente "BBVA | USD (fiat): 234.62" como línea aparte. Ejemplo de cómo tiene que quedar (con los datos reales de este caso): fila 1 "BBVA · ARS" → 86.38 (equivalente en USD de los pesos), fila 2 "BBVA · USD" → 234.62 (el saldo en dólares tal cual, SIN convertir nada) — dos números que casi nunca coinciden entre sí. Antes de escribir cada fila de una cuenta con dos monedas, releé el contexto y copiá el número que corresponde a ESA moneda puntual, no el de la fila de al lado.
 
 4. **Algo que hoy no tiene y le metería una mirada** — 1-2 ideas concretas por fuera de su cartera actual (un activo, un sector, una cobertura) que tengan sentido dado lo que ya sabés de él — no una lista genérica de "diversificá", una idea puntual con el motivo. Antes de sugerir algo, repasá TODAS sus posiciones actuales (no solo las que tienen análisis técnico) — nunca propongas como "nuevo" algo que ya tiene en cartera.
 
@@ -918,9 +959,16 @@ async def chat(req: ChatRequest):
         )
         full_context = db_context + price_context + tech_context + fund_context + sentiment_context
 
+        # El frontend manda TODA la conversación en cada request (sin límite) — el contexto
+        # financiero ya pesa ~6500 tokens con un solo mensaje, así que a los pocos intercambios
+        # la suma pasa el límite de tokens/minuto de Groq (8000) y el chat deja de responder a
+        # mitad de conversación. Se acota a los últimos turnos recientes; el historial viejo no
+        # se pierde para el usuario (sigue en pantalla), solo no se re-envía al modelo.
+        recent_messages = req.messages[-MAX_CHAT_HISTORY:]
+
         messages = [
             {"role": "system", "content": SYSTEM_PROMPT + "\n\n" + full_context}
-        ] + [{"role": m.role, "content": m.content} for m in req.messages]
+        ] + [{"role": m.role, "content": m.content} for m in recent_messages]
 
         # Groq primero
         if GROQ_API_KEY:
@@ -928,7 +976,15 @@ async def chat(req: ChatRequest):
                 r = await client.post(
                     "https://api.groq.com/openai/v1/chat/completions",
                     headers={"Authorization": f"Bearer {GROQ_API_KEY}"},
-                    json={"model": "openai/gpt-oss-120b", "messages": messages, "temperature": 0.7},
+                    # max_tokens y reasoning_effort son necesarios, no solo optimización: sin
+                    # max_tokens, Groq reserva un presupuesto enorme "por las dudas" para la
+                    # respuesta y rechaza el pedido entero por tamaño (413) aunque el prompt real
+                    # entre sobrado en el límite de 8000 tokens/minuto de la cuenta free. Y sin
+                    # bajar el reasoning_effort, gpt-oss-120b gasta cientos de tokens de
+                    # razonamiento oculto (no visible en la respuesta) antes de contestar, que
+                    # también cuentan contra ese mismo límite.
+                    json={"model": "openai/gpt-oss-120b", "messages": messages, "temperature": 0.7,
+                          "max_tokens": 900, "reasoning_effort": "low"},
                 )
                 if r.is_success:
                     return {"reply": r.json()["choices"][0]["message"]["content"]}
@@ -940,15 +996,8 @@ async def chat(req: ChatRequest):
             try:
                 gemini_messages = [{"parts": [{"text": m["content"]}], "role": "user" if m["role"] != "assistant" else "model"} for m in messages if m["role"] != "system"]
                 system_text = next((m["content"] for m in messages if m["role"] == "system"), "")
-                r = await client.post(
-                    f"https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6-flash:generateContent?key={GOOGLE_API_KEY}",
-                    json={
-                        "system_instruction": {"parts": [{"text": system_text}]},
-                        "contents": gemini_messages,
-                        "generationConfig": {"temperature": 0.7},
-                    },
-                )
-                if r.is_success:
+                r = await _post_gemini(client, system_text, gemini_messages, 0.7)
+                if r is not None and r.is_success:
                     return {"reply": r.json()["candidates"][0]["content"]["parts"][0]["text"]}
             except Exception:
                 pass
@@ -960,7 +1009,7 @@ async def chat(req: ChatRequest):
 async def generate_weekly_report():
     """Genera un informe de cartera on-demand (botón, no automático) y lo guarda en historial."""
     conn = get_db()
-    db_context, positions = build_context(conn)
+    db_context, positions = build_context(conn, include_recent_tx=False)
     conn.close()
 
     content = None
@@ -980,10 +1029,12 @@ async def generate_weekly_report():
                 r = await client.post(
                     "https://api.groq.com/openai/v1/chat/completions",
                     headers={"Authorization": f"Bearer {GROQ_API_KEY}"},
+                    # Ver comentario en /chat sobre max_tokens + reasoning_effort — acá todavía
+                    # más necesario: REPORT_SYSTEM_PROMPT es casi el doble de largo que el de chat.
                     json={"model": "openai/gpt-oss-120b", "messages": [
                         {"role": "system", "content": system_text},
                         {"role": "user", "content": user_ask},
-                    ], "temperature": 0.5},
+                    ], "temperature": 0.5, "max_tokens": 1800, "reasoning_effort": "low"},
                 )
                 if r.is_success:
                     content = r.json()["choices"][0]["message"]["content"]
@@ -992,15 +1043,8 @@ async def generate_weekly_report():
 
         if not content and GOOGLE_API_KEY:
             try:
-                r = await client.post(
-                    f"https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6-flash:generateContent?key={GOOGLE_API_KEY}",
-                    json={
-                        "system_instruction": {"parts": [{"text": system_text}]},
-                        "contents": [{"parts": [{"text": user_ask}], "role": "user"}],
-                        "generationConfig": {"temperature": 0.5},
-                    },
-                )
-                if r.is_success:
+                r = await _post_gemini(client, system_text, [{"parts": [{"text": user_ask}], "role": "user"}], 0.5)
+                if r is not None and r.is_success:
                     content = r.json()["candidates"][0]["content"]["parts"][0]["text"]
             except Exception:
                 pass
