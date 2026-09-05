@@ -1098,8 +1098,15 @@ function PatrimonioTab({ positions, accounts = [], transactions = [], maximosUrl
     // total) pero sin precio promedio ni P&L — valen ~1:1 siempre, así que esos dos campos
     // no significan nada y un avg_price viejo/erróneo no debe generar un P&L fantasma.
     if (FIAT_ARS.has(p.asset) || FIAT_USD.has(p.asset)) continue
-    if (!byAsset[p.asset]) byAsset[p.asset] = []
-    byAsset[p.asset].push(p)
+    // Se agrupa por (asset, unidad) — un CEDEAR y la acción/cedear_usd real del mismo ticker
+    // (ej. SPY como CEDEAR en un broker y SPY fraccionada real en Nexo) NO son la misma unidad:
+    // 1 CEDEAR no es 1 acción, hay un ratio de por medio. Sumar sus cantidades directo no
+    // tiene sentido aunque se arregle la moneda del costo — se separan en grupos distintos
+    // (mismo criterio que build_price_context en el backend).
+    const isCedearUnit = p.asset_type === 'cedear' || p.asset_type === 'cedear_usd'
+    const key = `${p.asset}||${isCedearUnit ? 'cedear' : 'native'}`
+    if (!byAsset[key]) byAsset[key] = []
+    byAsset[key].push(p)
   }
   const multiAccountAssets = Object.entries(byAsset).filter(([, list]) => list.length > 1)
 
@@ -1115,27 +1122,33 @@ function PatrimonioTab({ positions, accounts = [], transactions = [], maximosUrl
   // NINGUNA compra propia con precio, no hay pool que armar ahí — se usa su avg_price guardado
   // (manual o lo que sea) en vez de excluirla, que subestimaría el costo real de esa porción.
   const consolidatedPnl = {}
-  for (const [asset, list] of multiAccountAssets) {
+  for (const [key, list] of multiAccountAssets) {
+    const asset = list[0].asset  // todos los items del grupo comparten ticker (y unidad)
     const totalValueUSD = list.some(p => p.valueUSD != null)
       ? list.reduce((s, p) => s + (p.valueUSD ?? 0), 0) : null
 
     if (STABLECOINS.has(asset)) {
       // Sin precio promedio ni P&L — solo cantidad total y valor, vale ~1:1 siempre.
       const totalQty = list.reduce((s, p) => s + p.quantity + (p.accrued ?? 0), 0)
-      consolidatedPnl[asset] = { totalQty, totalValueUSD, avgPrice: null, totalPnL: null, pnlPct: null }
+      consolidatedPnl[key] = { asset, totalQty, totalValueUSD, avgPrice: null, totalPnL: null, pnlPct: null }
       continue
     }
 
-    const isCedear = list[0]?.asset_type === 'cedear'
+    // 'cedear' cotiza en ARS, 'cedear_usd' ya en USD — aunque las dos comparten unidad
+    // (ratio de CEDEAR), la conversión de moneda es por cuenta/posición, no por grupo entero.
+    const accountAssetType = {}
+    for (const p of list) accountAssetType[p.account_id] = p.asset_type
     const accountIds = new Set(list.map(p => p.account_id))
     const buys = transactions.filter(t =>
       t.currency === asset && t.source !== 'transfer' && accountIds.has(t.account_id) &&
       ['income', 'buy'].includes(t.type) && t.unit_price)
     const buyAccountIds = new Set(buys.map(t => t.account_id))
-    const totalCostNative = buys.reduce((s, t) => s + t.amount * t.unit_price, 0)
+    const totalCostNative = buys.reduce((s, t) => {
+      const unitUSD = (accountAssetType[t.account_id] === 'cedear' && cclRate) ? t.unit_price / cclRate : t.unit_price
+      return s + t.amount * unitUSD
+    }, 0)
     const totalQtyBought = buys.reduce((s, t) => s + t.amount, 0)
-    let globalAvg = totalQtyBought > 0 ? totalCostNative / totalQtyBought : null
-    if (globalAvg != null && isCedear && cclRate) globalAvg = globalAvg / cclRate  // ARS por CEDEAR → USD
+    const globalAvg = totalQtyBought > 0 ? totalCostNative / totalQtyBought : null
 
     let totalCost = 0, totalQty = 0
     for (const p of list) {
@@ -1144,7 +1157,7 @@ function PatrimonioTab({ positions, accounts = [], transactions = [], maximosUrl
         totalCost += globalAvg * qty
         totalQty += qty
       } else if (p.avg_price) {
-        const legAvg = (isCedear && cclRate) ? p.avg_price / cclRate : p.avg_price
+        const legAvg = (p.asset_type === 'cedear' && cclRate) ? p.avg_price / cclRate : p.avg_price
         totalCost += legAvg * qty
         totalQty += qty
       }
@@ -1152,7 +1165,7 @@ function PatrimonioTab({ positions, accounts = [], transactions = [], maximosUrl
     const avgPrice = totalQty > 0 ? totalCost / totalQty : null
     const totalPnL = (totalValueUSD != null && avgPrice != null) ? totalValueUSD - totalCost : null
     const pnlPct = totalPnL != null && totalCost > 0 ? totalPnL / totalCost * 100 : null
-    consolidatedPnl[asset] = { totalQty, totalValueUSD, avgPrice, totalPnL, pnlPct }
+    consolidatedPnl[key] = { asset, totalQty, totalValueUSD, avgPrice, totalPnL, pnlPct }
   }
 
   // Segunda pasada: costo/P&L por posición. Para un activo multi-cuenta, cada cuenta usa el
@@ -1161,7 +1174,8 @@ function PatrimonioTab({ positions, accounts = [], transactions = [], maximosUrl
   const enriched = withValue.map(p => {
     const isCedear = p.asset_type === 'cedear'
     const skipPnl = STABLECOINS.has(p.asset) || FIAT_USD.has(p.asset) || FIAT_ARS.has(p.asset)
-    const consolidated = consolidatedPnl[p.asset]
+    const isCedearUnit = p.asset_type === 'cedear' || p.asset_type === 'cedear_usd'
+    const consolidated = consolidatedPnl[`${p.asset}||${isCedearUnit ? 'cedear' : 'native'}`]
     const avgPriceUSD = skipPnl ? null : consolidated
       ? consolidated.avgPrice
       : (isCedear && cclRate && p.avg_price ? p.avg_price / cclRate : p.avg_price)
@@ -1350,12 +1364,15 @@ function PatrimonioTab({ positions, accounts = [], transactions = [], maximosUrl
             <span className="text-[10px] text-gray-400">mismo activo en varias cuentas</span>
           </div>
           <div className="flex flex-wrap gap-2">
-            {multiAccountAssets.map(([asset, list]) => {
-              const { totalQty, totalValueUSD, avgPrice, totalPnL, pnlPct } = consolidatedPnl[asset]
+            {multiAccountAssets.map(([key, list]) => {
+              const { asset, totalQty, totalValueUSD, avgPrice, totalPnL, pnlPct } = consolidatedPnl[key]
+              // "(CEDEAR)" solo si el mismo ticker también tiene un grupo "native" (acción/cedear_usd
+              // real) — para no confundirlo con esa otra posición, que es otra unidad y otra moneda.
+              const label = key.endsWith('||cedear') && byAsset[`${asset}||native`] ? `${asset} (CEDEAR)` : asset
               return (
-                <div key={asset} title={list.map(p => p.account_name).join(' + ')}
+                <div key={key} title={list.map(p => p.account_name).join(' + ')}
                   className="flex items-center gap-2.5 bg-gray-50 hover:bg-amber-50 transition-colors rounded-lg px-3 py-1.5 text-xs cursor-default">
-                  <span className="font-bold text-gray-800">{asset}</span>
+                  <span className="font-bold text-gray-800">{label}</span>
                   <span className="text-gray-500 tabular-nums">{fmtAmount(totalQty)}</span>
                   {avgPrice != null && <span className="text-gray-400 tabular-nums">@ {fmtAmount(avgPrice)}</span>}
                   {totalValueUSD != null && (
@@ -1613,6 +1630,17 @@ function TransactionForm({ initial, accounts, onSave, onClose }) {
             {!isSwap && <p className="mt-0.5 text-[10px] text-gray-400">CEDEARs: ticker (ej: NVDA)</p>}
           </div>
         </div>
+        {!isSwap && !isTransfer && !FIAT_CURRENCIES.has(form.currency.toUpperCase()) && (
+          <div>
+            <label className="text-xs font-medium text-gray-500 uppercase tracking-wide">
+              Tipo de activo <span className="text-gray-400 normal-case font-normal">(solo si es la primera vez que cargás este activo)</span>
+            </label>
+            <select value={form.asset_type} onChange={set('asset_type')} className={inputCls}>
+              <option value="">— Dejar que el sistema decida —</option>
+              {ASSET_TYPES.filter(t => t.value !== 'fiat').map(t => <option key={t.value} value={t.value}>{t.label}</option>)}
+            </select>
+          </div>
+        )}
         {isSwap && (
           <>
             <div className="grid grid-cols-2 gap-3">
@@ -1669,17 +1697,6 @@ function TransactionForm({ initial, accounts, onSave, onClose }) {
               <select value={form.category} onChange={set('category')} className={inputCls}>
                 <option value="">Sin categoría</option>
                 {CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
-              </select>
-            </div>
-          )}
-          {!isTransfer && !FIAT_CURRENCIES.has(form.currency.toUpperCase()) && (
-            <div>
-              <label className="text-xs font-medium text-gray-500 uppercase tracking-wide">
-                Tipo de activo <span className="text-gray-400 normal-case font-normal">(opcional — solo si es la primera vez que cargás este activo)</span>
-              </label>
-              <select value={form.asset_type} onChange={set('asset_type')} className={inputCls}>
-                <option value="">— Dejar que el sistema decida —</option>
-                {ASSET_TYPES.filter(t => t.value !== 'fiat').map(t => <option key={t.value} value={t.value}>{t.label}</option>)}
               </select>
             </div>
           )}

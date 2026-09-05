@@ -325,14 +325,24 @@ async def build_price_context(positions: list, client: httpx.AsyncClient) -> str
                 # activo repartido en más de una cuenta — si solo trackeáramos las que tienen
                 # avg_price, una cuenta sin precio cargado (ej. XRP en Nexo sin avg_price) queda
                 # afuera de la consolidación y su cantidad/valor desaparece silenciosamente.
-                acc = by_asset.setdefault(asset, {"qty": 0.0, "value": 0.0, "accounts": [], "atype": atype, "legs": []})
+                #
+                # Se agrupa por (asset, unidad) y NO solo por asset: un CEDEAR y la acción real
+                # del mismo ticker (ej. SPY como CEDEAR en Invertir Online vs SPY fraccionada
+                # real en Nexo) NO son la misma unidad — 1 CEDEAR no es 1 acción, hay un ratio
+                # de por medio — así que sumar sus cantidades directo ("52 CEDEARs + 0.08
+                # acciones = 52.08 total") no tiene sentido, ni aunque se arregle la moneda del
+                # costo. Se separan en grupos de consolidación distintos; el valor en USD de
+                # cada uno sigue sumando bien al total de cartera igual.
+                unit_group = 'cedear' if atype in CEDEAR_TYPES else 'native'
+                group_key = f"{asset}||{unit_group}"
+                acc = by_asset.setdefault(group_key, {"asset": asset, "qty": 0.0, "value": 0.0, "accounts": [], "atype": atype, "legs": []})
                 acc["qty"] += qty
                 acc["value"] += value_usd
                 acc["accounts"].append(p['account_name'])
                 # Por cuenta: cantidad + avg_price crudo, para el fallback de pooled_avg_usd
                 # (el usuario no siempre carga cada movimiento — a veces corrige la posición
                 # directo en Portfolio, sin transacción de respaldo).
-                acc["legs"].append({"account_id": p['account_id'], "qty": qty, "avg_price_raw": p.get('avg_price')})
+                acc["legs"].append({"account_id": p['account_id'], "qty": qty, "avg_price_raw": p.get('avg_price'), "atype": atype})
         elif atype in NO_PRICE_TYPES:
             if asset in FIAT_USD or asset in STABLECOINS:
                 value_usd = total_native
@@ -358,30 +368,44 @@ async def build_price_context(positions: list, client: httpx.AsyncClient) -> str
     # Portfolio sin dejar una transacción de respaldo — así que si una cuenta no tiene ninguna
     # compra propia con precio, se usa su avg_price guardado (manual o lo que sea) como respaldo
     # en vez de excluirla del todo, que subestimaría el costo real y exageraría la ganancia.
+    # Clave de consolidated = "ASSET||cedear" o "ASSET||native" (ver arriba) — nunca mezcla
+    # CEDEAR con acción/cedear_usd real del mismo ticker en el mismo grupo.
     consolidated = {a: d for a, d in by_asset.items() if len(d["accounts"]) > 1}
-    leg_direct_cost = {}  # (account_id, currency) -> {"qty":, "cost":} desde compras propias, sin transferencias
+    # atype real de cada (cuenta, activo real) — necesario para saber en qué moneda está el
+    # unit_price de las transacciones de esa cuenta (ARS si es 'cedear', USD si no) antes
+    # de sumarlas al costo total.
+    leg_atype = {(leg["account_id"], d["asset"]): leg["atype"] for d in consolidated.values() for leg in d["legs"]}
+    leg_direct_cost = {}  # (account_id, currency) -> {"qty":, "cost":} desde compras propias, sin transferencias, YA en USD
     if consolidated:
+        plain_assets = sorted({d["asset"] for d in consolidated.values()})
         conn2 = get_db()
         try:
             rows = conn2.execute(
                 "SELECT account_id, currency, amount, unit_price FROM transactions "
                 "WHERE currency IN ({}) AND source != 'transfer' AND type IN ('income','buy') "
                 "AND unit_price IS NOT NULL AND unit_price > 0".format(
-                    ",".join("?" for _ in consolidated)),
-                list(consolidated.keys())
+                    ",".join("?" for _ in plain_assets)),
+                plain_assets
             ).fetchall()
         finally:
             conn2.close()
         for r in rows:
             key = (r["account_id"], r["currency"])
+            unit_price_usd = r["unit_price"]
+            if leg_atype.get(key) == 'cedear':
+                if not ccl_rate:
+                    continue  # sin CCL no se puede convertir esta pata a USD — se excluye, no se suma mal
+                unit_price_usd = unit_price_usd / ccl_rate
             acc = leg_direct_cost.setdefault(key, {"qty": 0.0, "cost": 0.0})
             acc["qty"] += r["amount"]
-            acc["cost"] += r["amount"] * r["unit_price"]
+            acc["cost"] += r["amount"] * unit_price_usd
 
     _pooled_avg_cache = {}
 
-    def pooled_avg_usd(asset, atype):
-        """Promedio real ponderado en USD de un activo repartido en varias cuentas.
+    def pooled_avg_usd(group_key):
+        """Promedio real ponderado en USD de un activo repartido en varias cuentas,
+        DENTRO de un mismo grupo de unidad (ver group_key / unit_group más arriba —
+        nunca mezcla CEDEAR con acción/cedear_usd real del mismo ticker).
 
         Dos partes que NO se pueden mezclar en un solo pool de cantidad, porque una
         representa "cantidad alguna vez comprada" y la otra "cantidad que tengo hoy":
@@ -394,9 +418,10 @@ async def build_price_context(positions: list, client: httpx.AsyncClient) -> str
            directo en Portfolio sin cargar movimiento) — no hay pool que armar ahí, se
            usa su avg_price guardado tal cual, ponderado por su cantidad actual.
         """
-        if asset in _pooled_avg_cache:
-            return _pooled_avg_cache[asset]
-        d = by_asset.get(asset)
+        if group_key in _pooled_avg_cache:
+            return _pooled_avg_cache[group_key]
+        d = by_asset.get(group_key)
+        asset = d["asset"] if d else None  # ticker plano — así está guardado leg_direct_cost
         global_pool_qty = 0.0   # cantidad ALGUNA VEZ comprada (cuentas con respaldo de transacciones)
         global_pool_cost = 0.0
         tx_backed_qty_now = 0.0  # cantidad que esas cuentas tienen HOY
@@ -410,8 +435,11 @@ async def build_price_context(positions: list, client: httpx.AsyncClient) -> str
                 tx_backed_qty_now += leg["qty"]
             else:
                 leg_avg = leg["avg_price_raw"]  # respaldo: manual o lo que haya, mejor que nada
-                if leg_avg and atype == 'cedear' and ccl_rate:
-                    leg_avg = leg_avg / ccl_rate
+                # Usar el atype de ESTA leg, no el de la posición que disparó el consolidado —
+                # el mismo ticker puede ser 'cedear' (ARS) en una cuenta y 'stock'/'cedear_usd'
+                # (USD) en otra.
+                if leg_avg and leg["atype"] == 'cedear':
+                    leg_avg = (leg_avg / ccl_rate) if ccl_rate else None
                 if leg_avg and leg_avg > 0:
                     manual_cost += leg_avg * leg["qty"]
                     manual_qty += leg["qty"]
@@ -420,7 +448,7 @@ async def build_price_context(positions: list, client: httpx.AsyncClient) -> str
         total_cost = (global_avg * tx_backed_qty_now if global_avg is not None else 0.0) + manual_cost
         total_qty = (tx_backed_qty_now if global_avg is not None else 0.0) + manual_qty
         result = (total_cost / total_qty) if total_qty else None
-        _pooled_avg_cache[asset] = result
+        _pooled_avg_cache[group_key] = result
         return result
 
     ctx = "\nVALUACIÓN ACTUAL DE CARTERA:\n"
@@ -438,8 +466,9 @@ async def build_price_context(positions: list, client: httpx.AsyncClient) -> str
                 line = f"- {p['account_name']} | {asset} ({atype}): {total_native:,.2f} = USD {value_usd:,.2f}"
             else:
                 line = f"- {p['account_name']} | {asset} ({atype}): {qty} × USD {market_price:,.4g} = USD {value_usd:,.2f}"
-                if asset in consolidated:
-                    avg_usd = pooled_avg_usd(asset, atype)
+                group_key = f"{asset}||{'cedear' if atype in CEDEAR_TYPES else 'native'}"
+                if group_key in consolidated:
+                    avg_usd = pooled_avg_usd(group_key)
                 else:
                     avg = p.get('avg_price')
                     # 'cedear' (ARS): avg_price está en ARS por CEDEAR — convertir con el CCL
@@ -485,11 +514,16 @@ async def build_price_context(positions: list, client: httpx.AsyncClient) -> str
         ctx += line + "\n"
 
     consolidated_lines = []
-    for asset, d in consolidated.items():
-        avg_w = pooled_avg_usd(asset, d["atype"])
+    for group_key, d in consolidated.items():
+        asset = d["asset"]
+        # Etiqueta "(CEDEAR)" solo si hay más de un grupo para el mismo ticker (ej. SPY como
+        # CEDEAR en un broker Y como acción real en otro) — para que no se confunda con el
+        # otro grupo, que es una unidad y una moneda de costo distintas.
+        label = f"{asset} (CEDEAR)" if group_key.endswith("||cedear") and f"{asset}||native" in by_asset else asset
+        avg_w = pooled_avg_usd(group_key)
         pnl = (d["value"] - avg_w * d["qty"]) if avg_w is not None else None
         pct = (pnl / (avg_w * d["qty"]) * 100) if (pnl is not None and avg_w) else None
-        line = f"- {asset}: {d['qty']:.6g} total entre {', '.join(d['accounts'])} = USD {d['value']:,.2f}"
+        line = f"- {label}: {d['qty']:.6g} total entre {', '.join(d['accounts'])} = USD {d['value']:,.2f}"
         if avg_w is not None:
             line += f" | precio prom. ponderado USD {avg_w:,.4g} | P&L no realizado consolidado USD {pnl:+,.2f} ({pct:+.1f}%)"
         consolidated_lines.append(line)
@@ -511,7 +545,7 @@ async def build_price_context(positions: list, client: httpx.AsyncClient) -> str
         ctx += (
             "\nCHECKLIST INTERNO (no lo reproduzcas en tu respuesta, es solo para que te "
             "autocontroles) — activos con posición real y precio de mercado, uno por línea arriba "
-            "(fiat/stablecoin no incluidos acá): " + ", ".join(sorted(by_asset.keys())) + ". "
+            "(fiat/stablecoin no incluidos acá): " + ", ".join(sorted({d["asset"] for d in by_asset.values()})) + ". "
             "Si armás una tabla de veredictos por activo, tiene que haber EXACTAMENTE una fila por "
             "cada uno de estos — ni uno menos. Ya pasó que se te quedó afuera un activo entero "
             "(ETH) con datos completos en el contexto; contá esta lista antes de dar la tabla por "
@@ -520,24 +554,28 @@ async def build_price_context(positions: list, client: httpx.AsyncClient) -> str
 
     return ctx
 
+# Para 'stock' se buscan VARIAS listas, no una sola: a diferencia de CEDEAR (siempre
+# adrs_arg), una acción real puede ser cualquier cosa que maximos trackee — una empresa del
+# S&P 500, un ETF (SPY, QQQ), o un ADR argentino (YPF, GGAL, BMA — cada vez más comprados
+# fraccionados directo en plataformas como Nexo). Si solo se mirara sp500, un 'stock' de YPF
+# no encontraría NUNCA su análisis técnico (RSI, señal, score) — sp500 no incluye ADRs
+# argentinos — aunque el precio funcione bien igual (ese lookup no depende de la lista).
 ASSET_TYPE_TO_LIST = {
-    'crypto':     'crypto',
-    'flexible':   'crypto',
-    'cedear':     'adrs_arg',
-    'cedear_usd': 'adrs_arg',
-    'stock':      'sp500',
+    'crypto':     ['crypto'],
+    'flexible':   ['crypto'],
+    'cedear':     ['adrs_arg'],
+    'cedear_usd': ['adrs_arg'],
+    'stock':      ['sp500', 'nasdaq100', 'etfs', 'adrs_arg'],
 }
 
 async def build_technical_context(positions: list, client: httpx.AsyncClient) -> str:
     """Fetches technical indicators from maximos screener for assets in portfolio."""
-    lists_needed = {}
+    lists_needed = set()
     for p in positions:
         asset, atype = p['asset'], p['asset_type']
         if asset in FIAT_USD or asset in FIAT_ARS or asset in STABLECOINS:
             continue
-        list_id = ASSET_TYPE_TO_LIST.get(atype)
-        if list_id:
-            lists_needed.setdefault(list_id, set()).add(asset)
+        lists_needed.update(ASSET_TYPE_TO_LIST.get(atype, []))
 
     if not lists_needed:
         return ""

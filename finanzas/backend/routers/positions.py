@@ -1,7 +1,11 @@
+import os
+import httpx
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 from typing import Optional
 from database import get_db
+
+MAXIMOS_URL = os.getenv("MAXIMOS_URL", "https://maximos-worker.luchotour.workers.dev")
 
 router = APIRouter(prefix="/api/positions", tags=["positions"])
 
@@ -188,11 +192,47 @@ def delete_position(position_id: int):
 FIAT_ASSETS       = {'ARS', 'USD', 'EUR', 'BRL', 'UYU'}
 STABLECOIN_ASSETS = {'USDT', 'USDC', 'DAI', 'BUSD', 'FDUSD', 'TUSD', 'PYUSD'}
 
+def _is_binance_tradable(asset: str) -> bool:
+    """Chequea si el ticker tiene un par activo contra USDT en Binance spot. Se usa ANTES de
+    confiar en _looks_like_real_stock: en modo local, /api/quotes de maximos llama a yfinance
+    sin restricción y puede devolver "precio encontrado" para símbolos cripto reales que
+    casualmente también resuelven en Yahoo Finance (visto en vivo: BTC y XRP daban positivo
+    como "acción real" en modo local) — si Binance lo reconoce como cripto, gana eso siempre."""
+    try:
+        r = httpx.get("https://api.binance.com/api/v3/ticker/price", params={"symbol": f"{asset}USDT"}, timeout=3)
+        return r.is_success and "price" in r.json()
+    except Exception:
+        return False
+
+def _looks_like_real_stock(asset: str) -> bool:
+    """Consulta a maximos si el ticker tiene cotización real de acción/ETF (S&P 500, Nasdaq
+    100, ETFs, ADRs — lo que devuelve /api/quotes). Se usa para no asumir 'crypto' a ciegas en
+    cuentas exchange: plataformas como Nexo ahora también dejan comprar acciones fraccionadas
+    reales, no solo cripto. Si maximos no responde, no reconoce el ticker, o Binance ya lo
+    reconoce como cripto, devuelve False — nunca bloquea la creación de la posición, solo se
+    pierde la adivinanza inteligente."""
+    if _is_binance_tradable(asset):
+        return False
+    try:
+        r = httpx.get(f"{MAXIMOS_URL}/api/quotes", params={"tickers": asset}, timeout=3)
+        if r.is_success:
+            quotes = r.json().get("quotes", {})
+            return quotes.get(asset, {}).get("price") is not None
+    except Exception:
+        pass
+    return False
+
 def guess_asset_type(asset: str, account_type: str = None) -> str:
     a = asset.upper()
     if a in FIAT_ASSETS:       return 'fiat'
     if a in STABLECOIN_ASSETS: return 'stablecoin'
-    if account_type in ('exchange', 'wallet_crypto'): return 'crypto'
+    if account_type in ('exchange', 'wallet_crypto'):
+        # Antes se asumía cripto siempre para cuentas exchange — pero plataformas como Nexo
+        # ahora también permiten comprar acciones fraccionadas reales (ej. SPY, AAPL). Si
+        # maximos reconoce el ticker como una acción/ETF real, se prioriza eso sobre cripto.
+        if _looks_like_real_stock(a):
+            return 'stock'
+        return 'crypto'
     if account_type == 'broker': return 'cedear'
     return 'crypto'
 
