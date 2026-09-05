@@ -33,9 +33,14 @@ LISTS: dict[str, list[str]] = {
         "UVXY","SQQQ","SH","PSQ",
         "ARKK","ARKG","ARKW","SOXX","SMH","CIBR","ICLN","JETS","ROBO",
     ],
+    # PAMP y TGSU2 (tickers del mercado local BYMA) se sacaron — no existen como ADR en Yahoo
+    # Finance, siempre daban 404. Los ADRs reales de esas empresas son PAM y TGS, que ya
+    # estaban en la lista aparte. Se agregaron TS (Tenaris), TEO (Telecom Argentina), CAAP
+    # (Corporación América Airports) y AGRO (Adecoagro) — ADRs reales y líquidos que faltaban.
     "adrs_arg": [
-        "GGAL","BMA","SUPV","BBAR","PAMP","CEPU","EDN","TGSU2",
+        "GGAL","BMA","SUPV","BBAR","CEPU","EDN",
         "LOMA","CRESY","IRS","MELI","GLOB","VIST","YPF","PAM","TGS",
+        "TS","TEO","CAAP","AGRO",
     ],
     "commodities": [
         # Metales
@@ -72,12 +77,110 @@ LISTS: dict[str, list[str]] = {
 }
 
 
+# Nombre completo por ticker — para mostrar al pasar el mouse en el frontend ("AAPL" ->
+# "Apple Inc."). Se llena de tres formas distintas según de dónde sale cada lista:
+#  - sp500: el CSV de origen (GitHub) ya trae una columna "Security" con el nombre — se
+#    capturaba y se tiraba en get_sp500_tickers(); ahora se guarda acá como side-effect.
+#  - crypto en vivo: CoinGecko ya devuelve "name" por moneda en la misma respuesta que se
+#    usa para el ranking — se guarda igual, como side-effect de get_crypto_tickers_live().
+#  - nasdaq100 / etfs / adrs_arg / commodities: son listas hardcodeadas, no hay de dónde
+#    sacar el nombre en vivo sin una llamada extra por ticker (cientos de tickers, mucho
+#    más lento que la descarga bulk de precios) — se escriben a mano acá, una sola vez.
+_TICKER_NAMES: dict[str, str] = {
+    # nasdaq100
+    "AAPL": "Apple", "MSFT": "Microsoft", "NVDA": "NVIDIA", "AMZN": "Amazon",
+    "META": "Meta Platforms", "TSLA": "Tesla", "GOOGL": "Alphabet (Clase A)",
+    "GOOG": "Alphabet (Clase C)", "AVGO": "Broadcom", "COST": "Costco",
+    "NFLX": "Netflix", "ASML": "ASML Holding", "AZN": "AstraZeneca",
+    "TMUS": "T-Mobile US", "AMD": "AMD", "PEP": "PepsiCo", "LIN": "Linde",
+    "CSCO": "Cisco", "ADBE": "Adobe", "TXN": "Texas Instruments",
+    "QCOM": "Qualcomm", "INTU": "Intuit", "ISRG": "Intuitive Surgical",
+    "AMAT": "Applied Materials", "BKNG": "Booking Holdings", "CMCSA": "Comcast",
+    "HON": "Honeywell", "AMGN": "Amgen", "MU": "Micron Technology",
+    "VRTX": "Vertex Pharmaceuticals", "ARM": "Arm Holdings", "LRCX": "Lam Research",
+    "REGN": "Regeneron", "ADI": "Analog Devices", "KLAC": "KLA Corporation",
+    "PANW": "Palo Alto Networks", "CRWD": "CrowdStrike", "MELI": "MercadoLibre",
+    "GILD": "Gilead Sciences", "SNPS": "Synopsys", "CDNS": "Cadence Design Systems",
+    "CTAS": "Cintas", "MDLZ": "Mondelez International", "ADP": "Automatic Data Processing",
+    "ABNB": "Airbnb", "MAR": "Marriott International", "ORLY": "O'Reilly Automotive",
+    "FTNT": "Fortinet", "CEG": "Constellation Energy", "CSX": "CSX Corporation",
+    "DXCM": "Dexcom", "PCAR": "PACCAR", "ROP": "Roper Technologies",
+    "CHTR": "Charter Communications", "WDAY": "Workday", "MNST": "Monster Beverage",
+    "NXPI": "NXP Semiconductors", "MRVL": "Marvell Technology", "PYPL": "PayPal",
+    "FAST": "Fastenal", "KDP": "Keurig Dr Pepper", "IDXX": "IDEXX Laboratories",
+    "AEP": "American Electric Power", "CPRT": "Copart", "ROST": "Ross Stores",
+    "FANG": "Diamondback Energy", "ODFL": "Old Dominion Freight Line", "PAYX": "Paychex",
+    "VRSK": "Verisk Analytics", "MCHP": "Microchip Technology", "EXC": "Exelon",
+    "GEHC": "GE HealthCare", "EA": "Electronic Arts", "KHC": "Kraft Heinz",
+    "DDOG": "Datadog", "XEL": "Xcel Energy", "CTSH": "Cognizant",
+    "WBD": "Warner Bros. Discovery", "LULU": "Lululemon Athletica", "ON": "ON Semiconductor",
+    "BKR": "Baker Hughes", "ZS": "Zscaler", "CSGP": "CoStar Group",
+    "CCEP": "Coca-Cola Europacific Partners", "TTWO": "Take-Two Interactive", "BIIB": "Biogen",
+    "ILMN": "Illumina", "WBA": "Walgreens Boots Alliance", "DLTR": "Dollar Tree",
+    "SIRI": "Sirius XM", "MDB": "MongoDB", "ALGN": "Align Technology",
+    "ENPH": "Enphase Energy", "ZM": "Zoom Video Communications", "LCID": "Lucid Group",
+    "RIVN": "Rivian Automotive", "SMCI": "Super Micro Computer", "NWSA": "News Corp (Clase A)",
+    "NWS": "News Corp (Clase B)", "FOX": "Fox Corporation (Clase B)",
+    # etfs
+    "SPY": "SPDR S&P 500 ETF Trust", "IVV": "iShares Core S&P 500 ETF",
+    "VOO": "Vanguard S&P 500 ETF", "QQQ": "Invesco QQQ Trust",
+    "IWM": "iShares Russell 2000 ETF", "DIA": "SPDR Dow Jones Industrial Average ETF",
+    "VTI": "Vanguard Total Stock Market ETF", "VEA": "Vanguard FTSE Developed Markets ETF",
+    "VWO": "Vanguard FTSE Emerging Markets ETF", "EFA": "iShares MSCI EAFE ETF",
+    "XLF": "Financial Select Sector SPDR Fund", "XLK": "Technology Select Sector SPDR Fund",
+    "XLE": "Energy Select Sector SPDR Fund", "XLV": "Health Care Select Sector SPDR Fund",
+    "XLI": "Industrial Select Sector SPDR Fund", "XLY": "Consumer Discretionary Select Sector SPDR Fund",
+    "XLP": "Consumer Staples Select Sector SPDR Fund", "XLU": "Utilities Select Sector SPDR Fund",
+    "XLB": "Materials Select Sector SPDR Fund", "XLRE": "Real Estate Select Sector SPDR Fund",
+    "TLT": "iShares 20+ Year Treasury Bond ETF", "IEF": "iShares 7-10 Year Treasury Bond ETF",
+    "SHY": "iShares 1-3 Year Treasury Bond ETF", "AGG": "iShares Core U.S. Aggregate Bond ETF",
+    "BND": "Vanguard Total Bond Market ETF", "HYG": "iShares iBoxx High Yield Corporate Bond ETF",
+    "LQD": "iShares iBoxx Investment Grade Corporate Bond ETF",
+    "EMB": "iShares JP Morgan USD Emerging Markets Bond ETF",
+    "GLD": "SPDR Gold Shares", "SLV": "iShares Silver Trust", "USO": "United States Oil Fund",
+    "UNG": "United States Natural Gas Fund",
+    "PDBC": "Invesco Optimum Yield Diversified Commodity Strategy ETF",
+    "DBC": "Invesco DB Commodity Index Tracking Fund", "CORN": "Teucrium Corn Fund",
+    "WEAT": "Teucrium Wheat Fund", "UVXY": "ProShares Ultra VIX Short-Term Futures ETF",
+    "SQQQ": "ProShares UltraPro Short QQQ", "SH": "ProShares Short S&P 500",
+    "PSQ": "ProShares Short QQQ", "ARKK": "ARK Innovation ETF",
+    "ARKG": "ARK Genomic Revolution ETF", "ARKW": "ARK Next Generation Internet ETF",
+    "SOXX": "iShares Semiconductor ETF", "SMH": "VanEck Semiconductor ETF",
+    "CIBR": "First Trust NASDAQ Cybersecurity ETF", "ICLN": "iShares Global Clean Energy ETF",
+    "JETS": "US Global Jets ETF", "ROBO": "ROBO Global Robotics and Automation ETF",
+    # adrs_arg
+    "GGAL": "Grupo Financiero Galicia", "BMA": "Banco Macro", "SUPV": "Grupo Supervielle",
+    "BBAR": "BBVA Argentina", "CEPU": "Central Puerto", "EDN": "Edenor",
+    "LOMA": "Loma Negra", "CRESY": "Cresud", "IRS": "IRSA Inversiones y Representaciones",
+    "GLOB": "Globant", "VIST": "Vista Energy", "YPF": "YPF",
+    "PAM": "Pampa Energía", "TGS": "Transportadora de Gas del Sur", "TS": "Tenaris",
+    "TEO": "Telecom Argentina", "CAAP": "Corporación América Airports", "AGRO": "Adecoagro",
+    # commodities (mismos nombres que COMMODITY_NAMES en el frontend — no traducidos a
+    # propósito, para no cambiar lo que ya se muestra hoy en la lista de commodities)
+    "GC=F": "Gold", "SI=F": "Silver", "HG=F": "Copper", "PL=F": "Platinum", "PA=F": "Palladium",
+    "CL=F": "WTI Crude", "BZ=F": "Brent", "NG=F": "Natural Gas", "RB=F": "Gasolina",
+    "HO=F": "Heating Oil", "ZW=F": "Wheat", "ZC=F": "Corn", "ZS=F": "Soybeans",
+    "KC=F": "Coffee", "CC=F": "Cocoa", "CT=F": "Cotton", "SB=F": "Sugar", "OJ=F": "OJ",
+}
+
+def get_ticker_name(ticker: str) -> str:
+    """Nombre completo del ticker para mostrar en el frontend (tooltip al pasar el mouse).
+    Devuelve "" si no se conoce — el frontend cae al ticker crudo en ese caso."""
+    return _TICKER_NAMES.get(ticker, "")
+
 def get_sp500_tickers() -> list[str]:
     with httpx.Client(follow_redirects=True, timeout=30) as client:
         resp = client.get(SP500_CSV_URL)
         resp.raise_for_status()
     df = pd.read_csv(io.StringIO(resp.text))
-    return [t.replace(".", "-") for t in df["Symbol"].tolist()]
+    tickers = [t.replace(".", "-") for t in df["Symbol"].tolist()]
+    # Side-effect: la misma columna "Security" del CSV que ya se descarga trae el nombre
+    # completo de cada empresa — se guarda acá para no tener que pedirlo aparte.
+    if "Security" in df.columns:
+        for t, name in zip(tickers, df["Security"].tolist()):
+            if name:
+                _TICKER_NAMES[t] = str(name)
+    return tickers
 
 
 # Stablecoins conocidas — se excluyen del ranking de "top crypto por market cap"
@@ -152,6 +255,12 @@ def get_crypto_tickers_live(limit: int = 20) -> list[str]:
                 continue
             seen.add(symbol)
             tickers.append(f"{symbol}-USD")
+            # Side-effect: CoinGecko ya trae el nombre completo de la moneda en la misma
+            # respuesta ("BTC" -> "Bitcoin") — se guarda para el tooltip del frontend,
+            # sin pedir nada aparte.
+            name = coin.get("name")
+            if name:
+                _TICKER_NAMES[f"{symbol}-USD"] = str(name)
             if len(tickers) >= limit:
                 break
         if len(tickers) >= min(limit, 10):  # respuesta razonable, no un fallo silencioso
@@ -839,6 +948,7 @@ def run_screener(tickers: list[str], on_result=None) -> list[dict]:
 
             result = {
                 "ticker":        ticker,
+                "name":          get_ticker_name(ticker),
                 "price":         round(price, 2),
                 # Helper Prime
                 "score":         prime["best_score"],
@@ -975,7 +1085,7 @@ def compute_all(tickers: list[str], on_result=None, on_error=None) -> list[dict]
             pivots = _compute_pivots(high, low, close)
             signal = prime_to_signal(prime["direction"], prime["long_score"], prime["short_score"])
             row = {
-                "ticker": ticker, "price": round(price, 2),
+                "ticker": ticker, "name": get_ticker_name(ticker), "price": round(price, 2),
                 "score": prime["best_score"], "long_score": prime["long_score"],
                 "short_score": prime["short_score"], "direction": prime["direction"],
                 "zone": prime["zone"], "adx": prime["adx"], "mom": prime["mom"],

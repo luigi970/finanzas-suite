@@ -425,7 +425,7 @@ function HistoryTab({ ticker, listId }) {
   );
 }
 
-function AnalysisModal({ ticker, listId, onClose }) {
+function AnalysisModal({ ticker, name, listId, onClose }) {
   const [tab, setTab] = useState("tecnico");
   const tvSymbol = toTvSymbol(ticker);
   const tabs = [
@@ -439,7 +439,9 @@ function AnalysisModal({ ticker, listId, onClose }) {
     <BottomSheet onClose={onClose} className="h-[88vh]">
       <div className="flex items-center justify-between px-4 py-3 border-b border-gray-200 shrink-0">
         <div className="flex items-center gap-3 min-w-0">
-          <span className="font-semibold text-gray-800 shrink-0">{ticker.endsWith("-USD") ? ticker.replace("-USD","") : ticker}</span>
+          <NameTooltip ticker={ticker} name={name}>
+            <span className="font-semibold text-gray-800 shrink-0 cursor-default">{ticker.endsWith("-USD") ? ticker.replace("-USD","") : ticker}</span>
+          </NameTooltip>
           <div className="flex gap-1">
             {tabs.map(t => (
               <button key={t.id} onClick={() => setTab(t.id)}
@@ -512,11 +514,13 @@ function TradingViewFullChart({ ticker }) {
   return <div id={`tv-full-${ticker}`} ref={containerRef} className="w-full h-full" />;
 }
 
-function ChartModal({ ticker, onClose }) {
+function ChartModal({ ticker, name, onClose }) {
   return (
     <BottomSheet onClose={onClose} className="h-[85vh]">
       <div className="flex items-center justify-between px-4 py-3 border-b border-gray-200 shrink-0">
-        <span className="font-semibold text-gray-800">{ticker.endsWith("-USD") ? ticker.replace("-USD", "") : ticker} — Gráfico</span>
+        <NameTooltip ticker={ticker} name={name}>
+          <span className="font-semibold text-gray-800 cursor-default">{ticker.endsWith("-USD") ? ticker.replace("-USD", "") : ticker} — Gráfico</span>
+        </NameTooltip>
         <button onClick={onClose} className="text-gray-400 hover:text-gray-600 text-xl leading-none">✕</button>
       </div>
       <div className="flex-1 overflow-hidden">
@@ -555,7 +559,9 @@ function AIModal({ stock: s, onClose }) {
           <div className="flex items-center gap-2.5">
             <span className="text-amber-400 text-lg">✦</span>
             <div>
-              <div className="text-white font-bold text-base leading-tight">{s.ticker}</div>
+              <div className="text-white font-bold text-base leading-tight">
+                <TickerTooltip s={s}><span className="cursor-default">{s.ticker}</span></TickerTooltip>
+              </div>
               <div className="text-slate-400 text-xs">Análisis IA</div>
             </div>
           </div>
@@ -640,7 +646,7 @@ function TickerModal({ stock: s, listId, onClose }) {
           <div className="flex items-start justify-between">
             <div>
               <div className="flex items-center gap-2 mb-1">
-                <h2 className="text-xl sm:text-2xl font-bold text-white">{displayTicker(s.ticker)}</h2>
+                <TickerTooltip s={s}><h2 className="text-xl sm:text-2xl font-bold text-white cursor-default">{displayTicker(s.ticker)}</h2></TickerTooltip>
                 <span className={`px-2 py-0.5 rounded-full text-xs font-bold text-white ${sigCfg.color}`}>
                   {sigCfg.label}
                 </span>
@@ -974,8 +980,8 @@ function TickerModal({ stock: s, listId, onClose }) {
         </div>
         </div>{/* overflow-y-auto */}
       </BottomSheet>
-      {showChart && <ChartModal ticker={s.ticker} onClose={() => setShowChart(false)} />}
-      {showAnalysis && <AnalysisModal ticker={s.ticker} listId={listId} onClose={() => setShowAnalysis(false)} />}
+      {showChart && <ChartModal ticker={s.ticker} name={s.name} onClose={() => setShowChart(false)} />}
+      {showAnalysis && <AnalysisModal ticker={s.ticker} name={s.name} listId={listId} onClose={() => setShowAnalysis(false)} />}
     </>
   );
 }
@@ -1173,9 +1179,25 @@ const CRYPTO_NAMES = {
   WIF: "dogwifhat", BONK: "Bonk", FLOKI: "Floki",
 };
 
+// Nombre completo de un ticker: prioriza el que ya viene del backend (`name`, calculado en
+// screener.py — cubre sp500 desde el CSV de origen y cripto en vivo desde CoinGecko), y si no
+// vino (ADRs/ETFs/nasdaq100 sin ese dato, o la lista de cripto de respaldo) cae al mapa
+// hardcodeado CRYPTO_NAMES de acá. Devuelve null si no se conoce ninguno de los dos.
+function resolveTickerName(ticker, name) {
+  return name || CRYPTO_NAMES[displayTicker(ticker)] || null;
+}
+
+// Tooltip liviano — solo el nombre completo, para los lugares que apenas muestran el ticker
+// (encabezados de modal) y no tienen a mano el resto de los datos técnicos del ticker.
+function NameTooltip({ ticker, name, children }) {
+  const fullName = resolveTickerName(ticker, name);
+  if (!fullName) return children;
+  return <Tooltip content={<span className="font-semibold text-white">{fullName}</span>}>{children}</Tooltip>;
+}
+
 function TickerTooltip({ s, children }) {
   const base = displayTicker(s.ticker);
-  const cryptoName = CRYPTO_NAMES[base];
+  const cryptoName = resolveTickerName(s.ticker, s.name);
   const sigCfg = SIGNAL_CONFIG[s.signal] ?? SIGNAL_CONFIG.neutral;
   const zoneLabel = { discount: "DISCOUNT", fair: "FAIR", premium: "PREMIUM" }[s.zone] ?? (s.zone ?? "—");
   const dir = s.direction === "long" ? "LARGO" : s.direction === "short" ? "CORTO" : null;
