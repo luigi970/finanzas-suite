@@ -359,16 +359,24 @@ async def on_fetch(request, env):
             except Exception:
                 pass
 
-        # Stocks / CEDEARs: D1 (datos del último screener run)
+        # Stocks / CEDEARs: D1 (datos del último screener run) — screener_results NO tiene
+        # una columna "price" propia, el precio vive adentro del JSON de la columna "data"
+        # (mismo dato que ya devuelve /api/stocks). Antes esto seleccionaba "price" directo
+        # de la tabla, que no existe — el SELECT tiraba excepción, silenciada por el except,
+        # y /api/quotes devolvía "quotes": {} para CUALQUIER ticker de acción/CEDEAR siempre.
         if stock_list:
             try:
                 placeholders = ",".join(["?"] * len(stock_list))
                 result = await env.maximos_db.prepare(
-                    f"SELECT ticker, price FROM screener_results WHERE ticker IN ({placeholders})"
+                    f"SELECT ticker, data FROM screener_results WHERE ticker IN ({placeholders})"
                 ).bind(*stock_list).all()
                 for row in result.results.to_py():
                     t = row.get("ticker")
-                    p = row.get("price")
+                    try:
+                        d = json.loads(row.get("data") or "{}")
+                    except Exception:
+                        continue
+                    p = d.get("price")
                     if t and p is not None:
                         quotes[t] = {"price": round(float(p), 4), "change": None, "change_pct": None}
             except Exception:
