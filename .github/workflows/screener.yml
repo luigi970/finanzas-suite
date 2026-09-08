@@ -9,7 +9,7 @@ on:
   workflow_dispatch:
     inputs:
       list_id:
-        description: "Lista a analizar"
+        description: "Lista a analizar (o 'watchlist' para forzar la corrida de alertas)"
         required: false
         default: "sp500"
       crypto_limit:
@@ -72,9 +72,41 @@ jobs:
           CF_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
           CF_D1_DB_ID: ${{ secrets.CF_D1_DB_ID }}
           COINGECKO_API_KEY: ${{ secrets.COINGECKO_API_KEY }}
+          NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
         run: |
           cd maximos/backend
           python run_job.py --list ${{ matrix.list_id }} --crypto-limit ${{ steps.list.outputs.crypto_limit }}
+
+  # Corre TODOS los días (además de las 6 listas fijas de arriba) los tickers que el
+  # usuario cargó a mano en la sección 🔔 Alertas de la web — así una acción que no está
+  # en sp500/nasdaq100/etfs/adrs_arg/crypto/commodities (ej. MicroStrategy) igual se
+  # analiza todos los días y puede disparar una alerta. La lista de tickers vive en D1
+  # (tabla alert_watchlist), no acá — este job no necesita saber cuáles son.
+  screener-watchlist:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    if: github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && github.event.inputs.list_id == 'watchlist')
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install -r maximos/backend/requirements.txt
+
+      - name: Run screener (watchlist de alertas)
+        env:
+          CF_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+          CF_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
+          CF_D1_DB_ID: ${{ secrets.CF_D1_DB_ID }}
+          NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
+        run: |
+          cd maximos/backend
+          python run_job.py --list watchlist
 
   screener-custom:
     runs-on: ubuntu-latest

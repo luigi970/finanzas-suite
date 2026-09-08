@@ -121,6 +121,10 @@ _TICKER_NAMES: dict[str, str] = {
     "ENPH": "Enphase Energy", "ZM": "Zoom Video Communications", "LCID": "Lucid Group",
     "RIVN": "Rivian Automotive", "SMCI": "Super Micro Computer", "NWSA": "News Corp (Clase A)",
     "NWS": "News Corp (Clase B)", "FOX": "Fox Corporation (Clase B)",
+    # Extras — tickers que no están en ninguna de las 6 listas fijas pero pueden terminar
+    # en la watchlist de alertas de un usuario (ver "watchlist" en run_job.py). Sin nombre
+    # acá, el ticker igual se analiza y alerta bien — solo se pierde el nombre lindo.
+    "MSTR": "MicroStrategy",
     # etfs
     "SPY": "SPDR S&P 500 ETF Trust", "IVV": "iShares Core S&P 500 ETF",
     "VOO": "Vanguard S&P 500 ETF", "QQQ": "Invesco QQQ Trust",

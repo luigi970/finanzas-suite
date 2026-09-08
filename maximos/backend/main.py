@@ -1,3 +1,4 @@
+import json
 import os
 import concurrent.futures
 import threading
@@ -6,7 +7,7 @@ import time
 import httpx
 import yfinance as yf
 from dotenv import load_dotenv
-from fastapi import FastAPI, BackgroundTasks
+from fastapi import FastAPI, BackgroundTasks, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
@@ -316,6 +317,40 @@ def get_news(ticker: str = ""):
         return {"news": news}
     except Exception as e:
         return {"news": [], "error": str(e)}
+
+
+# Tickers vigilados para avisos de señal fuerte (ver sección 🔔 Alertas del frontend y
+# check_and_send_alerts() en run_job.py). En producción esto vive en D1 (Worker); acá en
+# local no hay base de datos persistente (main.py es todo en memoria) — se guarda en un
+# archivo JSON chico al lado del backend, alcanza y sobra para una lista de unos pocos tickers.
+ALERT_WATCHLIST_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "alert_watchlist.json")
+
+
+def _load_alert_watchlist() -> list[str]:
+    try:
+        with open(ALERT_WATCHLIST_PATH, "r", encoding="utf-8") as f:
+            return json.load(f).get("tickers", [])
+    except Exception:
+        return []
+
+
+class AlertWatchlistIn(BaseModel):
+    tickers: list[str] = []
+
+
+@app.get("/api/alerts/watchlist")
+def get_alert_watchlist():
+    return {"tickers": _load_alert_watchlist()}
+
+
+@app.post("/api/alerts/watchlist")
+def save_alert_watchlist(data: AlertWatchlistIn):
+    tickers = sorted({t.strip().upper() for t in data.tickers if t.strip()})
+    if len(tickers) > 30:
+        raise HTTPException(400, "máximo 30 tickers")
+    with open(ALERT_WATCHLIST_PATH, "w", encoding="utf-8") as f:
+        json.dump({"tickers": tickers}, f)
+    return {"tickers": tickers}
 
 
 @app.get("/api/quotes")

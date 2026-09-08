@@ -171,6 +171,46 @@ async def on_fetch(request, env):
             return _j({"error": str(e)}, status=500)
         return _j({"lists": meta})
 
+    # GET /api/alerts/watchlist — tickers vigilados para avisos de señal fuerte.
+    # Lista chica, se reemplaza entera desde la UI (no hay altas/bajas individuales).
+    if method == "GET" and path == "/api/alerts/watchlist":
+        try:
+            await db.prepare(
+                "CREATE TABLE IF NOT EXISTS alert_watchlist (ticker TEXT PRIMARY KEY, added_at TEXT NOT NULL)"
+            ).run()
+            cursor = await db.prepare("SELECT ticker FROM alert_watchlist ORDER BY ticker").all()
+            tickers = [row.to_py()["ticker"] for row in cursor.results]
+        except Exception as e:
+            return _j({"error": str(e)}, status=500)
+        return _j({"tickers": tickers})
+
+    # POST /api/alerts/watchlist — reemplaza la lista completa. Body: {"tickers": ["PYPL", "AAPL"]}
+    if method == "POST" and path == "/api/alerts/watchlist":
+        try:
+            body_text = await request.text()
+            body = json.loads(body_text) if body_text else {}
+        except Exception:
+            return _j({"error": "body inválido"}, status=400)
+
+        tickers = [t.strip().upper() for t in body.get("tickers", []) if isinstance(t, str) and t.strip()]
+        if len(tickers) > 30:
+            return _j({"error": "máximo 30 tickers"}, status=400)
+
+        try:
+            await db.prepare(
+                "CREATE TABLE IF NOT EXISTS alert_watchlist (ticker TEXT PRIMARY KEY, added_at TEXT NOT NULL)"
+            ).run()
+            await db.prepare("DELETE FROM alert_watchlist").run()
+            from datetime import datetime, timezone
+            now = datetime.now(timezone.utc).isoformat()
+            for t in tickers:
+                await db.prepare(
+                    "INSERT INTO alert_watchlist (ticker, added_at) VALUES (?, ?)"
+                ).bind(t, now).run()
+        except Exception as e:
+            return _j({"error": str(e)}, status=500)
+        return _j({"tickers": tickers})
+
     # POST /api/analyze — AI recommendation for a single ticker
     if method == "POST" and path == "/api/analyze":
         try:

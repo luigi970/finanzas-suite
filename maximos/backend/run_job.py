@@ -191,6 +191,151 @@ def upsert_result(token, account_id, db_id, run_id: int, list_id: str, row: dict
     )
 
 
+# ── Alertas por señal fuerte (push al celular vía ntfy.sh) ────────────────────
+# Idea: el usuario arma una lista corta de tickers que le importan (desde la web de
+# maximos, tabla alert_watchlist en D1). Cada vez que corre el screener, si alguno de
+# esos tickers ENTRA o SALE de compra_fuerte/venta_fuerte respecto de su señal del día
+# anterior, se manda un aviso al celular con un mensaje claro y las últimas noticias
+# del propio ticker. Nunca debe romper el job principal — cualquier error acá se traga
+# y se loguea, el screener ya guardó sus resultados antes de llegar a este punto.
+
+STRONG_SIGNALS = {"compra_fuerte", "venta_fuerte"}
+
+SIGNAL_LABELS = {
+    "compra_fuerte": "COMPRA FUERTE",
+    "compra":        "compra",
+    "neutral":       "neutral",
+    "venta":         "venta",
+    "venta_fuerte":  "VENTA FUERTE",
+}
+
+
+def ensure_alert_watchlist_table(token, account_id, db_id):
+    d1_query(token, account_id, db_id, """
+        CREATE TABLE IF NOT EXISTS alert_watchlist (
+            ticker TEXT PRIMARY KEY,
+            added_at TEXT NOT NULL
+        )
+    """)
+
+
+def get_alert_watchlist(token, account_id, db_id) -> set[str]:
+    try:
+        result = d1_query(token, account_id, db_id, "SELECT ticker FROM alert_watchlist")
+        rows = result[0].get("results", []) if result else []
+        return {r["ticker"] for r in rows}
+    except Exception as e:
+        print(f"[alerts] Error leyendo watchlist: {e}", file=sys.stderr)
+        return set()
+
+
+def get_previous_signal(token, account_id, db_id, ticker: str, today: str) -> str | None:
+    """Última señal registrada para este ticker ANTES de hoy (para detectar el cambio)."""
+    try:
+        result = d1_query(
+            token, account_id, db_id,
+            "SELECT signal FROM signal_history WHERE ticker = ? AND recorded_at < ? "
+            "ORDER BY recorded_at DESC LIMIT 1",
+            [ticker, today],
+        )
+        rows = result[0].get("results", []) if result else []
+        return rows[0]["signal"] if rows else None
+    except Exception as e:
+        print(f"[alerts] Error leyendo señal previa de {ticker}: {e}", file=sys.stderr)
+        return None
+
+
+def fetch_ticker_news(ticker: str, limit: int = 2) -> list[str]:
+    """Últimos titulares del ticker (yfinance) — mismo dato que ya se muestra en la
+    pestaña Noticias del modal de cada ticker en la web."""
+    try:
+        import yfinance as yf
+        raw = yf.Ticker(ticker).news or []
+        titles = []
+        for item in raw[:limit]:
+            content = item.get("content", {})
+            title = content.get("title") or item.get("title", "")
+            if title:
+                titles.append(title)
+        return titles
+    except Exception:
+        return []
+
+
+def build_alert_message(ticker: str, name: str, prev_signal: str, new_signal: str, price: float) -> tuple[str, str]:
+    """Arma título + cuerpo del aviso — tiene que ser corto, claro y fácil de leer en
+    una notificación de celular, no un volcado técnico."""
+    display = f"{name} ({ticker})" if name else ticker
+    entering_buy  = new_signal == "compra_fuerte" and prev_signal != "compra_fuerte"
+    entering_sell = new_signal == "venta_fuerte" and prev_signal != "venta_fuerte"
+
+    if entering_buy:
+        emoji, headline = "🚀", f"{ticker} entró en zona de COMPRA FUERTE"
+        body = f"{display} está cotizando a USD {price:,.2f} y el sistema le puso la señal más fuerte de compra. Vale la pena que le eches un vistazo."
+    elif entering_sell:
+        emoji, headline = "⚠️", f"{ticker} entró en zona de VENTA FUERTE"
+        body = f"{display} está cotizando a USD {price:,.2f} y el sistema detectó la señal más fuerte de venta. Si lo tenés en cartera, prestale atención."
+    elif prev_signal == "compra_fuerte":
+        emoji, headline = "📉", f"{ticker} salió de COMPRA FUERTE"
+        body = f"{display} se enfrió — ahora está en {SIGNAL_LABELS.get(new_signal, new_signal)}, cotizando a USD {price:,.2f}."
+    else:  # prev_signal == "venta_fuerte"
+        emoji, headline = "📈", f"{ticker} salió de VENTA FUERTE"
+        body = f"{display} mejoró — ahora está en {SIGNAL_LABELS.get(new_signal, new_signal)}, cotizando a USD {price:,.2f}."
+
+    news = fetch_ticker_news(ticker)
+    if news:
+        body += "\n\n📰 " + "\n📰 ".join(news)
+
+    return f"{emoji} {headline}", body
+
+
+def send_ntfy_alert(topic: str, title: str, body: str):
+    try:
+        r = requests.post(
+            f"https://ntfy.sh/{topic}",
+            data=body.encode("utf-8"),
+            headers={"Title": title.encode("utf-8"), "Priority": "default"},
+            timeout=10,
+        )
+        if r.status_code == 200:
+            # título en ASCII-safe para el log — emojis/tildes pueden romper la consola
+            # en algunos entornos (visto en Windows local); ntfy.sh ya los recibió bien.
+            print(f"[alerts] Enviado OK ({r.status_code})".encode("ascii", "replace").decode())
+        else:
+            print(f"[alerts] ntfy.sh HTTP {r.status_code}: {r.text[:200]}".encode("ascii", "replace").decode(), file=sys.stderr)
+    except Exception as e:
+        print(f"[alerts] Error enviando a ntfy.sh: {type(e).__name__}: {e}".encode("ascii", "replace").decode(), file=sys.stderr)
+
+
+def check_and_send_alerts(token, account_id, db_id, today, results):
+    ntfy_topic = os.environ.get("NTFY_TOPIC", "")
+    if not ntfy_topic:
+        return  # alertas no configuradas — no es un error, simplemente no está activado
+
+    try:
+        ensure_alert_watchlist_table(token, account_id, db_id)
+        watched = get_alert_watchlist(token, account_id, db_id)
+        if not watched:
+            return
+
+        for row in results:
+            ticker = row.get("ticker")
+            if ticker not in watched:
+                continue
+            new_signal = row.get("signal")
+            prev_signal = get_previous_signal(token, account_id, db_id, ticker, today)
+            if prev_signal is None or prev_signal == new_signal:
+                continue
+            was_strong = prev_signal in STRONG_SIGNALS
+            is_strong = new_signal in STRONG_SIGNALS
+            if not was_strong and not is_strong:
+                continue  # cambió de señal, pero nunca pasó por una zona fuerte — no es lo que queremos avisar
+            title, body = build_alert_message(ticker, row.get("name", ""), prev_signal, new_signal, row.get("price", 0))
+            send_ntfy_alert(ntfy_topic, title, body)
+    except Exception as e:
+        print(f"[alerts] Error general en chequeo de alertas: {e}", file=sys.stderr)
+
+
 # ── main ──────────────────────────────────────────────────────────────────────
 
 def main():
@@ -208,14 +353,27 @@ def main():
         print("ERROR: CF_API_TOKEN y CF_ACCOUNT_ID son requeridos", file=sys.stderr)
         sys.exit(1)
 
-    custom = [t.strip() for t in args.custom_tickers.split(",") if t.strip()] if args.custom_tickers else None
-    tickers = get_tickers(args.list_id, custom=custom, crypto_limit=args.crypto_limit)
+    # "watchlist" no es una lista fija de screener.py — son los tickers que el usuario
+    # cargó a mano en la sección 🔔 Alertas de la web (tabla alert_watchlist en D1),
+    # para que CUALQUIER ticker que le importe (esté o no en sp500/nasdaq100/etc.) se
+    # analice todos los días y pueda disparar una alerta. Sin esto, un ticker fuera de
+    # las 6 listas fijas nunca se procesa y nunca puede avisar nada.
+    if args.list_id == "watchlist":
+        ensure_alert_watchlist_table(token, account_id, db_id)
+        tickers = sorted(get_alert_watchlist(token, account_id, db_id))
+        if not tickers:
+            print("[job] Lista de alertas vacía — nada que analizar hoy.")
+            return
+    else:
+        custom = [t.strip() for t in args.custom_tickers.split(",") if t.strip()] if args.custom_tickers else None
+        tickers = get_tickers(args.list_id, custom=custom, crypto_limit=args.crypto_limit)
     print(f"[job] Lista: {args.list_id} — {len(tickers)} tickers")
 
-    # Custom list: clear stale results so only the requested tickers appear
-    if args.list_id == "custom":
+    # Custom/watchlist: clear stale results so only the tickers actuales aparecen (si se
+    # sacó un ticker de la lista de alertas, que no quede su fila vieja para siempre)
+    if args.list_id in ("custom", "watchlist"):
         d1_query(token, account_id, db_id,
-                 "DELETE FROM screener_results WHERE list_id = 'custom'")
+                 "DELETE FROM screener_results WHERE list_id = ?", [args.list_id])
         print("[job] Resultados custom anteriores eliminados")
 
     run_id = create_run(token, account_id, db_id, args.list_id, len(tickers))
@@ -280,6 +438,8 @@ def main():
     insert_history(token, account_id, db_id, args.list_id, today, results)
     update_history_prices(token, account_id, db_id, args.list_id, today, results)
     print(f"[history] {len(results)} registros insertados/actualizados para {today}")
+
+    check_and_send_alerts(token, account_id, db_id, today, results)
 
     if errors:
         print(f"[job] Tickers con error: {[t for t, _ in errors[:10]]}")

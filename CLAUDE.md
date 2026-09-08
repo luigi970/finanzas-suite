@@ -130,6 +130,7 @@ Status del Worker: `"idle"` → `"loading"` → `"ready"` (mapeado desde D1: `ru
 - `CF_D1_DB_ID` — ID de la base D1
 - `VITE_API_URL` — URL del Worker para el build de Pages
 - `COINGECKO_API_KEY` — para el ranking en vivo de la lista `crypto` (opcional: si falta, `get_crypto_tickers_live()` cae a la lista fija vieja sin romper el job)
+- `NTFY_TOPIC` — nombre del canal de ntfy.sh para las alertas de señal fuerte (opcional: si falta, `check_and_send_alerts()` no manda nada, no rompe el job). Ver sección "Alertas por señal fuerte" más abajo.
 
 ### Cloudflare Worker (dashboard → Settings → Variables and Secrets)
 - `GH_PAT` — GitHub PAT con permisos `repo` (para repository_dispatch)
@@ -208,6 +209,7 @@ Parámetros: `pivot_len=3`, `min_bars_between=5`, `min_osc_delta=3.0`, `turn_lev
 
 ## Campos calculados por ticker
 
+`name` (nombre completo — "AAPL" → "Apple"; sp500 sale del CSV de origen, cripto en vivo de CoinGecko, el resto de un mapa a mano en `_TICKER_NAMES`; usado por el frontend para el tooltip al pasar el mouse),
 `price`, `score`, `long_score`, `short_score`, `direction`, `signal`,
 `zone`, `adx`, `mom`, `poc`, `sl`, `tp1`, `tp2`,
 `pulse_signal`, `pulse_state`,
@@ -226,7 +228,7 @@ Parámetros: `pivot_len=3`, `min_bars_between=5`, `min_osc_delta=3.0`, `turn_lev
 | `sp500` | 503 acciones | CSV GitHub `datasets/s-and-p-500-companies` |
 | `nasdaq100` | 100 empresas tech | Hardcodeado en `screener.py` |
 | `etfs` | 49 ETFs | Hardcodeado en `screener.py` |
-| `adrs_arg` | 17 ADRs argentinos | Hardcodeado en `screener.py` |
+| `adrs_arg` | 19 ADRs argentinos | Hardcodeado en `screener.py` |
 | `crypto` | Top N criptos por market cap real (sin stablecoins), limitado por `crypto_limit` | **En vivo** desde CoinGecko (`get_crypto_tickers_live()` en `screener.py`), filtrado contra pares activos en Binance — cae a una lista fija vieja si CoinGecko/Binance fallan |
 | `commodities` | 18 futuros: metales, energía y agrícolas | Hardcodeado en `screener.py` con tickers `=F` |
 
@@ -235,6 +237,21 @@ Parámetros: `pivot_len=3`, `min_bars_between=5`, `min_osc_delta=3.0`, `turn_lev
 - **El ranking crudo de CoinGecko trae basura**: fondos tokenizados (BUIDL, USYC, JAAA), oro/commodities tokenizados (XAUT, PAXG), stablecoins nuevas no cubiertas por la lista de exclusión, y ocasionalmente símbolos con datos corruptos (se vio un símbolo con caracteres no latinos). Se filtra con: (1) lista de stablecoins conocidas, (2) regex `^[A-Z0-9_-]{1,15}$` para descartar símbolos con formato raro, (3) cruce contra `_get_binance_tradable_symbols()` — solo se incluye un ticker si tiene un par activo contra USDT en Binance, que es de donde el screener saca los precios igual, así se evita listar algo que después no va a tener datos.
 - **Límite real, a propósito — solo spot, nunca futuros**: si una moneda no cotiza en Binance **spot**, no va a aparecer en la lista, sin importar cuán alto esté el `crypto_limit`. Caso real: Hyperliquid (HYPE) no tiene par `HYPEUSDT` en spot, solo en futuros/perpetuos (`fapi.binance.com`) — se evaluó agregar futuros como respaldo cuando spot no tiene el símbolo, pero se descartó: el precio de un perpetuo diverge del spot (funding rate, apalancamiento, mechas de liquidación), así que mezclar las dos fuentes entre distintos tickers de la misma lista haría que los scores dejen de ser comparables entre sí — algunos calculados sobre precio "real" y otros sobre precio de futuros. Para incluir monedas futures-only habría que evaluar todo el ticker con datos de futuros de forma consistente (otro cambio de arquitectura, no un ajuste de la lista), o directamente aceptar que quedan afuera.
 - Respaldo: si CoinGecko o Binance fallan (rate limit, sin red, sin key), `get_crypto_tickers_live()` cae a la lista fija vieja (`LISTS["crypto"]`) — el screener nunca se queda sin tickers por esto, aunque en ese caso vuelve a ser una lista desactualizada hasta la próxima corrida exitosa.
+
+## Alertas por señal fuerte (2026-09-08)
+
+Aviso push al celular (vía [ntfy.sh](https://ntfy.sh), gratis, sin cuenta) cuando un ticker que el usuario vigila entra o sale de `compra_fuerte`/`venta_fuerte`. Pensado para no tener que abrir la app todos los días — el usuario arma una lista corta de tickers que le importan, y listo.
+
+- **Alcance, a propósito**: solo una lista corta que el usuario arma a mano (tabla `alert_watchlist` en D1, columna `ticker`) — no se avisa de toda la lista sp500/nasdaq100 completa, sería puro ruido. Se gestiona desde la web de maximos (sección "🔔 Alertas", input de tickers separados por coma) — **distinta** del "Watchlist" que ya existía, que vive solo en `localStorage` del navegador y por eso el trabajo diario de GitHub Actions no lo puede leer (corre en la nube, no en el navegador del usuario).
+- **Disparador, a propósito — solo señales fuertes, no cualquier cambio**: se compara la señal de hoy contra la de ayer (ya está guardado en `signal_history`, no hace falta ningún dato nuevo). Se avisa únicamente si la señal de HOY o la de AYER es `compra_fuerte`/`venta_fuerte` y cambiaron — cubre entrar a una zona fuerte, salir de una, y el caso raro de flip directo compra_fuerte↔venta_fuerte. Un cambio entre señales débiles (ej. neutral → compra) no dispara nada — el objetivo es señal, no ruido de todos los días.
+- **Mensaje "claro y ameno", no un volcado técnico** (pedido explícito): el título usa un emoji + una frase corta ("🚀 PYPL entró en zona de COMPRA FUERTE"), el cuerpo explica en una oración qué pasó y a qué precio, y le pega abajo las 2 noticias más recientes del propio ticker (mismo dato que ya se muestra en la pestaña Noticias del modal — `yf.Ticker(ticker).news`, no es una fuente nueva).
+- **No incluye noticias "indirectas"** (una suba de tasas que pega en tech, por ejemplo) — eso se evaluó y se descartó para esta primera versión: solo hay noticias del propio ticker, no hay ninguna fuente de noticias de mercado/sector todavía, así que una IA "juzgando relevancia indirecta" no tendría de qué mercado alimentarse. Queda como posible vuelta de tuerca si las alertas simples resultan útiles.
+- **Arquitectura**: `run_job.py` corre `check_and_send_alerts()` al final de cada corrida (una vez por lista, ya con los resultados del día calculados) — la tabla `alert_watchlist` se auto-crea (`CREATE TABLE IF NOT EXISTS`) tanto ahí como en los endpoints del Worker, no depende de aplicar una migración a mano. Todo el bloque está en un único `try/except` grande — un error acá (ntfy caído, D1 con un hipo) nunca debe tirar abajo el job del screener, que ya guardó sus resultados antes de llegar a este punto.
+- **Sin `NTFY_TOPIC` configurado, no manda nada** — no es un error, `check_and_send_alerts()` corta al toque. El topic actúa como "contraseña" del canal (cualquiera que lo sepa puede suscribirse) — hay que elegir un nombre largo y random, no algo como `maximos-alertas`.
+- **Cómo activarlo**: 1) instalar la app [ntfy](https://ntfy.sh/) (Android/iOS) y suscribirse a un topic random elegido por el usuario; 2) cargar ese mismo nombre como secret `NTFY_TOPIC` en GitHub Actions (Settings → Secrets → Actions) — esto no lo puede hacer Claude, requiere acceso a la config del repo; 3) agregar tickers desde la sección 🔔 Alertas en la web de maximos.
+- **Endpoints**: `GET /api/alerts/watchlist` (lista actual), `POST /api/alerts/watchlist` con `{"tickers": [...]}` (reemplaza la lista entera, no hay altas/bajas individuales — máximo 30 tickers).
+- **Tickers fuera de las 6 listas fijas (ej. MicroStrategy/MSTR)**: si no está en sp500/nasdaq100/etfs/adrs_arg/crypto/commodities, el screener normal nunca lo procesa y nunca podría alertar nada. Se agregó un job separado, `screener-watchlist` en `screener.yml`, que corre TODOS los días (mismo cron) y llama a `run_job.py --list watchlist` — un modo especial que, en vez de usar `get_tickers()`, lee los tickers directo de `alert_watchlist` en D1 y los procesa con `compute_all()` igual que cualquier otra lista, guardando bajo `list_id='watchlist'` en `screener_results`/`signal_history`. Así CUALQUIER ticker que el usuario cargue en 🔔 Alertas queda cubierto, esté o no en las listas grandes. Si la watchlist está vacía, el job no hace nada (sale al toque, sin gastar tiempo de CI). **A propósito no se agregó como pestaña navegable en la UI** (solo sirve para alertas, no para mirar el análisis técnico en la web) — para eso haría falta además arreglar el disparo por `repository_dispatch` del botón "Analizar", que hoy no cubre `list_id=watchlist`.
+- **Nombres de tickers fuera de listas**: `_TICKER_NAMES` en `screener.py` tiene una sub-sección de "Extras" para tickers que pueden terminar en una watchlist de alertas sin estar en ninguna lista fija (ej. `MSTR: MicroStrategy`) — si falta, el ticker se analiza y alerta igual de bien, solo se pierde el nombre lindo en el mensaje (queda el ticker pelado).
 
 ## IA — cadena de proveedores
 
@@ -316,9 +333,12 @@ El prompt está en `worker/src/providers/prompt.py` (`build_prompt()`). El backe
 - [x] `start-all.ps1` arranca los 8 procesos, auto-libera puertos y abre solo el launcher
 - [x] `strictPort: true` en todos los vite.config.js — evita que vite cambie puertos silenciosamente
 - [x] `/api/health` en maximos backend — necesario para el status check del launcher
+- [x] ADRs argentinos: 2 tickers rotos corregidos (PAMP→PAM, TGSU2→TGS) + 4 ADRs reales agregados (TS, TEO, CAAP, AGRO)
+- [x] Nombre completo del ticker al pasar el mouse en toda la app (sp500 desde el CSV de origen, cripto en vivo desde CoinGecko, resto en mapa a mano)
+- [x] Alertas push (ntfy.sh) por señal fuerte para una lista corta de tickers vigilados, con noticias del propio ticker incluidas
 
 ### Features pendientes
-- [ ] Alertas por email o Telegram cuando cambia la señal
+- [ ] Alertas: incorporar noticias de mercado/sector (no solo del propio ticker) + juicio de relevancia vía IA — evaluado, requiere primero una fuente de noticias de mercado que hoy no existe
 - [ ] MTF real con descarga intraday para 15m/1h/4h
 - [ ] Lista personalizada (custom tickers) en la UI
 

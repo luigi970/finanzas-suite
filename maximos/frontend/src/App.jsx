@@ -1539,6 +1539,42 @@ export default function App() {
   const [watchlist, setWatchlist] = useState(() => {
     try { return JSON.parse(localStorage.getItem("watchlist") || "[]"); } catch { return []; }
   });
+  // Lista de tickers vigilados para avisos por señal fuerte (push al celu) — a diferencia
+  // del Watchlist de arriba, esta vive en la nube (D1), porque el trabajo diario que manda
+  // los avisos corre en GitHub Actions, no en el navegador.
+  const [alertTickers, setAlertTickers] = useState([]);
+  const [alertInput, setAlertInput] = useState("");
+  const [alertSaving, setAlertSaving] = useState(false);
+  const [alertSavedAt, setAlertSavedAt] = useState(null);
+  useEffect(() => {
+    fetch(`${API_BASE}/api/alerts/watchlist`)
+      .then(r => r.json())
+      .then(d => {
+        const tickers = d.tickers || [];
+        setAlertTickers(tickers);
+        setAlertInput(tickers.join(", "));
+      })
+      .catch(() => {});
+  }, []);
+  async function saveAlertWatchlist() {
+    const tickers = [...new Set(alertInput.split(",").map(t => t.trim().toUpperCase()).filter(Boolean))];
+    setAlertSaving(true);
+    try {
+      const r = await fetch(`${API_BASE}/api/alerts/watchlist`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ tickers }),
+      });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.error || "Error al guardar");
+      setAlertTickers(d.tickers || tickers);
+      setAlertSavedAt(new Date());
+    } catch (e) {
+      alert(`No se pudo guardar la lista de alertas: ${e.message}`);
+    } finally {
+      setAlertSaving(false);
+    }
+  }
   const [quotes, setQuotes] = useState({});
   const [quotesUpdated, setQuotesUpdated] = useState(null);
   const headerRef = useRef(null);
@@ -1860,6 +1896,39 @@ export default function App() {
             <p className="text-xs text-amber-600 mt-1 text-right">
               {status === "downloading" ? "Conectando…" : `${totalTickers > 0 ? Math.round((processed / totalTickers) * 100) : 0}%`}
             </p>
+          </div>
+        )}
+
+        {/* Alertas por señal fuerte (push al celular vía ntfy) */}
+        {selectedList !== "dolar" && (
+          <div className="mb-6 bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
+            <div className="flex items-center justify-between px-4 py-2.5 border-b border-gray-100 bg-gray-50">
+              <span className="text-sm font-semibold text-gray-700">🔔 Alertas</span>
+              <span className="text-xs text-gray-400">Aviso al celu cuando entren o salgan de compra/venta fuerte</span>
+            </div>
+            <div className="p-4 flex flex-col sm:flex-row gap-2 sm:items-center">
+              <input
+                value={alertInput}
+                onChange={e => setAlertInput(e.target.value)}
+                placeholder="Ej: PYPL, AAPL, BTC-USD"
+                className="flex-1 border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-amber-400"
+              />
+              <button
+                onClick={saveAlertWatchlist}
+                disabled={alertSaving}
+                className="bg-amber-500 hover:bg-amber-600 disabled:opacity-50 text-white text-sm font-semibold px-4 py-2 rounded-lg transition shrink-0"
+              >
+                {alertSaving ? "Guardando..." : "Guardar"}
+              </button>
+            </div>
+            {alertSavedAt && (
+              <p className="px-4 pb-3 text-xs text-green-600">
+                Guardado {alertSavedAt.toLocaleTimeString("es-AR", { hour: "2-digit", minute: "2-digit" })} — se revisa una vez por día, cuando corre el screener.
+              </p>
+            )}
+            {!alertSavedAt && alertTickers.length > 0 && (
+              <p className="px-4 pb-3 text-xs text-gray-400">Vigilando: {alertTickers.join(", ")}</p>
+            )}
           </div>
         )}
 
