@@ -254,6 +254,70 @@ function Tooltip({ text, content, children }) {
   );
 }
 
+// Botón de ayuda con popover propio (no el Tooltip genérico de arriba, pensado para
+// textos cortos arriba de un ticker) — este tiene contenido largo y aparece cerca del
+// borde superior de la página, así que se renderiza en un portal y se ubica siempre
+// hacia abajo, clampeado dentro del viewport, para que nunca quede cortado ni se vaya
+// de cuadro.
+function AlertHelpButton({ show, setShow }) {
+  const btnRef = useRef(null);
+  const [pos, setPos] = useState(null);
+
+  useEffect(() => {
+    if (!show || !btnRef.current) { setPos(null); return; }
+    const r = btnRef.current.getBoundingClientRect();
+    const width = Math.min(384, window.innerWidth - 24);
+    const left = Math.max(12, Math.min(window.innerWidth - width - 12, r.left));
+    setPos({ left, top: r.bottom + 8, width });
+  }, [show]);
+
+  return (
+    <>
+      <button
+        ref={btnRef}
+        onClick={() => setShow(v => !v)}
+        className={`w-5 h-5 flex items-center justify-center rounded-full text-xs font-bold transition ${
+          show ? "bg-amber-500 text-white" : "bg-gray-200 text-gray-500 hover:bg-gray-300"
+        }`}
+        aria-label="Ayuda"
+      >
+        ?
+      </button>
+
+      {show && pos && createPortal(
+        <>
+          <div className="fixed inset-0 z-40" onClick={() => setShow(false)} />
+          <div
+            className="fixed z-50 bg-white rounded-xl border border-gray-200 shadow-2xl p-4 text-sm text-gray-700 leading-relaxed"
+            style={{ left: pos.left, top: pos.top, width: pos.width }}
+          >
+            <div className="flex items-center justify-between mb-2.5">
+              <span className="font-bold text-gray-900 text-base">Cómo cargar los tickers</span>
+              <button onClick={() => setShow(false)} className="text-gray-400 hover:text-gray-600 text-lg leading-none">✕</button>
+            </div>
+            <div className="space-y-2.5">
+              <p>
+                <span className="font-semibold text-gray-900">Acciones y CEDEARs:</span> sin sufijo — <code className="bg-amber-50 text-amber-700 rounded px-1 py-0.5 font-mono text-xs">AAPL</code>, <code className="bg-amber-50 text-amber-700 rounded px-1 py-0.5 font-mono text-xs">MSTR</code>, <code className="bg-amber-50 text-amber-700 rounded px-1 py-0.5 font-mono text-xs">PYPL</code>.
+              </p>
+              <p>
+                <span className="font-semibold text-gray-900">Cripto:</span> siempre con <code className="bg-amber-50 text-amber-700 rounded px-1 py-0.5 font-mono text-xs">-USD</code> — <code className="bg-amber-50 text-amber-700 rounded px-1 py-0.5 font-mono text-xs">BTC-USD</code>, <code className="bg-amber-50 text-amber-700 rounded px-1 py-0.5 font-mono text-xs">ETH-USD</code>. Sin el sufijo, "BTC" solo se confunde con un ticker de acción sin relación.
+              </p>
+              <p className="text-gray-500">Hasta 30 tickers. Se revisa una vez por día, cuando corre el screener — no es en tiempo real.</p>
+              <p className="text-gray-500">Solo avisa al entrar o salir de COMPRA FUERTE / VENTA FUERTE — cambios más chicos no generan aviso.</p>
+            </div>
+            <div className="mt-3 -mx-4 -mb-4 px-4 pb-4 pt-3 border-t border-amber-100 bg-amber-50 rounded-b-xl">
+              <p className="text-amber-800 text-xs font-semibold leading-relaxed">
+                ⚠️ Cargalos acá, en la web online (maximos.pages.dev) — si los cargás en un localhost de desarrollo, el trabajo automático en la nube no los va a ver.
+              </p>
+            </div>
+          </div>
+        </>,
+        document.body
+      )}
+    </>
+  );
+}
+
 function BottomSheet({ onClose, children, className = "" }) {
   return (
     <div className="fixed inset-0 bg-black/60 z-50 flex items-end" onClick={onClose}>
@@ -1546,6 +1610,7 @@ export default function App() {
   const [alertInput, setAlertInput] = useState("");
   const [alertSaving, setAlertSaving] = useState(false);
   const [alertSavedAt, setAlertSavedAt] = useState(null);
+  const [showAlertHelp, setShowAlertHelp] = useState(false);
   useEffect(() => {
     fetch(`${API_BASE}/api/alerts/watchlist`)
       .then(r => r.json())
@@ -1903,8 +1968,11 @@ export default function App() {
         {selectedList !== "dolar" && (
           <div className="mb-6 bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
             <div className="flex items-center justify-between px-4 py-2.5 border-b border-gray-100 bg-gray-50">
-              <span className="text-sm font-semibold text-gray-700">🔔 Alertas</span>
-              <span className="text-xs text-gray-400">Aviso al celu cuando entren o salgan de compra/venta fuerte</span>
+              <div className="flex items-center gap-2">
+                <span className="text-sm font-semibold text-gray-700">🔔 Alertas</span>
+                <AlertHelpButton show={showAlertHelp} setShow={setShowAlertHelp} />
+              </div>
+              <span className="text-xs text-gray-400 hidden sm:block">Aviso al celu cuando entren o salgan de compra/venta fuerte</span>
             </div>
             <div className="p-4 flex flex-col sm:flex-row gap-2 sm:items-center">
               <input
