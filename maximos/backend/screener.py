@@ -1,6 +1,7 @@
 import io
 import os
 import re
+import sys
 import concurrent.futures
 import httpx
 import pandas as pd
@@ -320,24 +321,97 @@ def _fetch_binance_klines(symbol: str, interval: str, limit: int = 30) -> pd.Dat
         return None
 
 
-# Nota (2026-09-11): se evaluó un fallback automático a otro proveedor cuando Binance
-# falla (geobloquea IPs de datacenter de forma intermitente — las corridas de GitHub
-# Actions arrancan en una VM nueva con una IP al azar cada vez, así que un día puede
-# pasar y otro no). Se descartó: CryptoCompare ahora exige API key hasta en su tier
-# gratis (probado en vivo, 401), y CoinGecko solo da velas diarias reales (high/low)
-# para los últimos ~30 días gratis — más allá de eso solo da precio de cierre, sin
-# high/low/volumen reales. Rellenar eso a mano degradaría en silencio el análisis
-# (ATR/ADX/zona necesitan high/low reales) en días donde ni se nota. Se prefirió NO
-# tener análisis ese día antes que tener uno con apariencia normal pero mal fundado
-# — ver el botón de reintento manual en run_job.py / screener.yml.
+# Fallback cuando Binance falla (2026-09-11): Binance geobloquea tráfico que
+# geolocaliza como EE.UU./datacenter de forma intermitente (regulatorio — tienen
+# Binance.US aparte para eso), y las corridas de GitHub Actions arrancan en una VM
+# nueva de Azure US cada vez, así que a veces pasa y a veces no. Se evaluó y se
+# descartó CryptoCompare (ahora exige API key hasta en su tier gratis, probado en
+# vivo con 401) y CoinGecko (solo da velas diarias reales -high/low- para los
+# últimos ~30 días gratis, insuficiente para ATR/ADX/zona sin degradar el análisis
+# en silencio). En cambio se agregan dos exchanges más como respaldo, en ese orden:
+# Coinbase y Kraken — ambos con velas diarias reales (open/high/low/close/volumen,
+# 300+ días) gratis y sin key, PROBADO EN VIVO. A diferencia de Binance, los dos son
+# empresas de EE.UU. (Coinbase Global Inc., Payward/Kraken) sin ningún motivo para
+# bloquear tráfico de datacenter estadounidense — es lo opuesto al caso de Binance.
+
+
+def _fetch_coinbase_klines(product_id: str, limit: int = 300) -> pd.DataFrame | None:
+    """product_id ya viene en formato Coinbase nativo (ej. 'BTC-USD', igual a nuestro
+    ticker interno — no hace falta conversión). Devuelve velas en orden DESCENDENTE
+    (más nueva primero), hay que invertirlas para que coincidan con el orden ascendente
+    del resto del pipeline."""
+    try:
+        resp = httpx.get(
+            f"https://api.exchange.coinbase.com/products/{product_id}/candles",
+            params={"granularity": 86400},
+            headers={"User-Agent": "maximos-screener/1.0"},
+            timeout=10,
+        )
+        data = resp.json()
+        if not isinstance(data, list) or len(data) < 20:
+            return None
+        df = pd.DataFrame(data, columns=["time", "low", "high", "open", "close", "volume"])
+        df = df.iloc[::-1].reset_index(drop=True)  # ascendente: más vieja primero
+        for col in ["open", "high", "low", "close", "volume"]:
+            df[col] = df[col].astype(float)
+        return df.tail(limit).reset_index(drop=True)
+    except Exception:
+        return None
+
+
+_KRAKEN_PAIR_OVERRIDES = {"BTC": "XBT"}  # Kraken usa el código ISO 4217 legado para BTC
+
+
+def _fetch_kraken_klines(base: str, limit: int = 300) -> pd.DataFrame | None:
+    pair = _KRAKEN_PAIR_OVERRIDES.get(base, base) + "USD"
+    try:
+        resp = httpx.get(
+            "https://api.kraken.com/0/public/OHLC",
+            params={"pair": pair, "interval": 1440},
+            headers={"User-Agent": "maximos-screener/1.0"},
+            timeout=10,
+        )
+        data = resp.json()
+        if data.get("error"):
+            return None
+        result = data.get("result", {})
+        rows = next((v for k, v in result.items() if k != "last"), None)
+        if not rows or len(rows) < 20:
+            return None
+        df = pd.DataFrame(rows, columns=["time", "open", "high", "low", "close", "vwap", "volume", "count"])
+        for col in ["open", "high", "low", "close", "volume"]:
+            df[col] = df[col].astype(float)
+        return df.tail(limit).reset_index(drop=True)
+    except Exception:
+        return None
+
+
 def _fetch_all_binance_daily(tickers: list[str], limit: int = 300) -> dict[str, pd.DataFrame | None]:
-    """Fetch Binance 1d candles for all crypto tickers in parallel (única fuente)."""
+    """Fetch daily candles for all crypto tickers en paralelo — Binance primero, y para
+    los que fallen, Coinbase y después Kraken como respaldo (ver nota arriba)."""
     crypto = [t for t in tickers if t.endswith("-USD")]
     if not crypto:
         return {}
     with concurrent.futures.ThreadPoolExecutor(max_workers=min(len(crypto), 10)) as ex:
         futures = {t: ex.submit(_fetch_binance_klines, _to_binance_symbol(t), "1d", limit) for t in crypto}
-    return {t: fut.result() for t, fut in futures.items()}
+    result = {t: fut.result() for t, fut in futures.items()}
+
+    for provider_name, fetch_fn, to_arg in (
+        ("Coinbase", _fetch_coinbase_klines, lambda t: t),
+        ("Kraken", _fetch_kraken_klines, lambda t: t[:-4]),
+    ):
+        missing = [t for t, df in result.items() if df is None or len(df) < 30]
+        if not missing:
+            break
+        with concurrent.futures.ThreadPoolExecutor(max_workers=min(len(missing), 10)) as ex:
+            fb_futures = {t: ex.submit(fetch_fn, to_arg(t), limit) for t in missing}
+        for t, fut in fb_futures.items():
+            df = fut.result()
+            if df is not None and len(df) >= 30:
+                print(f"[crypto] {t}: Binance falló, usando {provider_name}", file=sys.stderr)
+                result[t] = df
+
+    return result
 
 
 def _fetch_all_binance_mtf(tickers: list[str]) -> dict[str, tuple[int, int] | None]:
