@@ -211,6 +211,72 @@ async def on_fetch(request, env):
             return _j({"error": str(e)}, status=500)
         return _j({"tickers": tickers})
 
+    # GET /api/alerts/config — cadencia del análisis de watchlist (cada cuánto y en qué
+    # rango horario ART). El job de GitHub Actions (watchlist-alerts.yml) corre cada
+    # hora pero solo analiza de verdad cuando esta config lo indica — ver run_job.py.
+    if method == "GET" and path == "/api/alerts/config":
+        try:
+            await db.prepare(
+                "CREATE TABLE IF NOT EXISTS alert_watchlist_config ("
+                "id INTEGER PRIMARY KEY CHECK (id = 1), "
+                "interval_minutes INTEGER NOT NULL DEFAULT 60, "
+                "hour_from INTEGER NOT NULL DEFAULT 0, "
+                "hour_to INTEGER NOT NULL DEFAULT 24, "
+                "last_run_at TEXT)"
+            ).run()
+            await db.prepare(
+                "INSERT OR IGNORE INTO alert_watchlist_config (id, interval_minutes, hour_from, hour_to) "
+                "VALUES (1, 60, 0, 24)"
+            ).run()
+            cursor = await db.prepare(
+                "SELECT interval_minutes, hour_from, hour_to, last_run_at "
+                "FROM alert_watchlist_config WHERE id = 1"
+            ).all()
+            rows = [row.to_py() for row in cursor.results]
+        except Exception as e:
+            return _j({"error": str(e)}, status=500)
+        return _j(rows[0] if rows else {"interval_minutes": 60, "hour_from": 0, "hour_to": 24, "last_run_at": None})
+
+    # POST /api/alerts/config — Body: {"interval_minutes": 60, "hour_from": 0, "hour_to": 24}
+    # Horas en ART (0-23), hour_to=24 significa "sin límite superior".
+    if method == "POST" and path == "/api/alerts/config":
+        try:
+            body_text = await request.text()
+            body = json.loads(body_text) if body_text else {}
+        except Exception:
+            return _j({"error": "body inválido"}, status=400)
+
+        try:
+            interval_minutes = int(body.get("interval_minutes", 60))
+            hour_from = int(body.get("hour_from", 0))
+            hour_to = int(body.get("hour_to", 24))
+        except (TypeError, ValueError):
+            return _j({"error": "interval_minutes/hour_from/hour_to deben ser números"}, status=400)
+
+        if interval_minutes < 60:
+            return _j({"error": "el intervalo mínimo es 60 minutos (cadencia del cron)"}, status=400)
+        if not (0 <= hour_from <= 24) or not (0 <= hour_to <= 24):
+            return _j({"error": "hour_from/hour_to deben estar entre 0 y 24"}, status=400)
+
+        try:
+            await db.prepare(
+                "CREATE TABLE IF NOT EXISTS alert_watchlist_config ("
+                "id INTEGER PRIMARY KEY CHECK (id = 1), "
+                "interval_minutes INTEGER NOT NULL DEFAULT 60, "
+                "hour_from INTEGER NOT NULL DEFAULT 0, "
+                "hour_to INTEGER NOT NULL DEFAULT 24, "
+                "last_run_at TEXT)"
+            ).run()
+            await db.prepare(
+                "INSERT INTO alert_watchlist_config (id, interval_minutes, hour_from, hour_to) "
+                "VALUES (1, ?, ?, ?) "
+                "ON CONFLICT (id) DO UPDATE SET interval_minutes = excluded.interval_minutes, "
+                "hour_from = excluded.hour_from, hour_to = excluded.hour_to"
+            ).bind(interval_minutes, hour_from, hour_to).run()
+        except Exception as e:
+            return _j({"error": str(e)}, status=500)
+        return _j({"interval_minutes": interval_minutes, "hour_from": hour_from, "hour_to": hour_to})
+
     # POST /api/analyze — AI recommendation for a single ticker
     if method == "POST" and path == "/api/analyze":
         try:

@@ -353,6 +353,49 @@ def save_alert_watchlist(data: AlertWatchlistIn):
     return {"tickers": tickers}
 
 
+# Cadencia configurable del análisis de watchlist (cada cuánto y en qué rango horario
+# ART) — en producción vive en D1 (tabla alert_watchlist_config, ver run_job.py), acá
+# en local se guarda igual que la lista de tickers, en un JSON chico al lado del backend.
+ALERT_CONFIG_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "alert_watchlist_config.json")
+ALERT_CONFIG_DEFAULTS = {"interval_minutes": 60, "hour_from": 0, "hour_to": 24, "last_run_at": None}
+
+
+def _load_alert_config() -> dict:
+    try:
+        with open(ALERT_CONFIG_PATH, "r", encoding="utf-8") as f:
+            return {**ALERT_CONFIG_DEFAULTS, **json.load(f)}
+    except Exception:
+        return dict(ALERT_CONFIG_DEFAULTS)
+
+
+class AlertConfigIn(BaseModel):
+    interval_minutes: int = 60
+    hour_from: int = 0
+    hour_to: int = 24
+
+
+@app.get("/api/alerts/config")
+def get_alert_config():
+    return _load_alert_config()
+
+
+@app.post("/api/alerts/config")
+def save_alert_config(data: AlertConfigIn):
+    if data.interval_minutes < 60:
+        raise HTTPException(400, "el intervalo mínimo es 60 minutos (cadencia del cron)")
+    if not (0 <= data.hour_from <= 24) or not (0 <= data.hour_to <= 24):
+        raise HTTPException(400, "hour_from/hour_to deben estar entre 0 y 24")
+    config = {
+        "interval_minutes": data.interval_minutes,
+        "hour_from": data.hour_from,
+        "hour_to": data.hour_to,
+        "last_run_at": _load_alert_config().get("last_run_at"),
+    }
+    with open(ALERT_CONFIG_PATH, "w", encoding="utf-8") as f:
+        json.dump(config, f)
+    return config
+
+
 @app.get("/api/quotes")
 def get_quotes(tickers: str = ""):
     symbols = [t.strip().upper() for t in tickers.split(",") if t.strip()]

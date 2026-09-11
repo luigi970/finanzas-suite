@@ -1611,6 +1611,16 @@ export default function App() {
   const [alertSaving, setAlertSaving] = useState(false);
   const [alertSavedAt, setAlertSavedAt] = useState(null);
   const [showAlertHelp, setShowAlertHelp] = useState(false);
+  const [retryingWatchlist, setRetryingWatchlist] = useState(false);
+  const [retryWatchlistAt, setRetryWatchlistAt] = useState(null);
+  // Cadencia configurable del análisis automático (cada cuánto y en qué rango horario
+  // ART) — el cron de GitHub Actions corre cada hora, pero solo analiza de verdad
+  // cuando esta config lo indica (ver is_watchlist_run_due() en run_job.py).
+  const [alertIntervalMin, setAlertIntervalMin] = useState(60);
+  const [alertHourFrom, setAlertHourFrom] = useState(0);
+  const [alertHourTo, setAlertHourTo] = useState(24);
+  const [configSaving, setConfigSaving] = useState(false);
+  const [configSavedAt, setConfigSavedAt] = useState(null);
   useEffect(() => {
     fetch(`${API_BASE}/api/alerts/watchlist`)
       .then(r => r.json())
@@ -1620,7 +1630,36 @@ export default function App() {
         setAlertInput(tickers.join(", "));
       })
       .catch(() => {});
+    fetch(`${API_BASE}/api/alerts/config`)
+      .then(r => r.json())
+      .then(d => {
+        if (d.interval_minutes != null) setAlertIntervalMin(d.interval_minutes);
+        if (d.hour_from != null) setAlertHourFrom(d.hour_from);
+        if (d.hour_to != null) setAlertHourTo(d.hour_to);
+      })
+      .catch(() => {});
   }, []);
+  async function saveAlertConfig() {
+    setConfigSaving(true);
+    try {
+      const r = await fetch(`${API_BASE}/api/alerts/config`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          interval_minutes: alertIntervalMin,
+          hour_from: alertHourFrom,
+          hour_to: alertHourTo,
+        }),
+      });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.error || "Error al guardar");
+      setConfigSavedAt(new Date());
+    } catch (e) {
+      alert(`No se pudo guardar la configuración: ${e.message}`);
+    } finally {
+      setConfigSaving(false);
+    }
+  }
   async function saveAlertWatchlist() {
     const tickers = [...new Set(alertInput.split(",").map(t => t.trim().toUpperCase()).filter(Boolean))];
     setAlertSaving(true);
@@ -1638,6 +1677,26 @@ export default function App() {
       alert(`No se pudo guardar la lista de alertas: ${e.message}`);
     } finally {
       setAlertSaving(false);
+    }
+  }
+  // Análisis de la watchlist de alertas: corre por cron una vez al día, y a veces
+  // los tickers de cripto se caen porque Binance geobloquea IPs de datacenter de
+  // forma intermitente (ver maximos/CLAUDE.md). No hay pestaña propia para esta
+  // lista, así que este botón dispara otra corrida a demanda en vez de esperar al
+  // cron del día siguiente.
+  async function retryWatchlistAnalysis() {
+    setRetryingWatchlist(true);
+    try {
+      await fetch(`${API_BASE}/api/refresh`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ list_id: "watchlist" }),
+      });
+      setRetryWatchlistAt(new Date());
+    } catch (e) {
+      alert(`No se pudo reintentar el análisis: ${e.message}`);
+    } finally {
+      setRetryingWatchlist(false);
     }
   }
   const [quotes, setQuotes] = useState({});
@@ -1991,11 +2050,84 @@ export default function App() {
             </div>
             {alertSavedAt && (
               <p className="px-4 pb-3 text-xs text-green-600">
-                Guardado {alertSavedAt.toLocaleTimeString("es-AR", { hour: "2-digit", minute: "2-digit" })} — se revisa una vez por día, cuando corre el screener.
+                Guardado {alertSavedAt.toLocaleTimeString("es-AR", { hour: "2-digit", minute: "2-digit" })} — se revisa según la cadencia configurada abajo.
               </p>
             )}
             {!alertSavedAt && alertTickers.length > 0 && (
               <p className="px-4 pb-3 text-xs text-gray-400">Vigilando: {alertTickers.join(", ")}</p>
+            )}
+            {alertTickers.length > 0 && (
+              <div className="px-4 pb-3 flex items-center gap-2 flex-wrap">
+                <button
+                  onClick={retryWatchlistAnalysis}
+                  disabled={retryingWatchlist}
+                  className="text-xs font-medium text-amber-700 hover:text-amber-800 disabled:opacity-50 underline decoration-dotted underline-offset-2"
+                >
+                  {retryingWatchlist ? "Reintentando..." : "🔄 Reintentar análisis de hoy"}
+                </button>
+                <span className="text-xs text-gray-400">
+                  — usalo si algún ticker (sobre todo cripto) no tiene señal actualizada hoy
+                </span>
+                {retryWatchlistAt && (
+                  <span className="text-xs text-green-600">
+                    Disparado {retryWatchlistAt.toLocaleTimeString("es-AR", { hour: "2-digit", minute: "2-digit" })} — tarda 1-2 min en reflejarse
+                  </span>
+                )}
+              </div>
+            )}
+            {alertTickers.length > 0 && (
+              <div className="px-4 pb-4 pt-1 border-t border-gray-100 flex flex-col sm:flex-row sm:items-center gap-2 flex-wrap">
+                <label className="text-xs text-gray-500 flex items-center gap-1.5 shrink-0">
+                  Reintentar cada
+                  <select
+                    value={alertIntervalMin}
+                    onChange={e => setAlertIntervalMin(Number(e.target.value))}
+                    className="border border-gray-200 rounded-lg px-2 py-1 text-xs focus:outline-none focus:ring-2 focus:ring-amber-400"
+                  >
+                    <option value={60}>1 hora</option>
+                    <option value={120}>2 horas</option>
+                    <option value={180}>3 horas</option>
+                    <option value={360}>6 horas</option>
+                    <option value={720}>12 horas</option>
+                    <option value={1440}>24 horas</option>
+                  </select>
+                </label>
+                <label className="text-xs text-gray-500 flex items-center gap-1.5 shrink-0">
+                  entre
+                  <select
+                    value={alertHourFrom}
+                    onChange={e => setAlertHourFrom(Number(e.target.value))}
+                    className="border border-gray-200 rounded-lg px-2 py-1 text-xs focus:outline-none focus:ring-2 focus:ring-amber-400"
+                  >
+                    {Array.from({ length: 24 }, (_, h) => (
+                      <option key={h} value={h}>{String(h).padStart(2, "0")}:00</option>
+                    ))}
+                  </select>
+                  y
+                  <select
+                    value={alertHourTo}
+                    onChange={e => setAlertHourTo(Number(e.target.value))}
+                    className="border border-gray-200 rounded-lg px-2 py-1 text-xs focus:outline-none focus:ring-2 focus:ring-amber-400"
+                  >
+                    {Array.from({ length: 25 }, (_, h) => (
+                      <option key={h} value={h}>{h === 24 ? "24:00" : `${String(h).padStart(2, "0")}:00`}</option>
+                    ))}
+                  </select>
+                  hs (ART)
+                </label>
+                <button
+                  onClick={saveAlertConfig}
+                  disabled={configSaving}
+                  className="text-xs font-semibold text-white bg-gray-700 hover:bg-gray-800 disabled:opacity-50 px-3 py-1.5 rounded-lg transition shrink-0"
+                >
+                  {configSaving ? "Guardando..." : "Guardar cadencia"}
+                </button>
+                {configSavedAt && (
+                  <span className="text-xs text-green-600">
+                    Guardado {configSavedAt.toLocaleTimeString("es-AR", { hour: "2-digit", minute: "2-digit" })}
+                  </span>
+                )}
+              </div>
             )}
           </div>
         )}

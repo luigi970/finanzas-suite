@@ -5,6 +5,7 @@ fiscal/backend/.env
 launcher/backend/.env
 launcher/backend/launcher_config.json
 maximos/backend/alert_watchlist.json
+maximos/backend/alert_watchlist_config.json
 finanzas/backend/*.db
 fiscal/backend/*.db
 

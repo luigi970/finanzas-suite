@@ -320,8 +320,18 @@ def _fetch_binance_klines(symbol: str, interval: str, limit: int = 30) -> pd.Dat
         return None
 
 
+# Nota (2026-09-11): se evaluó un fallback automático a otro proveedor cuando Binance
+# falla (geobloquea IPs de datacenter de forma intermitente — las corridas de GitHub
+# Actions arrancan en una VM nueva con una IP al azar cada vez, así que un día puede
+# pasar y otro no). Se descartó: CryptoCompare ahora exige API key hasta en su tier
+# gratis (probado en vivo, 401), y CoinGecko solo da velas diarias reales (high/low)
+# para los últimos ~30 días gratis — más allá de eso solo da precio de cierre, sin
+# high/low/volumen reales. Rellenar eso a mano degradaría en silencio el análisis
+# (ATR/ADX/zona necesitan high/low reales) en días donde ni se nota. Se prefirió NO
+# tener análisis ese día antes que tener uno con apariencia normal pero mal fundado
+# — ver el botón de reintento manual en run_job.py / screener.yml.
 def _fetch_all_binance_daily(tickers: list[str], limit: int = 300) -> dict[str, pd.DataFrame | None]:
-    """Fetch Binance 1d candles for all crypto tickers in parallel (primary data source)."""
+    """Fetch Binance 1d candles for all crypto tickers in parallel (única fuente)."""
     crypto = [t for t in tickers if t.endswith("-USD")]
     if not crypto:
         return {}

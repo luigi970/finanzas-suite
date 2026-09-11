@@ -1,0 +1,46 @@
+name: Watchlist Alerts
+
+# Corre cada hora (más seguido que el screener diario de las 6 listas fijas) para dos
+# cosas: (1) darle más chances de esquivar el bloqueo intermitente de Binance a las IPs
+# de datacenter — cada corrida arranca en una VM nueva con otra IP al azar — y (2)
+# mantener el análisis de la watchlist de alertas fresco durante el día, no solo una
+# vez a las 2am UTC. El propio job decide si "toca" analizar de verdad según el
+# intervalo y el rango horario que el usuario configuró desde el panel 🔔 Alertas de la
+# web (tabla alert_watchlist_config en D1) — así no hace falta editar este archivo
+# para cambiar la cadencia.
+on:
+  schedule:
+    - cron: "0 * * * *"
+  repository_dispatch:
+    types: [run-screener]
+  workflow_dispatch: {}
+
+jobs:
+  screener-watchlist:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    if: >-
+      github.event_name == 'schedule' ||
+      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'repository_dispatch' && github.event.client_payload.list_id == 'watchlist')
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install -r maximos/backend/requirements.txt
+
+      - name: Run screener (watchlist de alertas)
+        env:
+          CF_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+          CF_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
+          CF_D1_DB_ID: ${{ secrets.CF_D1_DB_ID }}
+          NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
+        run: |
+          cd maximos/backend
+          python run_job.py --list watchlist ${{ github.event_name != 'schedule' && '--force' || '' }}

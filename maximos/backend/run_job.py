@@ -229,6 +229,71 @@ def get_alert_watchlist(token, account_id, db_id) -> set[str]:
         return set()
 
 
+# ── Watchlist: cadencia configurable ────────────────────────────────────────────
+# El workflow (watchlist-alerts.yml) corre cada hora en vez de una vez por día — más
+# chances de esquivar el bloqueo intermitente de Binance a IPs de datacenter, y de
+# paso el análisis se refresca más seguido. Pero no significa que TODA corrida deba
+# analizar de verdad: el usuario configura desde el panel 🔔 Alertas cada cuánto (como
+# mínimo cada 1 hora, igual a la cadencia del cron) y en qué rango horario — esta
+# tabla guarda esa config y la marca de la última corrida real.
+
+def ensure_alert_config_table(token, account_id, db_id):
+    d1_query(token, account_id, db_id, """
+        CREATE TABLE IF NOT EXISTS alert_watchlist_config (
+            id INTEGER PRIMARY KEY CHECK (id = 1),
+            interval_minutes INTEGER NOT NULL DEFAULT 60,
+            hour_from INTEGER NOT NULL DEFAULT 0,
+            hour_to INTEGER NOT NULL DEFAULT 24,
+            last_run_at TEXT
+        )
+    """)
+    d1_query(token, account_id, db_id,
+        "INSERT OR IGNORE INTO alert_watchlist_config (id, interval_minutes, hour_from, hour_to) "
+        "VALUES (1, 60, 0, 24)")
+
+
+def get_alert_config(token, account_id, db_id) -> dict:
+    defaults = {"interval_minutes": 60, "hour_from": 0, "hour_to": 24, "last_run_at": None}
+    try:
+        result = d1_query(
+            token, account_id, db_id,
+            "SELECT interval_minutes, hour_from, hour_to, last_run_at FROM alert_watchlist_config WHERE id = 1",
+        )
+        rows = result[0].get("results", []) if result else []
+        return rows[0] if rows else defaults
+    except Exception as e:
+        print(f"[alerts] Error leyendo config: {e}", file=sys.stderr)
+        return defaults
+
+
+def update_alert_config_last_run(token, account_id, db_id, when_iso: str):
+    try:
+        d1_query(token, account_id, db_id,
+                 "UPDATE alert_watchlist_config SET last_run_at = ? WHERE id = 1", [when_iso])
+    except Exception as e:
+        print(f"[alerts] Error actualizando last_run_at: {e}", file=sys.stderr)
+
+
+def is_watchlist_run_due(config: dict, now_utc: datetime) -> bool:
+    """Argentina no tiene horario de verano desde 2009 — UTC-3 fijo, sin conversión
+    con DST que pueda romperse con el tiempo."""
+    art_hour = (now_utc.hour - 3) % 24
+    hour_from = config.get("hour_from", 0)
+    hour_to = config.get("hour_to", 24)
+    in_window = (hour_from <= art_hour < hour_to) if hour_from < hour_to else (art_hour >= hour_from or art_hour < hour_to)
+    if not in_window:
+        return False
+
+    last_run_at = config.get("last_run_at")
+    if not last_run_at:
+        return True
+    try:
+        elapsed_min = (now_utc - datetime.fromisoformat(last_run_at)).total_seconds() / 60
+        return elapsed_min >= config.get("interval_minutes", 60)
+    except Exception:
+        return True
+
+
 def get_previous_signal(token, account_id, db_id, ticker: str, today: str) -> str | None:
     """Última señal registrada para este ticker ANTES de hoy (para detectar el cambio)."""
     try:
@@ -343,6 +408,9 @@ def main():
     parser.add_argument("--list", default="sp500", dest="list_id")
     parser.add_argument("--crypto-limit", type=int, default=20)
     parser.add_argument("--custom-tickers", default="", dest="custom_tickers")
+    parser.add_argument("--force", action="store_true",
+                         help="Ignora el intervalo/rango horario configurado para watchlist "
+                              "(usado por el botón manual y por workflow_dispatch)")
     args = parser.parse_args()
 
     token = os.environ.get("CF_API_TOKEN") or os.environ.get("CLOUDFLARE_API_TOKEN")
@@ -360,10 +428,17 @@ def main():
     # las 6 listas fijas nunca se procesa y nunca puede avisar nada.
     if args.list_id == "watchlist":
         ensure_alert_watchlist_table(token, account_id, db_id)
+        ensure_alert_config_table(token, account_id, db_id)
         tickers = sorted(get_alert_watchlist(token, account_id, db_id))
         if not tickers:
             print("[job] Lista de alertas vacía — nada que analizar hoy.")
             return
+        if not args.force:
+            config = get_alert_config(token, account_id, db_id)
+            now_utc = datetime.now(timezone.utc)
+            if not is_watchlist_run_due(config, now_utc):
+                print(f"[job] Watchlist: todavía no toca según la config del panel ({config}) — se sale sin analizar.")
+                return
     else:
         custom = [t.strip() for t in args.custom_tickers.split(",") if t.strip()] if args.custom_tickers else None
         tickers = get_tickers(args.list_id, custom=custom, crypto_limit=args.crypto_limit)
@@ -440,6 +515,9 @@ def main():
     print(f"[history] {len(results)} registros insertados/actualizados para {today}")
 
     check_and_send_alerts(token, account_id, db_id, today, results)
+
+    if args.list_id == "watchlist":
+        update_alert_config_last_run(token, account_id, db_id, datetime.now(timezone.utc).isoformat())
 
     if errors:
         print(f"[job] Tickers con error: {[t for t, _ in errors[:10]]}")
