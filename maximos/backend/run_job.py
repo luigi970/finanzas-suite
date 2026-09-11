@@ -294,20 +294,47 @@ def is_watchlist_run_due(config: dict, now_utc: datetime) -> bool:
         return True
 
 
-def get_previous_signal(token, account_id, db_id, ticker: str, today: str) -> str | None:
-    """Última señal registrada para este ticker ANTES de hoy (para detectar el cambio)."""
-    try:
-        result = d1_query(
-            token, account_id, db_id,
-            "SELECT signal FROM signal_history WHERE ticker = ? AND recorded_at < ? "
-            "ORDER BY recorded_at DESC LIMIT 1",
-            [ticker, today],
+# Última señal conocida por ticker, para detectar el cambio en check_and_send_alerts().
+# OJO: esto NO es signal_history (esa tabla es de un registro por día, para los gráficos
+# de % a 5/10/20 días). Antes se comparaba contra "la última señal de un día anterior",
+# lo cual andaba bien cuando el job corría una vez por día — pero desde que
+# watchlist-alerts.yml corre cada hora, comparar contra "ayer" en vez de contra "la
+# corrida anterior" hacía que un ticker que se quedaba varias horas en compra_fuerte
+# reavisara lo mismo en cada corrida (siempre comparado contra el "ayer" fijo), y que un
+# vaivén dentro del mismo día que terminara igual a como estaba ayer se perdiera sin
+# avisar nada. Esta tabla se actualiza en TODAS las corridas (no una vez por día), así
+# la comparación siempre es contra el estado real inmediatamente anterior.
+
+def ensure_alert_last_signal_table(token, account_id, db_id):
+    d1_query(token, account_id, db_id, """
+        CREATE TABLE IF NOT EXISTS alert_last_signal (
+            ticker TEXT PRIMARY KEY,
+            signal TEXT NOT NULL,
+            updated_at TEXT NOT NULL
         )
+    """)
+
+
+def get_all_last_signals(token, account_id, db_id) -> dict[str, str]:
+    try:
+        result = d1_query(token, account_id, db_id, "SELECT ticker, signal FROM alert_last_signal")
         rows = result[0].get("results", []) if result else []
-        return rows[0]["signal"] if rows else None
+        return {r["ticker"]: r["signal"] for r in rows}
     except Exception as e:
-        print(f"[alerts] Error leyendo señal previa de {ticker}: {e}", file=sys.stderr)
-        return None
+        print(f"[alerts] Error leyendo últimas señales: {e}", file=sys.stderr)
+        return {}
+
+
+def set_last_alert_signal(token, account_id, db_id, ticker: str, signal: str, when_iso: str):
+    try:
+        d1_query(
+            token, account_id, db_id,
+            "INSERT INTO alert_last_signal (ticker, signal, updated_at) VALUES (?, ?, ?) "
+            "ON CONFLICT (ticker) DO UPDATE SET signal = excluded.signal, updated_at = excluded.updated_at",
+            [ticker, signal, when_iso],
+        )
+    except Exception as e:
+        print(f"[alerts] Error guardando última señal de {ticker}: {e}", file=sys.stderr)
 
 
 def fetch_ticker_news(ticker: str, limit: int = 2) -> list[str]:
@@ -372,7 +399,7 @@ def send_ntfy_alert(topic: str, title: str, body: str):
         print(f"[alerts] Error enviando a ntfy.sh: {type(e).__name__}: {e}".encode("ascii", "replace").decode(), file=sys.stderr)
 
 
-def check_and_send_alerts(token, account_id, db_id, today, results):
+def check_and_send_alerts(token, account_id, db_id, results):
     ntfy_topic = os.environ.get("NTFY_TOPIC", "")
     if not ntfy_topic:
         return  # alertas no configuradas — no es un error, simplemente no está activado
@@ -383,12 +410,19 @@ def check_and_send_alerts(token, account_id, db_id, today, results):
         if not watched:
             return
 
+        ensure_alert_last_signal_table(token, account_id, db_id)
+        last_signals = get_all_last_signals(token, account_id, db_id)
+        now_iso = datetime.now(timezone.utc).isoformat()
+
         for row in results:
             ticker = row.get("ticker")
             if ticker not in watched:
                 continue
             new_signal = row.get("signal")
-            prev_signal = get_previous_signal(token, account_id, db_id, ticker, today)
+            prev_signal = last_signals.get(ticker)
+            # Se guarda SIEMPRE, haya alerta o no — es lo que le da a la próxima corrida
+            # (en 1 hora, no en 1 día) el estado real contra el cual comparar.
+            set_last_alert_signal(token, account_id, db_id, ticker, new_signal, now_iso)
             if prev_signal is None or prev_signal == new_signal:
                 continue
             was_strong = prev_signal in STRONG_SIGNALS
@@ -514,7 +548,7 @@ def main():
     update_history_prices(token, account_id, db_id, args.list_id, today, results)
     print(f"[history] {len(results)} registros insertados/actualizados para {today}")
 
-    check_and_send_alerts(token, account_id, db_id, today, results)
+    check_and_send_alerts(token, account_id, db_id, results)
 
     if args.list_id == "watchlist":
         update_alert_config_last_run(token, account_id, db_id, datetime.now(timezone.utc).isoformat())
