@@ -381,6 +381,27 @@ def build_alert_message(ticker: str, name: str, prev_signal: str, new_signal: st
     return f"{emoji} {headline}", body
 
 
+def build_welcome_alert_message(ticker: str, name: str, signal: str, price: float) -> tuple[str, str]:
+    """Aviso único cuando un ticker recién agregado a la watchlist YA está en señal
+    fuerte desde su primera corrida — sin esto, check_and_send_alerts() se queda
+    callado para siempre en ese caso (no hay "corrida anterior" contra la cual detectar
+    un cambio para un ticker que se acaba de empezar a vigilar)."""
+    display = f"{name} ({ticker})" if name else ticker
+    if signal == "compra_fuerte":
+        emoji, headline = "👀", f"{ticker} ya está en zona de COMPRA FUERTE"
+        accion = "compra"
+    else:
+        emoji, headline = "👀", f"{ticker} ya está en zona de VENTA FUERTE"
+        accion = "venta"
+    body = f"Empezaste a vigilar a {display} y ya está cotizando a USD {price:,.2f} con la señal más fuerte de {accion}."
+
+    news = fetch_ticker_news(ticker)
+    if news:
+        body += "\n\n📰 " + "\n📰 ".join(news)
+
+    return f"{emoji} {headline}", body
+
+
 def send_ntfy_alert(topic: str, title: str, body: str):
     try:
         r = requests.post(
@@ -423,7 +444,15 @@ def check_and_send_alerts(token, account_id, db_id, results):
             # Se guarda SIEMPRE, haya alerta o no — es lo que le da a la próxima corrida
             # (en 1 hora, no en 1 día) el estado real contra el cual comparar.
             set_last_alert_signal(token, account_id, db_id, ticker, new_signal, now_iso)
-            if prev_signal is None or prev_signal == new_signal:
+            if prev_signal is None:
+                # Ticker recién agregado — no hay corrida anterior contra la cual
+                # detectar un "cambio", pero si ya arranca en zona fuerte el usuario
+                # igual quiere enterarse ahora, no recién cuando la señal se mueva.
+                if new_signal in STRONG_SIGNALS:
+                    title, body = build_welcome_alert_message(ticker, row.get("name", ""), new_signal, row.get("price", 0))
+                    send_ntfy_alert(ntfy_topic, title, body)
+                continue
+            if prev_signal == new_signal:
                 continue
             was_strong = prev_signal in STRONG_SIGNALS
             is_strong = new_signal in STRONG_SIGNALS
