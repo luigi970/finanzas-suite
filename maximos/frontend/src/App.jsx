@@ -3,6 +3,39 @@ import { createPortal } from "react-dom";
 
 const API_BASE = import.meta.env.VITE_API_URL ?? "";
 
+// Cuándo se calculó de verdad ese ticker por última vez — no siempre es "hoy": si
+// Binance/Coinbase/Kraken fallan los tres para un ticker puntual (ver fallback en
+// screener.py), su fila en D1 se queda con el valor de un run anterior en vez de
+// desaparecer, y sin este indicador no habría forma de notar que el análisis que
+// estás mirando no es de esta corrida.
+function FreshnessBadge({ updatedAt }) {
+  if (!updatedAt) return null; // desarrollo local: siempre en memoria, no aplica
+  const then = new Date(updatedAt);
+  if (isNaN(then.getTime())) return null;
+  const hoursAgo = (Date.now() - then.getTime()) / 3_600_000;
+
+  let label;
+  if (hoursAgo < 1) label = "hace instantes";
+  else if (hoursAgo < 24) label = `hace ${Math.round(hoursAgo)}h`;
+  else label = `hace ${Math.round(hoursAgo / 24)}d`;
+
+  const cls = hoursAgo < 36
+    ? "bg-gray-100 text-gray-500"
+    : hoursAgo < 72
+      ? "bg-amber-100 text-amber-700"
+      : "bg-red-100 text-red-700";
+  const icon = hoursAgo < 36 ? "🕐" : "⚠️";
+  const title = hoursAgo >= 36
+    ? `No se pudo recalcular en la(s) última(s) corrida(s) — datos de ${then.toLocaleString("es-AR")}`
+    : `Última corrida: ${then.toLocaleString("es-AR")}`;
+
+  return (
+    <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold ${cls}`} title={title}>
+      {icon} {label}
+    </span>
+  );
+}
+
 function generateRecommendation(s) {
   const parts = [];
   const { signal, zone, pulse_signal: pulse, pulse_state, adx, mom,
@@ -723,6 +756,7 @@ function TickerModal({ stock: s, listId, onClose }) {
                 <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold ${zoneCfg.cls}`}>{zoneCfg.label}</span>
                 {s.adx != null && <span className="text-xs text-slate-400">ADX {s.adx}</span>}
                 {s.candle_pattern && <CandlePatternBadge pattern={s.candle_pattern} />}
+                <FreshnessBadge updatedAt={s.updated_at} />
                 {info?.earnings_date && (() => {
                   const days = Math.round((new Date(info.earnings_date) - new Date()) / 86400000);
                   const urgent = days >= 0 && days <= 14;
@@ -1619,6 +1653,7 @@ export default function App() {
   const [alertIntervalMin, setAlertIntervalMin] = useState(60);
   const [alertHourFrom, setAlertHourFrom] = useState(0);
   const [alertHourTo, setAlertHourTo] = useState(24);
+  const [alertLastRunAt, setAlertLastRunAt] = useState(null);
   const [configSaving, setConfigSaving] = useState(false);
   const [configSavedAt, setConfigSavedAt] = useState(null);
   useEffect(() => {
@@ -1636,6 +1671,7 @@ export default function App() {
         if (d.interval_minutes != null) setAlertIntervalMin(d.interval_minutes);
         if (d.hour_from != null) setAlertHourFrom(d.hour_from);
         if (d.hour_to != null) setAlertHourTo(d.hour_to);
+        setAlertLastRunAt(d.last_run_at || null);
       })
       .catch(() => {});
   }, []);
@@ -2054,7 +2090,10 @@ export default function App() {
               </p>
             )}
             {!alertSavedAt && alertTickers.length > 0 && (
-              <p className="px-4 pb-3 text-xs text-gray-400">Vigilando: {alertTickers.join(", ")}</p>
+              <p className="px-4 pb-3 text-xs text-gray-400 flex items-center gap-2 flex-wrap">
+                <span>Vigilando: {alertTickers.join(", ")}</span>
+                <FreshnessBadge updatedAt={alertLastRunAt} />
+              </p>
             )}
             {alertTickers.length > 0 && (
               <div className="px-4 pb-3 flex items-center gap-2 flex-wrap">

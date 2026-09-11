@@ -352,6 +352,8 @@ def _fetch_coinbase_klines(product_id: str, limit: int = 300) -> pd.DataFrame | 
             return None
         df = pd.DataFrame(data, columns=["time", "low", "high", "open", "close", "volume"])
         df = df.iloc[::-1].reset_index(drop=True)  # ascendente: más vieja primero
+        if not _last_candle_is_fresh(df["time"].iloc[-1]):
+            return None
         for col in ["open", "high", "low", "close", "volume"]:
             df[col] = df[col].astype(float)
         return df.tail(limit).reset_index(drop=True)
@@ -379,11 +381,25 @@ def _fetch_kraken_klines(base: str, limit: int = 300) -> pd.DataFrame | None:
         if not rows or len(rows) < 20:
             return None
         df = pd.DataFrame(rows, columns=["time", "open", "high", "low", "close", "vwap", "volume", "count"])
+        if not _last_candle_is_fresh(df["time"].iloc[-1]):
+            return None
         for col in ["open", "high", "low", "close", "volume"]:
             df[col] = df[col].astype(float)
         return df.tail(limit).reset_index(drop=True)
     except Exception:
         return None
+
+
+def _last_candle_is_fresh(last_time_epoch_sec, max_age_hours: int = 48) -> bool:
+    """Guarda de sanidad para los proveedores de respaldo (Coinbase/Kraken): si la
+    última vela diaria es más vieja que esto, algo anda mal del lado del proveedor
+    (cache vencido, endpoint devolviendo un día incorrecto) — mejor rechazarla y
+    dejar que la cadena siga probando el siguiente proveedor, en vez de aceptar en
+    silencio un precio desactualizado como si fuera el de hoy."""
+    from datetime import datetime, timezone
+    last = datetime.fromtimestamp(float(last_time_epoch_sec), tz=timezone.utc)
+    age_hours = (datetime.now(timezone.utc) - last).total_seconds() / 3600
+    return age_hours <= max_age_hours
 
 
 def _fetch_all_binance_daily(tickers: list[str], limit: int = 300) -> dict[str, pd.DataFrame | None]:
