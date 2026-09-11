@@ -217,8 +217,13 @@ def _calc_accrued(p: dict) -> float:
         return 0.0
     return p['quantity'] * (p['rate'] / 100) * (days / 365)
 
-async def build_price_context(positions: list, client: httpx.AsyncClient) -> str:
-    """Fetches current market prices from maximos and returns a full portfolio valuation."""
+async def build_price_context(positions: list, client: httpx.AsyncClient) -> tuple[str, list[dict]]:
+    """Fetches current market prices from maximos and returns a full portfolio valuation.
+
+    Devuelve (texto_para_el_prompt, filas_estructuradas) — las filas son exactamente los
+    mismos valores que ya se calculan acá para armar el texto (mismo market_price, avg_usd,
+    P&L), capturados en paralelo sin duplicar la cuenta, para reusarlos en el export a Excel
+    sin repetir esta lógica en otro lado."""
     quotes = {}
     ccl_rate = None
 
@@ -482,10 +487,18 @@ async def build_price_context(positions: list, client: httpx.AsyncClient) -> str
         ctx += f"Dólar CCL: ARS {ccl_rate:.0f}\n"
 
     total_unrealized_pnl = 0.0  # se suma en Python, nunca se le pide al modelo que sume esto
+    rows = []  # una fila estructurada por posición, en paralelo al texto — ver export.py
     for r in raw:
         p, asset, atype = r["p"], r["asset"], r["atype"]
         qty, accrued, total_native = r["qty"], r["accrued"], r["total_native"]
         market_price, value_usd = r["market_price"], r["value_usd"]
+        row = {
+            "account_name": p['account_name'], "account_id": p['account_id'],
+            "asset": asset, "asset_type": atype, "quantity": qty, "accrued": accrued,
+            "market_price_usd": market_price, "value_usd": value_usd,
+            "avg_price_usd": None, "unrealized_pnl_usd": None, "unrealized_pnl_pct": None,
+            "maturity_date": p.get('end_date'), "rate_pct": p.get('rate'), "notes": p.get('notes'),
+        }
 
         if market_price is not None:
             if asset in FIAT_USD or asset in FIAT_ARS or asset in STABLECOINS:
@@ -511,6 +524,7 @@ async def build_price_context(positions: list, client: httpx.AsyncClient) -> str
                     pct  = (market_price - avg_usd) / avg_usd * 100
                     total_unrealized_pnl += upnl
                     line += f" | precio prom. compra USD {avg_usd:,.4g} | P&L no realizado USD {upnl:+,.2f} ({pct:+.1f}% vs precio promedio de compra)"
+                    row["avg_price_usd"], row["unrealized_pnl_usd"], row["unrealized_pnl_pct"] = avg_usd, upnl, pct
 
         elif atype in NO_PRICE_TYPES:
             # Plazo fijo / fondo / rendimiento flexible — valuado por su moneda subyacente
@@ -538,6 +552,7 @@ async def build_price_context(positions: list, client: httpx.AsyncClient) -> str
         if p.get('notes'):
             line += f" | nota: {p['notes']}"
         ctx += line + "\n"
+        rows.append(row)
 
     consolidated_lines = []
     for group_key, d in consolidated.items():
@@ -585,7 +600,7 @@ async def build_price_context(positions: list, client: httpx.AsyncClient) -> str
             "terminada, pero no la pegues como texto en tu respuesta.\n"
         )
 
-    return ctx
+    return ctx, rows
 
 # Para 'stock' se buscan VARIAS listas, no una sola: a diferencia de CEDEAR (siempre
 # adrs_arg), una acción real puede ser cualquier cosa que maximos trackee — una empresa del
@@ -1018,7 +1033,7 @@ async def chat(req: ChatRequest):
     conn.close()
 
     async with httpx.AsyncClient(timeout=30) as client:
-        price_context, tech_context, fund_context, sentiment_context = await asyncio.gather(
+        (price_context, _price_rows), tech_context, fund_context, sentiment_context = await asyncio.gather(
             build_price_context(positions, client),
             build_technical_context(positions, client),
             build_fundamentals_context(positions, client),
@@ -1090,7 +1105,7 @@ async def generate_weekly_report():
     # de margen se cortaba a la mitad y el reporte fallaba con 503 aunque Gemini hubiera
     # terminado bien unos segundos después. 110s da margen real incluso en un día lento.
     async with httpx.AsyncClient(timeout=110) as client:
-        price_context, tech_context, fund_context, sentiment_context = await asyncio.gather(
+        (price_context, _price_rows), tech_context, fund_context, sentiment_context = await asyncio.gather(
             build_price_context(positions, client),
             build_technical_context(positions, client),
             build_fundamentals_context(positions, client),

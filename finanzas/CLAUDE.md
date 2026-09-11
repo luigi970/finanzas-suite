@@ -77,7 +77,8 @@ Las keys también se pueden configurar desde la UI: ⚙️ → sección "API Key
 | PATCH | `/api/transactions/{id}` | Editar transacción (recalcula P&L) |
 | DELETE | `/api/transactions/{id}` | Eliminar |
 | POST | `/api/transactions/batch` | Importar lote — también auto-crea posiciones faltantes |
-| GET | `/api/transactions/export` | Descarga CSV |
+| GET | `/api/transactions/export` | Descarga CSV de movimientos (solo transacciones) — endpoint viejo, no está conectado a ningún botón en la web |
+| GET | `/api/export/portfolio` | Descarga un Excel (.xlsx) con 3 hojas: Portfolio (posiciones + P&L, misma valuación que el agente IA), Cuentas (resumen por cuenta) y Movimientos (historial completo). Botón "↓ Excel" en el header. |
 | GET | `/api/transactions/summary` | Resumen por mes/categoría/P&L |
 | POST | `/api/ingest/text` | Extraer transacciones desde texto |
 | POST | `/api/ingest/file` | Extraer desde PDF/imagen/CSV |
@@ -212,6 +213,11 @@ Tanto `POST /api/transactions` como `POST /api/transactions/batch` crean automá
 ### Maximos status/start (main.py)
 - `/api/maximos/status`: hace GET a `http://localhost:8000/api/status` con timeout 2s; devuelve `{"running": bool}`
 - `/api/maximos/start`: si no está corriendo, lanza `uvicorn main:app --port 8000` en `backend/` con `CREATE_NEW_CONSOLE` (Windows) o proceso daemon (Unix)
+
+### Export a Excel (routers/export.py, 2026-09-11)
+- `build_price_context()` en `agent.py` ahora devuelve `(texto, filas)` en vez de solo texto — `filas` es una lista de dicts, una por posición, con exactamente los mismos valores (`market_price_usd`, `avg_price_usd`, `unrealized_pnl_usd`, `unrealized_pnl_pct`) que ya se calculaban para armar el texto del prompt, capturados en el mismo loop sin duplicar la cuenta. **A propósito no se reimplementó la valuación desde cero** para el export — reusa esta función tal cual para no arriesgar reintroducir bugs de precisión ya corregidos ahí (CEDEAR vs acción real, promedio ponderado multi-cuenta, P&L no realizado). Los dos call sites (`chat`, `generate_weekly_report`) se actualizaron para desempaquetar la tupla; el texto que usan no cambió.
+- `GET /api/export/portfolio` arma el `.xlsx` con `openpyxl`: hoja Portfolio (una fila por posición + fila TOTAL sumada en Python, mismo criterio que el resto del proyecto), Cuentas (agrupa `value_usd` por `account_name`) y Movimientos (todo el historial, sin filtrar). Devuelto como `StreamingResponse` con `Content-Disposition: attachment`.
+- Verificado: el TOTAL del Excel coincidió (a centavos, por la fluctuación normal de precio entre llamadas) con lo que responde el chat a "cuánto vale mi cartera" — mismo cálculo, dos caminos distintos.
 
 ## Gotchas
 

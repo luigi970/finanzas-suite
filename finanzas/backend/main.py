@@ -7,7 +7,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import Optional
 from database import init_db
-from routers import accounts, positions, transactions, ingest, agent
+from routers import accounts, positions, transactions, ingest, agent, export
 import httpx
 
 app = FastAPI(title="Finanzas Personales")
@@ -24,6 +24,7 @@ app.include_router(positions.router)
 app.include_router(transactions.router)
 app.include_router(ingest.router)
 app.include_router(agent.router)
+app.include_router(export.router)
 
 @app.on_event("startup")
 def startup():

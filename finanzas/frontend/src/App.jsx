@@ -2626,6 +2626,11 @@ export default function App() {
           <span className="text-xs text-gray-400 ml-2">personal</span>
         </div>
         <div className="flex items-center gap-2">
+          <a href={`${API}/api/export/portfolio`}
+            className="text-gray-400 hover:text-white text-xs font-medium px-2.5 py-1.5 rounded-lg border border-gray-700 hover:border-gray-500 transition-colors"
+            title="Descarga un Excel con Portfolio, Cuentas y Movimientos completos">
+            ↓ Excel
+          </a>
           <button onClick={() => setModal('help')}
             className="text-gray-400 hover:text-white text-xs font-medium px-2.5 py-1.5 rounded-lg border border-gray-700 hover:border-gray-500 transition-colors">
             ? Ayuda
